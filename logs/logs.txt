@@ -1,9 +1,182 @@
-[veng][Shader.cpp:605]              [error] Location 0: vertex outputs R32G32B32Sfloat but fragment expects R32G32B32A32Sfloat
-[veng][Shader.cpp:851]              [error] Invalid pipeline: fragment is the final stage
-[veng][Shader.cpp:826]              [error] Invalid pipeline: geometry must connect to fragment
-[veng][Shader.cpp:597]              [error] fragment input 'normal' at location 0 has no matching vertex output
-[veng][Shader.cpp:597]              [error] fragment input 'texCoord' at location 1 has no matching vertex output
-[veng][Shader.cpp:757]              [error] Invalid pipeline: tess_control must connect to tess_eval
-[veng][Shader.cpp:597]              [error] fragment input 'color' at location 0 has no matching geometry output
-[veng][Shader.cpp:597]              [error] fragment input 'barycentrics' at location 1 has no matching geometry output
-[veng][Shader.cpp:597]              [error] fragment input 'barycentrics' at location 1 has no matching vertex output
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance
+[veng][Context.cpp:108]             [debug] Instance extensions:
+[veng][Context.cpp:111]             [debug]   VK_EXT_debug_utils
+[veng][Context.cpp:111]             [debug]   VK_KHR_surface
+[veng][Context.cpp:126]             [ info] Validation layers enabled
+[veng][Context.cpp:138]             [debug] Created Vulkan instance
+[veng][Context.cpp:158]             [debug] Created debug messenger
+[veng][Context.cpp:186]             [ info] Selected discrete GPU: NVIDIA GeForce RTX 4060
+[veng][Context.cpp:234]             [debug] Queue families - graphics: 0, compute: 2
+[veng][Context.cpp:285]             [debug] Created logical device
+[veng][Context.hpp:58]              [ info] VulkanContext VK_HEADER_VERSION: 309
+[veng][Context.hpp:59]              [ info] VulkanContext initialized
+[veng][Context.cpp:340]             [trace] Destroyed logical device
+[veng][Context.cpp:168]             [trace] Destroyed debug messenger
+[veng][Context.cpp:348]             [trace] Destroyed instance

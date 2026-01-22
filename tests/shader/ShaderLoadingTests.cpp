@@ -8,7 +8,9 @@
 TEST_CASE("Simple vertex shader loads correctly", "[shader][loading][vertex]")
 {
 	veng::Logger::instance().set_level(spdlog::level::trace);
-	veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/vertex/simple_vert");
 
@@ -86,7 +88,9 @@ TEST_CASE("Simple vertex shader loads correctly", "[shader][loading][vertex]")
 TEST_CASE("Vertex shader with descriptor array", "[shader][loading][vertex]")
 {
 	veng::Logger::instance().set_level(spdlog::level::trace);
-	veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/vertex/descriptor_array.vert");
 
@@ -112,7 +116,9 @@ TEST_CASE("Vertex shader with descriptor array", "[shader][loading][vertex]")
 TEST_CASE("Simple fragment shader loads correctly", "[shader][loading][fragment]")
 {
 	veng::Logger::instance().set_level(spdlog::level::trace);
-	veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/fragment/simple_frag");
 
@@ -149,7 +155,9 @@ TEST_CASE("Simple fragment shader loads correctly", "[shader][loading][fragment]
 TEST_CASE("Push constant vertex shader loads correctly", "[shader][loading][vertex]")
 {
 	veng::Logger::instance().set_level(spdlog::level::trace);
-	veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/vertex/push_constant_vert");
 
@@ -197,7 +205,9 @@ TEST_CASE("Push constant vertex shader loads correctly", "[shader][loading][vert
 TEST_CASE("Textured fragment shader loads correctly", "[shader][loading][fragment]")
 {
     veng::Logger::instance().set_level(spdlog::level::trace);
-    veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/fragment/textured_frag");
 
@@ -258,7 +268,9 @@ TEST_CASE("Textured fragment shader loads correctly", "[shader][loading][fragmen
 TEST_CASE("Multi-descriptor fragment shader loads correctly", "[shader][loading][fragment]")
 {
     veng::Logger::instance().set_level(spdlog::level::trace);
-    veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/fragment/multi_descriptor_frag");
 
@@ -320,7 +332,9 @@ TEST_CASE("Multi-descriptor fragment shader loads correctly", "[shader][loading]
 TEST_CASE("Simple geometry shader loads correctly", "[shader][loading][geometry]")
 {
     veng::Logger::instance().set_level(spdlog::level::trace);
-    veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/geometry/simple.geom");
 
@@ -358,7 +372,9 @@ TEST_CASE("Simple geometry shader loads correctly", "[shader][loading][geometry]
 TEST_CASE("Simple tessellation control shader loads correctly", "[shader][loading][tessellation]")
 {
     veng::Logger::instance().set_level(spdlog::level::trace);
-    veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/tessellation/simple.hull");
 
@@ -400,7 +416,9 @@ TEST_CASE("Simple tessellation control shader loads correctly", "[shader][loadin
 TEST_CASE("Simple tessellation evaluation shader loads correctly", "[shader][loading][tessellation]")
 {
     veng::Logger::instance().set_level(spdlog::level::trace);
-    veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/tessellation/simple.domain");
 
@@ -438,7 +456,9 @@ TEST_CASE("Simple tessellation evaluation shader loads correctly", "[shader][loa
 TEST_CASE("Vertex shader with multiple bindings loads correctly", "[shader][loading][vertex]")
 {
     veng::Logger::instance().set_level(spdlog::level::trace);
-    veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     auto shader_result = veng::Shader::create_shader(ctx.device(), "tests/loading/vertex/multiple_bindings.vert");
 
@@ -583,7 +603,9 @@ TEST_CASE("Vertex shader with multiple bindings loads correctly", "[shader][load
 TEST_CASE("Invalid shader fails gracefully", "[shader][loading][error]")
 {
     veng::Logger::instance().set_level(spdlog::level::trace);
-    veng::VulkanContext ctx("Shader Test");
+	auto ctx_res = veng::Context::create("Shader Test");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
 
     SECTION("nonexistent shader returns error")
     {

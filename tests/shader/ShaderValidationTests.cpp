@@ -15,7 +15,7 @@ veng::Shader load_shader(vk::Device device, std::string_view name)
 TEST_CASE("Vertex to Fragment matching - simple pipeline", "[shader][validation][matching]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto vert = load_shader(ctx.device(), "tests/matching/vert_to_frag/simple.vert");
     auto frag = load_shader(ctx.device(), "tests/matching/vert_to_frag/simple.frag");
@@ -43,7 +43,7 @@ TEST_CASE("Vertex to Fragment matching - simple pipeline", "[shader][validation]
 TEST_CASE("Vertex to Geometry to Fragment matching", "[shader][validation][matching]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto vert = load_shader(ctx.device(), "tests/matching/vert_to_geom_to_frag/passthrough.vert");
     auto geom = load_shader(ctx.device(), "tests/matching/vert_to_geom_to_frag/passthrough.geom");
@@ -78,7 +78,7 @@ TEST_CASE("Vertex to Geometry to Fragment matching", "[shader][validation][match
 TEST_CASE("Vertex to Tessellation to Fragment matching", "[shader][validation][matching]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto vert = load_shader(ctx.device(), "tests/matching/vert_to_tess_to_frag/tess.vert");
     auto hull = load_shader(ctx.device(), "tests/matching/vert_to_tess_to_frag/tess.hull");
@@ -120,7 +120,7 @@ TEST_CASE("Vertex to Tessellation to Fragment matching", "[shader][validation][m
 TEST_CASE("Format mismatch detection", "[shader][validation][mismatch]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto vert = load_shader(ctx.device(), "tests/mismatched/format_mismatch/wrong_format.vert");
     auto frag = load_shader(ctx.device(), "tests/mismatched/format_mismatch/wrong_format.frag");
@@ -153,7 +153,7 @@ TEST_CASE("Format mismatch detection", "[shader][validation][mismatch]")
 TEST_CASE("Missing output detection", "[shader][validation][mismatch]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto vert = load_shader(ctx.device(), "tests/mismatched/missing_output/incomplete.vert");
     auto frag = load_shader(ctx.device(), "tests/mismatched/missing_output/expects_more.frag");
@@ -183,7 +183,7 @@ TEST_CASE("Missing output detection", "[shader][validation][mismatch]")
 TEST_CASE("Location mismatch detection", "[shader][validation][mismatch]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto vert = load_shader(ctx.device(), "tests/mismatched/location_mismatch/wrong_location.vert");
     auto frag = load_shader(ctx.device(), "tests/mismatched/location_mismatch/expects_location_0.frag");
@@ -214,7 +214,7 @@ TEST_CASE("Location mismatch detection", "[shader][validation][mismatch]")
 TEST_CASE("Fragment shader cannot match with another shader", "[shader][validation][constraints]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto frag1 = load_shader(ctx.device(), "tests/matching/vert_to_frag/simple.frag");
     auto frag2 = load_shader(ctx.device(), "tests/matching/vert_to_tess_to_frag/tess.frag");
@@ -229,7 +229,7 @@ TEST_CASE("Fragment shader cannot match with another shader", "[shader][validati
 TEST_CASE("Tessellation control must connect to tessellation evaluation", "[shader][validation][constraints]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto hull = load_shader(ctx.device(), "tests/matching/vert_to_tess_to_frag/tess.hull");
     auto frag = load_shader(ctx.device(), "tests/matching/vert_to_tess_to_frag/tess.frag");
@@ -244,7 +244,7 @@ TEST_CASE("Tessellation control must connect to tessellation evaluation", "[shad
 TEST_CASE("Geometry shader must connect to fragment", "[shader][validation][constraints]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto geom = load_shader(ctx.device(), "tests/matching/vert_to_geom_to_frag/passthrough.geom");
     auto vert = load_shader(ctx.device(), "tests/matching/vert_to_geom_to_frag/passthrough.vert");
@@ -258,7 +258,7 @@ TEST_CASE("Geometry shader must connect to fragment", "[shader][validation][cons
 TEST_CASE("Vertex shader can skip to fragment", "[shader][validation][skip-stages]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto vert = load_shader(ctx.device(), "tests/matching/vert_to_frag/simple.vert");
     auto frag = load_shader(ctx.device(), "tests/matching/vert_to_frag/simple.frag");
@@ -273,7 +273,7 @@ TEST_CASE("Vertex shader can skip to fragment", "[shader][validation][skip-stage
 TEST_CASE("Vertex shader can skip to geometry", "[shader][validation][skip-stages]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto vert = load_shader(ctx.device(), "tests/matching/vert_to_geom_to_frag/passthrough.vert");
     auto geom = load_shader(ctx.device(), "tests/matching/vert_to_geom_to_frag/passthrough.geom");
@@ -287,7 +287,7 @@ TEST_CASE("Vertex shader can skip to geometry", "[shader][validation][skip-stage
 TEST_CASE("Tessellation evaluation can skip to fragment", "[shader][validation][skip-stages]")
 {
     veng::Logger::instance().set_level(spdlog::level::warn);
-    veng::VulkanContext ctx("veng::Shader Validation Test");
+    veng::Context ctx("veng::Shader Validation Test");
 
     auto domain = load_shader(ctx.device(), "tests/matching/vert_to_tess_to_frag/tess.domain");
     auto frag = load_shader(ctx.device(), "tests/matching/vert_to_tess_to_frag/tess.frag");

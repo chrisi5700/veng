@@ -9,13 +9,15 @@ TEST_CASE("VulkanContext creation", "[vulkan]")
 	veng::Logger::instance().set_level(spdlog::level::trace);
     SECTION("constructs without throwing")
     {
-        REQUIRE_NOTHROW(veng::VulkanContext("Test App"));
+        REQUIRE(veng::Context::create("Test App"));
     }
 }
 
 TEST_CASE("VulkanContext provides valid handles", "[vulkan]")
 {
-	veng::VulkanContext ctx("Test App");
+	auto ctx_res = veng::Context::create("Test App");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
     
     SECTION("instance is valid")
     {
@@ -46,7 +48,9 @@ TEST_CASE("VulkanContext provides valid handles", "[vulkan]")
 
 TEST_CASE("VulkanContext queue indices are reasonable", "[vulkan]")
 {
-	veng::VulkanContext ctx("Test App");
+	auto ctx_res = veng::Context::create("Test App");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
     
     auto indices = ctx.queue_indices();
     auto queue_families = ctx.physical_device().getQueueFamilyProperties();
@@ -77,8 +81,10 @@ TEST_CASE("VulkanContext queue indices are reasonable", "[vulkan]")
 
 TEST_CASE("VulkanContext physical device properties", "[vulkan]")
 {
-	veng::VulkanContext ctx("Test App");
-    
+	auto ctx_res = veng::Context::create("Test App");
+	REQUIRE(ctx_res);
+	auto ctx = std::move(*ctx_res);
+
     auto props = ctx.physical_device().getProperties();
     
     SECTION("device has a name")
