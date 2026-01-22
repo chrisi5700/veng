@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(test_project)
+project(veng)
 
 # Include CMake modules for target helpers and compiler settings
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -12,6 +12,13 @@ set(ENABLE_SANITIZER_ADDRESS OFF CACHE BOOL "Enable AddressSanitizer")
 set(ENABLE_SANITIZER_THREAD OFF CACHE BOOL "Enable ThreadSanitizer")
 set(ENABLE_SANITIZER_UNDEFINED OFF CACHE BOOL "Enable UndefinedBehaviorSanitizer")
 set(ENABLE_LTO OFF CACHE BOOL "Enable Link Time Optimization")
+
+find_package(Vulkan REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
+find_package(slang REQUIRED)
 
 add_subdirectory(src)
 add_subdirectory(playground)

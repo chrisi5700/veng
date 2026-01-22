@@ -1,0 +1,9 @@
+[veng][Shader.cpp:605]              [error] Location 0: vertex outputs R32G32B32Sfloat but fragment expects R32G32B32A32Sfloat
+[veng][Shader.cpp:851]              [error] Invalid pipeline: fragment is the final stage
+[veng][Shader.cpp:826]              [error] Invalid pipeline: geometry must connect to fragment
+[veng][Shader.cpp:597]              [error] fragment input 'normal' at location 0 has no matching vertex output
+[veng][Shader.cpp:597]              [error] fragment input 'texCoord' at location 1 has no matching vertex output
+[veng][Shader.cpp:757]              [error] Invalid pipeline: tess_control must connect to tess_eval
+[veng][Shader.cpp:597]              [error] fragment input 'color' at location 0 has no matching geometry output
+[veng][Shader.cpp:597]              [error] fragment input 'barycentrics' at location 1 has no matching geometry output
+[veng][Shader.cpp:597]              [error] fragment input 'barycentrics' at location 1 has no matching vertex output
