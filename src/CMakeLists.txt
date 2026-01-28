@@ -29,7 +29,12 @@ target_compile_definitions(veng_context PUBLIC
 
 target_add_library(veng_shader)
 target_sources(veng_shader PRIVATE shader/Shader.cpp)
-target_link_libraries(veng_shader PUBLIC veng_context slang::slang glm::glm)
+target_link_libraries(veng_shader PUBLIC veng_context slang::slang)
 target_compile_definitions(veng_shader PUBLIC
         SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
 )
+
+target_add_library(veng_render_graph)
+target_sources(veng_render_graph PRIVATE rendergraph/nodes/Node.cpp rendergraph/nodes/ComputeNode.cpp rendergraph/data/Data.cpp)
+target_link_libraries(veng_render_graph PUBLIC veng_shader glm::glm)
+

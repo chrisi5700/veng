@@ -172,6 +172,7 @@ public:
 	[[nodiscard]] vk::ShaderModule get_shader_module() const;
 	[[nodiscard]] vk::PipelineShaderStageCreateInfo create_pipeline_shader_stage_create_info() const;
 	[[nodiscard]] const ShaderDetails& get_details() const;
+	[[nodiscard]] const std::string& get_entry_point() const { return m_entry_point; }
 
 	auto operator<=>(const Shader& other) const
 	{

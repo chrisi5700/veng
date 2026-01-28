@@ -6,6 +6,7 @@
 #define VENG_COMMON_HPP
 #include <variant>
 #include <expected>
+#include <vulkan/vulkan.hpp>
 
 template<class... Fs>
 struct overloaded : Fs...
@@ -62,7 +63,6 @@ std::string to_string(const T& t)
 {
 	return vk::to_string(t);
 }
-
 
 
 

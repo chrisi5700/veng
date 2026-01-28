@@ -300,6 +300,20 @@ std::expected<Context, ContextCreationError> Context::create(std::string_view ti
 			}
 		}
 	};
+	struct RAIIDebugMSG
+	{
+		vk::Instance instance;
+		vk::DebugUtilsMessengerEXT messenger;
+		vk::DebugUtilsMessengerEXT steal()
+		{
+			return std::exchange(messenger, nullptr);
+		}
+		~RAIIDebugMSG()
+		{
+			if (messenger)
+				destroy_debug_messenger(instance, messenger);
+		}
+	};
 	auto instance_res = create_instance(title);
 	if (not instance_res)
 	{
@@ -311,6 +325,7 @@ std::expected<Context, ContextCreationError> Context::create(std::string_view ti
 	{
 		return std::unexpected(debug_msg_res.error());
 	}
+	RAIIDebugMSG debug_msg{instance.instance, *debug_msg_res};
 	auto physical_device_res = select_physical_device(instance.instance);
 	if (not physical_device_res)
 	{
@@ -328,7 +343,7 @@ std::expected<Context, ContextCreationError> Context::create(std::string_view ti
 	}
 	auto graphics_queue = device_res->getQueue(queue_family_res->graphics, 0);
 	auto compute_queue	= device_res->getQueue(queue_family_res->compute, 0);
-	return Context{instance.steal(), *debug_msg_res, *physical_device_res, *queue_family_res,
+	return Context{instance.steal(), debug_msg.steal(), *physical_device_res, *queue_family_res,
 				   *device_res,		 graphics_queue, compute_queue};
 }
 Context::~Context()
