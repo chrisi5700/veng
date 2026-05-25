@@ -83,6 +83,51 @@ swapchain-source-as-clock is the one input deliberately dirty every frame.
 
 ---
 
+## Review context (2026-05-25, pass 13) — Step 2 GPU bridge reviewed
+
+- **Step 2 (GPU bridge) landed and is verified working on-GPU.** `GpuExecContext :
+  graph::ExecContext` (adds command buffer / `Context` / frame slot) + `GpuNode`
+  (localizes the one downcast, forwards to `record()`) + a new
+  `Graph::execute(plan, scheduler, ExecContext&)` overload the driver injects the GPU
+  context into. The bridge test runs a real `GpuNode` (`vkCmdFillBuffer`) and reads back
+  the right value — first graph-driven GPU work. **69/69 on-GPU.**
+- **The `execute` refactor is clean and regression-free.** Default overload builds a
+  stack `ExecContextImpl` and delegates; tasks capture it by reference, sound because
+  the band barriers make execute fully synchronous (it returns only after every task
+  completes). My core regression harness still all-passes.
+- **New active finding M9** (below) — the seam's one rough edge: `GpuNode`'s
+  `static_cast` is unchecked. Reporting it because it's in the new slice code (my focus),
+  not because I'm hunting polish — the deferred findings stay deferred.
+- The team also self-documented the **single-command-buffer-per-band** limitation
+  (correct under `InlineScheduler`; multi-thread recording needs one CB per
+  queue/slot/thread) — that's Step 3's `CommandManager`, where **M8** goes live too.
+
+---
+
+## ACTIVE — slice correctness (not deferred)
+
+### M9 — `GpuNode::execute` does an unchecked `static_cast` to `GpuExecContext`  *(New)*
+
+`GpuNode::execute` is `return record(static_cast<GpuExecContext&>(ctx));` with no guard.
+`GpuExecContext` and the core `ExecContextImpl` are **siblings** (both derive from
+`graph::ExecContext`), so casting a CPU context to `GpuExecContext&` is **undefined
+behavior** — it would read `m_command_buffer`/`m_context` off the wrong object (garbage
+command buffer → GPU corruption / crash). The contract "a GPU plan is always executed
+with a GpuExecContext" holds on the **driver path** (`execute(plan, scheduler, gpuCtx)`,
+which the bridge test uses correctly), but the **ergonomic `frame()` / default
+`execute()` path builds a CPU `ExecContextImpl`** — so a single `GpuNode` reached via
+`graph.frame(sink, scheduler)` (the entry point used throughout tests/playground) is
+silent UB, with nothing at compile or run time to stop it.
+
+Correct usage today is fine, but "ready for production" wants the seam to **fail safe**.
+Cheapest fix (RTTI is already enabled — TransformNode uses `dynamic_cast`):
+`auto* gpu = dynamic_cast<GpuExecContext*>(&ctx); if (!gpu) return std::unexpected(...);`
+— turns UB into a typed error. (Alternatively a `kind()` tag on `ExecContext`, or a
+`Node::requires_gpu_context()` the core checks before dispatch.) Harden before the L4
+nodes + driver wire many GPU nodes in.
+
+---
+
 ## Review context (2026-05-25, pass 12) — directive adopted by both loops; slice underway
 
 - **The implementation loop consumed the directive and committed.** Iteration 11
@@ -236,8 +281,11 @@ machinery. Not a bug — code works — but it's the kind of inconsistency that 
 - **M2 (downgraded) — FAILED nodes re-execute every frame with no backoff.** Policy is
   explicit and §9-valid; only nit is a persistently-failing node re-running forever.
   Consider backoff / propagate-after-N later. Consumers correctly do not spin.
-- **INFO — `execute()` is frame-synchronous** (intended; correct for CPU v1). Still
-  owed for L4/L5: GPU/timeline async + frames-in-flight overlap (§2.7, §5, §6).
+- **INFO — `execute()` is frame-synchronous** (intended; correct for CPU v1). Note this
+  is now load-bearing: since iter 12 the `ExecContext` is passed **by reference** (the
+  `shared_ptr` was dropped), which is sound *only* because the band barriers block until
+  every task finishes. When frames-in-flight / async GPU overlap lands (§2.7, §6), the
+  context lifetime must become owned/shared again, or the by-reference capture dangles.
 
 ---
 
@@ -294,8 +342,11 @@ machinery. Not a bug — code works — but it's the kind of inconsistency that 
   feed the slice.
 - **Step 1 L1 resources (iter 11) reviewed: clean** — `Buffer`/`Image` RAII is correct
   (free handle+allocation together, null-after-move, view-then-image teardown,
-  partial-failure cleanup). The `Handle::generation` guard (L5) is in and tested. Suite
-  **68/68 on-GPU**. The loop now commits per-iteration on `reactive-engine`.
+  partial-failure cleanup). The `Handle::generation` guard (L5) is in and tested.
+- **Step 2 GPU bridge (iter 12) reviewed: clean apart from M9.** `GpuExecContext`/
+  `GpuNode` localize the L3→Vulkan seam; the `execute` injection refactor is correct and
+  regression-free; first real graph-driven GPU work runs and reads back correctly. Suite
+  **69/69 on-GPU**. The loop commits per-iteration on `reactive-engine`.
 - The temporal feature is now correct end-to-end: the `needs_refresh()` hook is minimal
   and regression-free, and the reset baseline (`last_run_revision()`) is documented as
   the canonical pattern so L4 history nodes inherit it.

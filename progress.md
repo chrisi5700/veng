@@ -5,6 +5,68 @@
 
 ---
 
+## Iteration 13 — 2026-05-25 — Step 3 (part 1): device-side L2 managers (Command + Sync)
+
+Step 3 of the slice has three managers. Two are device-side and fully testable
+headless on the GPU; `SwapchainManager` needs a window/surface and is taken separately
+(below). This iteration landed the two device-side ones (new `veng_managers` lib).
+
+### What landed (design.md §L2.4)
+
+- **`SyncManager`** — one timeline semaphore per queue (graphics, compute): the
+  queue's monotonic revision clock (§5). `timeline(queue)`, `next_value(queue)`
+  (reserve the next monotonic signal value), `current_value(queue)` (query the GPU's
+  reached value). RAII move-only.
+- **`CommandManager`** — one command pool per **(queue, frame slot, recording
+  thread)**, created lazily and mutex-guarded, so concurrent node recording never
+  shares a pool (Vulkan requires per-pool external sync). `begin(queue, slot)` returns
+  a fresh begun primary buffer; `reset_frame(slot)` recycles a slot's pools; a static
+  `image_barrier` synchronization2 helper. This **resolves the Step-2 single-command-
+  buffer limitation** and gives **M8** its threading contract (documented: `reset_frame`
+  only after the slot's frame retired; per-thread pools for concurrent recording).
+- **`QueueKind`** + `queue_of`/`queue_family_of`/`queue_index` helpers shared by both.
+
+### Tested + verified (on-GPU)
+
+`tests/managers/ManagerTests.cpp` (4 cases / 28 assertions): timeline monotonicity +
+host-signal reflection; a CommandManager-issued buffer that fills a host-visible buffer
+and reads back the value; `reset_frame` then `begin` again; and **two `std::async`
+threads get distinct command buffers** (per-thread pool isolation). **73/73 ctest
+green** (was 69; +4). Stable across 3 runs under the `llm-vcpkg` ASan/UBSan gate.
+
+- A test bug surfaced and confirmed the **manager ownership rule** (the pass-12 INFO):
+  `SyncManager::create(make_context())` segfaulted — the temporary `Context` died,
+  leaving the manager holding a dead device. Fixed by keeping the Context alive. The
+  L5 driver must likewise free managers/resources before tearing down `Context`.
+
+### SwapchainManager — deferred to its own step (and the offscreen-proof plan)
+
+`SwapchainManager` needs a `VkSurfaceKHR` from a window. A display is present
+(`DISPLAY=:0`/Wayland), but opening a real window from this automated loop is fragile,
+and present can't be asserted headlessly. **Plan:** build Step 4 (slice nodes) + Step 5
+(driver) + Step 6 (caching proof) **offscreen** first — render into a persistent
+scene-color `Image`, model the "swapchain" as a rotating offscreen target + a
+swapchain-*source* dirtied each frame, and a present/blit node. That proves the thesis
+(**static scene → raster runs 0×, present/blit runs every frame**, asserted via node
+counts) **without a display**. The real windowed `SwapchainManager`/`vkQueuePresentKHR`
+then becomes a thin adapter swapped in for the offscreen present (a final integration
+step that may need a usable display).
+
+### Where to continue (next iteration) — Step 4: L4 slice nodes (offscreen)
+
+- **`ScreenSize` source** (`vk::Extent2D`), equality-gated.
+- **A GPU raster `GpuNode`** that draws a triangle (via `GraphicsPipelineBuilder`,
+  dynamic rendering) into a **persistent scene-color `Image`** sized from `ScreenSize`,
+  using `CommandManager` to record and `image_barrier` for layout transitions.
+- **A swapchain *source*** (dirtied every frame) + a **present/blit `GpuNode`**
+  depending on **both** the scene target and the swapchain source — blits scene→target.
+- Honor the **wiring rule**: the raster subgraph must not depend on the swapchain source.
+
+### Deferred (per directive): M5, M6, M8 (contract now defined by CommandManager; full
+frames-in-flight enforcement lands with the L5 driver), L1–L7.
+
+---
+
 ## Iteration 12 — 2026-05-25 — Step 2: the GPU bridge (L3→Vulkan seam)
 
 Vertical-slice roadmap step 2 (the directive). The L3 core stays Vulkan-agnostic; this
