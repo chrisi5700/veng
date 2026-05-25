@@ -83,48 +83,33 @@ swapchain-source-as-clock is the one input deliberately dirty every frame.
 
 ---
 
-## Review context (2026-05-25, pass 13) — Step 2 GPU bridge reviewed
+## Review context (2026-05-25, pass 14) — Step 3 managers reviewed; M9 already fixed
 
-- **Step 2 (GPU bridge) landed and is verified working on-GPU.** `GpuExecContext :
-  graph::ExecContext` (adds command buffer / `Context` / frame slot) + `GpuNode`
-  (localizes the one downcast, forwards to `record()`) + a new
-  `Graph::execute(plan, scheduler, ExecContext&)` overload the driver injects the GPU
-  context into. The bridge test runs a real `GpuNode` (`vkCmdFillBuffer`) and reads back
-  the right value — first graph-driven GPU work. **69/69 on-GPU.**
-- **The `execute` refactor is clean and regression-free.** Default overload builds a
-  stack `ExecContextImpl` and delegates; tasks capture it by reference, sound because
-  the band barriers make execute fully synchronous (it returns only after every task
-  completes). My core regression harness still all-passes.
-- **New active finding M9** (below) — the seam's one rough edge: `GpuNode`'s
-  `static_cast` is unchecked. Reporting it because it's in the new slice code (my focus),
-  not because I'm hunting polish — the deferred findings stay deferred.
-- The team also self-documented the **single-command-buffer-per-band** limitation
-  (correct under `InlineScheduler`; multi-thread recording needs one CB per
-  queue/slot/thread) — that's Step 3's `CommandManager`, where **M8** goes live too.
-
----
-
-## ACTIVE — slice correctness (not deferred)
-
-### M9 — `GpuNode::execute` does an unchecked `static_cast` to `GpuExecContext`  *(New)*
-
-`GpuNode::execute` is `return record(static_cast<GpuExecContext&>(ctx));` with no guard.
-`GpuExecContext` and the core `ExecContextImpl` are **siblings** (both derive from
-`graph::ExecContext`), so casting a CPU context to `GpuExecContext&` is **undefined
-behavior** — it would read `m_command_buffer`/`m_context` off the wrong object (garbage
-command buffer → GPU corruption / crash). The contract "a GPU plan is always executed
-with a GpuExecContext" holds on the **driver path** (`execute(plan, scheduler, gpuCtx)`,
-which the bridge test uses correctly), but the **ergonomic `frame()` / default
-`execute()` path builds a CPU `ExecContextImpl`** — so a single `GpuNode` reached via
-`graph.frame(sink, scheduler)` (the entry point used throughout tests/playground) is
-silent UB, with nothing at compile or run time to stop it.
-
-Correct usage today is fine, but "ready for production" wants the seam to **fail safe**.
-Cheapest fix (RTTI is already enabled — TransformNode uses `dynamic_cast`):
-`auto* gpu = dynamic_cast<GpuExecContext*>(&ctx); if (!gpu) return std::unexpected(...);`
-— turns UB into a typed error. (Alternatively a `kind()` tag on `ExecContext`, or a
-`Node::requires_gpu_context()` the core checks before dispatch.) Harden before the L4
-nodes + driver wire many GPU nodes in.
+- **M9 RESOLVED (fast).** Flagged pass 13; the loop fixed it within the cycle.
+  `GpuNode::execute` now `dynamic_cast`s and returns the new `ExecError::WRONG_CONTEXT`
+  if reached with a non-GPU context — exactly the fail-safe fix suggested. New test "a
+  GpuNode reached via the CPU execute path fails safe". **Verified: compiles, 74/74.**
+  (Uncommitted on top of the managers commit — mid-iteration work.)
+- **Step 3 part 1 (device-side managers) reviewed → clean, no bugs.** Both verified
+  on-GPU (74/74, incl. timeline monotonicity + per-thread command-pool isolation):
+  - `SyncManager` — one timeline semaphore per queue, created correctly
+    (`eTimeline`/initial 0) with partial-failure cleanup; RAII move-only.
+  - `CommandManager` — pools keyed by **(slot, thread, queue)** under a mutex (correct
+    concurrent-recording pattern), documented `reset_frame` frames-in-flight contract,
+    proper sync2 `ImageMemoryBarrier2` helper. Notably it handles the **non-movable
+    `std::mutex` correctly** (manual move locking the source; `scoped_lock` in
+    move-assign) — a subtlety many get wrong.
+  - This gives **M8's command-pool half** a concrete contract; the `DescriptorAllocator`
+    (M8's actual subject) still needs the same treatment — M8 stays deferred.
+- **Small forward note (not a bug):** `SyncManager::next_value()` is `++m_counters[...]`
+  (non-atomic). Correct only if per-queue timeline-value reservation is serialized with
+  `vkQueueSubmit` (which Vulkan already requires be externally synchronized) — but it's
+  an undocumented contract. Document it (or make it atomic) when the L5 driver wires
+  submission. Same family as the M8/frames-in-flight contracts.
+- `SwapchainManager` is deferred to its own step (needs a surface); the plan is to prove
+  Steps 4–6 **offscreen** first (rotating offscreen target + swapchain-source clock),
+  then swap in real present. Sound — it lets the caching proof run headlessly.
+- **Deferred findings unchanged** (M5, M6, M8, L1–L4, L7); not hunting polish.
 
 ---
 
@@ -305,6 +290,10 @@ machinery. Not a bug — code works — but it's the kind of inconsistency that 
 
 ## Recently resolved (verified, dropped from active list)
 
+- **M9 (MEDIUM, real UB hazard)** — `GpuNode::execute` did an unchecked `static_cast` to
+  `GpuExecContext` (UB if reached via the CPU `frame()`/`execute()` path) → RESOLVED
+  iter 14: `dynamic_cast` + `ExecError::WRONG_CONTEXT`; fail-safe test added. **Verified:
+  compiles, 74/74.** (Found pass 13, fixed within the cycle.)
 - **L5 (LOW)** — `Handle::generation` ignored by `get_node`/`get_data` → RESOLVED iter 11
   (folded into Step 1): per-slot generation vectors; stale handle → `nullptr`. Verified
   (generation-guard test + no core regression).
@@ -343,10 +332,13 @@ machinery. Not a bug — code works — but it's the kind of inconsistency that 
 - **Step 1 L1 resources (iter 11) reviewed: clean** — `Buffer`/`Image` RAII is correct
   (free handle+allocation together, null-after-move, view-then-image teardown,
   partial-failure cleanup). The `Handle::generation` guard (L5) is in and tested.
-- **Step 2 GPU bridge (iter 12) reviewed: clean apart from M9.** `GpuExecContext`/
-  `GpuNode` localize the L3→Vulkan seam; the `execute` injection refactor is correct and
-  regression-free; first real graph-driven GPU work runs and reads back correctly. Suite
-  **69/69 on-GPU**. The loop commits per-iteration on `reactive-engine`.
+- **Step 2 GPU bridge (iter 12) reviewed: clean** (M9 now fixed). `GpuExecContext`/
+  `GpuNode` localize the L3→Vulkan seam with a fail-safe downcast; first real
+  graph-driven GPU work runs and reads back correctly.
+- **Step 3 part 1 managers (iter 13) reviewed: clean.** `SyncManager` (timeline-per-queue)
+  and `CommandManager` (per-(slot,thread,queue) pools, sync2 barriers, correct
+  mutex-aware move) are solid; per-thread pool isolation tested. Suite **74/74 on-GPU**.
+  The loop commits per-iteration on `reactive-engine` and turned M9 around within a cycle.
 - The temporal feature is now correct end-to-end: the `needs_refresh()` hook is minimal
   and regression-free, and the reset baseline (`last_run_revision()`) is documented as
   the canonical pattern so L4 history nodes inherit it.

@@ -57,6 +57,10 @@ target_link_libraries(GpuBridgeTests PRIVATE veng_gpu Catch2::Catch2WithMain)
 add_executable(ManagerTests managers/ManagerTests.cpp)
 target_link_libraries(ManagerTests PRIVATE veng_managers veng_resources Catch2::Catch2WithMain)
 
+# L4 slice test — RasterTriangleNode renders a triangle, verified by readback.
+add_executable(RasterTriangleTests nodes/RasterTriangleTests.cpp)
+target_link_libraries(RasterTriangleTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
 catch_discover_tests(ShaderValidationTests)
@@ -69,4 +73,5 @@ catch_discover_tests(DescriptorAllocatorTests)
 catch_discover_tests(ResourceTests)
 catch_discover_tests(GpuBridgeTests)
 catch_discover_tests(ManagerTests)
+catch_discover_tests(RasterTriangleTests)
 

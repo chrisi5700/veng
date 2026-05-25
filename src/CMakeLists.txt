@@ -72,6 +72,11 @@ target_add_library(veng_managers)
 target_sources(veng_managers PRIVATE managers/CommandManager.cpp managers/SyncManager.cpp)
 target_link_libraries(veng_managers PUBLIC veng_context)
 
+# L4 nodes — concrete GPU graph nodes for the rendering slice.
+target_add_library(veng_nodes)
+target_sources(veng_nodes PRIVATE nodes/RasterTriangleNode.cpp)
+target_link_libraries(veng_nodes PUBLIC veng_gpu veng_pipelines veng_managers)
+
 # L3 Reactive Core. Deliberately Vulkan-agnostic (design.md §3): no link to the
 # Vulkan construction layers, so it builds and unit-tests without a GPU.
 target_add_library(veng_render_graph)

@@ -5,6 +5,67 @@
 
 ---
 
+## Iteration 14 — 2026-05-25 — M9 fix + Step 4a: the first rendered triangle
+
+### M9 (slice finding from pass 13) — GpuNode's unchecked cast — **FIXED**
+
+`GpuNode::execute` did `static_cast<GpuExecContext&>(ctx)`. Since `GpuExecContext` and
+the core CPU `ExecContextImpl` are siblings, reaching a `GpuNode` via the default
+`frame()`/`execute()` path was silent UB. Now a checked `dynamic_cast` → new
+`ExecError::WRONG_CONTEXT` on mismatch, so `run_node` marks the node **FAILED** instead
+of corrupting. Test added: a `GpuNode` driven on the CPU path lands FAILED, no crash.
+
+### Step 4a — the engine's first rendered frame (offscreen)
+
+- **`ScreenSize` source** — `graph.add_source<vk::Extent2D>` (equality-gated; resize is
+  an ordinary invalidation).
+- **`veng::nodes::RasterTriangleNode`** (`GpuNode`, new `veng_nodes` lib) — draws a
+  triangle via `GraphicsPipelineBuilder` + **Vulkan 1.3 dynamic rendering** into a
+  **persistent scene-color `Image`** it owns, (re)created sized from the demanded
+  `ScreenSize`. Records: `image_barrier` UNDEFINED→COLOR, `beginRendering`(clear black)
+  → bind pipeline → dynamic viewport/scissor → `draw(3)` → `endRendering`,
+  `image_barrier` COLOR→TRANSFER_SRC (ready for the present/blit or a readback). Built
+  on every prior layer: `Context`/`Shader` → `GraphicsPipelineBuilder` → `Image` →
+  `GpuExecContext`/`GpuNode` → `CommandManager::image_barrier`.
+- **Slice triangle shaders** (`shaders/tests/slice/triangle.{vert,frag}.slang`):
+  SV_VertexID centered triangle, solid red — no vertex buffer.
+
+### Proof (on-GPU, readback)
+
+`tests/nodes/RasterTriangleTests.cpp` (1 case / 19 assertions): drive the graph through
+a `GpuExecContext`, copy the scene image to a host buffer, and assert the **center
+pixel is red (the triangle)** over a **black-cleared corner**. First pixels the engine
+has ever drawn. **75/75 ctest green** (was 73; +1 raster, +1 M9). Clean under the
+`llm-vcpkg` ASan/UBSan gate.
+
+- Gotcha found + fixed: the triangle was initially back-face **culled** — CCW in math is
+  CW in Vulkan's y-down framebuffer, so the builder default (`cullMode=eBack`,
+  `frontFace=eCCW`) culled it. The slice builds the pipeline with `cullMode=eNone`.
+
+### Where to continue (next iteration) — Step 4b + 5 + 6 (offscreen)
+
+The scene renders; now wire the reactive present path and prove the thesis:
+1. **Swapchain *source*** — a `Data` dirtied **every frame** (stands in for `acquire()`;
+   real swapchain images come with the windowed `SwapchainManager`).
+2. **Present/blit `GpuNode`** depending on **both** the scene token **and** the
+   swapchain source — `vkCmdBlitImage` (or copy) scene → the frame's target image.
+   **Wiring rule:** the raster node must NOT depend on the swapchain source.
+3. **L5 driver loop** (offscreen): bump the swapchain source → `frame(present_sink)` →
+   submit. Frames-in-flight via `CommandManager`/`SyncManager`; free graph resources
+   before `Context` (the ownership rule confirmed in iter 13).
+4. **Step 6 proof**: over N frames with a static scene, assert the **present/blit runs
+   every frame but `RasterTriangleNode` runs 0 extra times** (node-execution counts) —
+   the headline caching thesis, provable headless. Then mutate `ScreenSize`/a scene
+   source and assert the raster node re-runs exactly once.
+
+Real windowed `SwapchainManager` + `vkQueuePresentKHR` is the final integration once a
+display is reliably usable; the offscreen proof does not need it.
+
+### Deferred (per directive): M5, M6, M8 (frames-in-flight enforcement lands with the
+L5 driver, Step 4b/5), L1–L7.
+
+---
+
 ## Iteration 13 — 2026-05-25 — Step 3 (part 1): device-side L2 managers (Command + Sync)
 
 Step 3 of the slice has three managers. Two are device-side and fully testable

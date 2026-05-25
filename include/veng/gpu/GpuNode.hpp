@@ -21,11 +21,18 @@ namespace veng::gpu
 class GpuNode : public graph::Node
 {
 	 public:
-	// The single, localized seam: a GPU frame plan is always executed with a
-	// GpuExecContext, so the cast is sound. Forwards to record().
+	// The single, localized seam. GpuExecContext and the core CPU context are siblings,
+	// so a plain static_cast would be UB if a GpuNode were reached via the default
+	// (CPU) execute()/frame() path. Check it: turn that misuse into a typed error
+	// (WRONG_CONTEXT) — run_node then marks the node FAILED instead of corrupting (M9).
 	[[nodiscard]] std::expected<bool, graph::ExecError> execute(graph::ExecContext& ctx) final
 	{
-		return record(static_cast<GpuExecContext&>(ctx));
+		auto* gpu = dynamic_cast<GpuExecContext*>(&ctx);
+		if (gpu == nullptr)
+		{
+			return std::unexpected(graph::ExecError::WRONG_CONTEXT);
+		}
+		return record(*gpu);
 	}
 
 	 protected:

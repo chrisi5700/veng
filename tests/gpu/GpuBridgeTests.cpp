@@ -143,3 +143,20 @@ TEST_CASE("a GpuNode records through the injected GpuExecContext and the command
 	device.destroyFence(fence.value);
 	device.destroyCommandPool(pool.value);
 }
+
+TEST_CASE("a GpuNode reached via the CPU execute path fails safe", "[gpu][bridge][error]")
+{
+	// M9: GpuExecContext and the core CPU context are siblings, so dispatching a GpuNode
+	// with the default (CPU) context must not be UB. It is turned into a FAILED node.
+	veng::Logger::instance().set_level(spdlog::level::warn);
+	Graph			 graph;
+	const DataHandle out  = graph.add(std::make_unique<ValueData<int>>(0));
+	auto			 node = std::make_unique<FillBufferNode>(vk::Buffer{}, 0, 0U, out); // record() never runs
+	const NodeHandle nh	  = graph.add(std::move(node));
+	graph.set_producer(out, nh);
+
+	InlineScheduler scheduler;
+	const auto		plan = graph.frame(out, scheduler); // default CPU context — no GpuExecContext
+	REQUIRE(plan.has_value());
+	REQUIRE(graph.get_node(nh)->state() == ExecutionState::FAILED);
+}

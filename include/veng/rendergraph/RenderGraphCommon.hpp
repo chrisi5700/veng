@@ -85,6 +85,7 @@ enum class ExecError : std::uint8_t
 {
 	MISSING_INPUT, // an input handle did not resolve to data of the expected type
 	NODE_FAILED,   // the node's work reported failure
+	WRONG_CONTEXT, // a node needed a context it was not dispatched with (e.g. a GPU node on the CPU path)
 };
 
 [[nodiscard]] constexpr std::string_view to_string(ExecError error) noexcept
@@ -93,6 +94,7 @@ enum class ExecError : std::uint8_t
 	{
 		case ExecError::MISSING_INPUT: return "node input did not resolve to the expected data";
 		case ExecError::NODE_FAILED: return "node execution failed";
+		case ExecError::WRONG_CONTEXT: return "node dispatched without the execution context it requires";
 	}
 	return "unknown execution error";
 }
