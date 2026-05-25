@@ -10,24 +10,25 @@
 
 struct InstanceCreationError
 {
-	vk::Result result;
+	vk::Result		result;
 	explicit(false) operator vk::Result() const { return result; }
 };
 
 struct DebugUtilsMessengerEXTCreationError
 {
-	vk::Result result;
+	vk::Result		result;
 	explicit(false) operator vk::Result() const { return result; }
 };
 
 struct PhysicalDeviceCreationError
 {
-	vk::Result result;
+	vk::Result		result;
 	explicit(false) operator vk::Result() const { return result; }
 };
 
-
-struct NoQueueFamilyError {};
+struct NoQueueFamilyError
+{
+};
 inline std::string to_string(const NoQueueFamilyError&)
 {
 	return "Could not find Queue Families";
@@ -35,12 +36,18 @@ inline std::string to_string(const NoQueueFamilyError&)
 
 struct DeviceCreationError
 {
-	vk::Result result;
+	vk::Result		result;
 	explicit(false) operator vk::Result() const { return result; }
 };
 
+struct AllocatorCreationError
+{
+	vk::Result		result;
+	explicit(false) operator vk::Result() const { return result; }
+};
 
-using ContextCreationError = ResultVariant<InstanceCreationError, DebugUtilsMessengerEXTCreationError, PhysicalDeviceCreationError, NoQueueFamilyError, DeviceCreationError>;
-
+using ContextCreationError =
+	ResultVariant<InstanceCreationError, DebugUtilsMessengerEXTCreationError, PhysicalDeviceCreationError,
+				  NoQueueFamilyError, DeviceCreationError, AllocatorCreationError>;
 
 #endif // VENG_CONTEXTERRORS_HPP

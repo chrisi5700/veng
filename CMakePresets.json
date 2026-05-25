@@ -57,6 +57,16 @@
       "name": "release-vcpkg",
       "inherits": ["release", "vcpkg"],
       "description": "Release build with vcpkg dependency management"
+    },
+    {
+      "name": "llm-vcpkg",
+      "inherits": ["dev", "vcpkg"],
+      "description": "AI-assisted dev preset (CLAUDE.md): warnings-as-errors plus AddressSanitizer + UndefinedBehaviorSanitizer. Sanitizers are applied via global flags (not the ENABLE_SANITIZER_* cache vars) so the plain-add_executable test targets are instrumented too. Run clang-format/clang-tidy/cppcheck via ./fix_and_format.sh and the gated test+coverage flow via ./run_test.sh.",
+      "cacheVariables": {
+        "TREAT_WARNINGS_AS_ERRORS": "ON",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
     }
   ],
   "buildPresets": [
@@ -79,6 +89,11 @@
       "name": "release-vcpkg",
       "configurePreset": "release-vcpkg",
       "jobs": 0
+    },
+    {
+      "name": "llm-vcpkg",
+      "configurePreset": "llm-vcpkg",
+      "jobs": 0
     }
   ],
   "testPresets": [
@@ -92,6 +107,13 @@
     {
       "name": "release",
       "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "llm-vcpkg",
+      "configurePreset": "llm-vcpkg",
       "output": {
         "outputOnFailure": true
       }

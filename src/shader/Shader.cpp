@@ -3,13 +3,12 @@
 //
 #include <map>
 #include <slang-com-ptr.h>
+#include <veng/common.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/shader/Shader.hpp>
-#include <veng/common.hpp>
 
 namespace veng
 {
-
 
 // ============================================================================
 // Slang Session Management
@@ -17,7 +16,6 @@ namespace veng
 // These functions manage the global Slang compiler session. The session is
 // created lazily on first use and persists for the application lifetime.
 // ==========================================================================
-
 
 Slang::ComPtr<slang::IGlobalSession> create_global_session()
 {
@@ -55,14 +53,11 @@ slang::ISession* get_session()
 	return session.get();
 }
 
-
-
 // ============================================================================
 // Shader Compilation
 // ============================================================================
 // Functions for loading, linking, and compiling shaders to SPIR-V.
 // ==========================================================================
-
 
 /// Check Slang diagnostics blob for errors. Returns error string if present.
 std::optional<std::string> check_diagnostics(slang::IBlob* diagnostics)
@@ -153,7 +148,7 @@ std::expected<Slang::ComPtr<slang::IBlob>, std::string> get_spirv_code(slang::IC
 }
 
 /// Create a Vulkan shader module from SPIR-V bytecode.
-vk::ShaderModule create_shader_module(vk::Device device, slang::IBlob* spirv)
+std::expected<vk::ShaderModule, std::string> create_shader_module(vk::Device device, slang::IBlob* spirv)
 {
 	auto create_info = vk::ShaderModuleCreateInfo()
 						   .setCodeSize(spirv->getBufferSize())
@@ -163,21 +158,17 @@ vk::ShaderModule create_shader_module(vk::Device device, slang::IBlob* spirv)
 	if (module_res.result != vk::Result::eSuccess)
 	{
 		Logger::instance().error("Failed to create Shader Module {}", to_string(module_res.result));
-	} else
-	{
-		Logger::instance().debug("Created shader module ({} bytes)", spirv->getBufferSize());
+		return std::unexpected{std::format("vkCreateShaderModule failed: {}", to_string(module_res.result))};
 	}
-	return module_res.value; // TODO Probably make this std::expected as well
+	Logger::instance().debug("Created shader module ({} bytes)", spirv->getBufferSize());
+	return module_res.value;
 }
-
-
 
 // ============================================================================
 // Type Conversion Utilities
 // ============================================================================
 // Mappings between Slang reflection types and Vulkan types.
 // ==========================================================================
-
 
 /// Convert Slang scalar/vector type to Vulkan format.
 /// Supports float, int, uint in 1-4 component vectors.
@@ -241,8 +232,6 @@ vk::ShaderStageFlagBits to_vk_shader_stage(SlangStage stage)
 	}
 }
 
-
-
 /// Convert Slang binding type to human-readable string (for logging).
 std::string_view to_string(slang::BindingType binding_type)
 {
@@ -296,15 +285,12 @@ vk::DescriptorType to_vk_descriptor_type(slang::BindingType binding_type)
 	}
 }
 
-
-
 // ============================================================================
 // Descriptor & Push Constant Extraction
 // ============================================================================
 // Extract descriptor set layouts and push constant ranges from shader
 // reflection. Uses TypeLayoutReflection for accurate binding information.
 // ==========================================================================
-
 
 /// Recursively extract size from a type layout, unwrapping arrays/structs.
 std::size_t extract_size(slang::TypeLayoutReflection* type_layout)
@@ -435,8 +421,6 @@ vk::ShaderStageFlagBits extract_shader_stage(slang::IComponentType* linked)
 	return vk_stage;
 }
 
-
-
 // ============================================================================
 // Stage Variable Extraction (Inputs/Outputs)
 // ============================================================================
@@ -448,7 +432,6 @@ vk::ShaderStageFlagBits extract_shader_stage(slang::IComponentType* linked)
 // Location is determined from binding index. System values (SV_Position,
 // SV_Target, etc.) are skipped since they map to Vulkan builtins.
 // ==========================================================================
-
 
 /// Get the entry point from a linked program, or nullptr if none.
 slang::EntryPointReflection* get_entry_point(slang::IComponentType* linked)
@@ -611,8 +594,6 @@ bool interfaces_match(const std::vector<StageVariable>& producer, const std::vec
 	return valid;
 }
 
-
-
 // ============================================================================
 // Shader Stage Details
 // ============================================================================
@@ -642,54 +623,50 @@ uint32_t format_size(vk::Format format)
 }
 /// Extract vertex inputs with binding information.
 /// Each entry point parameter becomes a separate binding.
-std::pair<std::vector<VertexAttribute>, std::vector<VertexBinding>>
-extract_vertex_inputs(slang::EntryPointReflection* entry)
+std::pair<std::vector<VertexAttribute>, std::vector<VertexBinding>> extract_vertex_inputs(
+	slang::EntryPointReflection* entry)
 {
 	std::vector<VertexAttribute> attributes;
-	std::vector<VertexBinding> bindings;
+	std::vector<VertexBinding>	 bindings;
 
-
-	for (uint32_t param_idx = 0; param_idx < entry->getParameterCount(); ++param_idx) {
-		auto* param = entry->getParameterByIndex(param_idx);
+	for (uint32_t param_idx = 0; param_idx < entry->getParameterCount(); ++param_idx)
+	{
+		auto* param		  = entry->getParameterByIndex(param_idx);
 		auto* type_layout = param->getTypeLayout();
 
 		// Skip non-struct parameters (SV_VertexID, SV_InstanceID are scalars)
-		if (type_layout->getKind() != slang::TypeReflection::Kind::Struct) {
+		if (type_layout->getKind() != slang::TypeReflection::Kind::Struct)
+		{
 			continue;
 		}
 
 		const char* struct_name = type_layout->getType()->getName();
-		if (!struct_name || struct_name[0] == '\0') {
-			Logger::instance().error(
-				"Vertex input struct at parameter {} has no name. "
-				"This is a reflection bug.", param_idx);
+		if (!struct_name || struct_name[0] == '\0')
+		{
+			Logger::instance().error("Vertex input struct at parameter {} has no name. "
+									 "This is a reflection bug.",
+									 param_idx);
 			throw std::runtime_error("Vertex input struct has no name");
 		}
 
 		uint32_t offset = 0;
 
-		for (uint32_t f = 0; f < type_layout->getFieldCount(); ++f) {
-			auto* field = type_layout->getFieldByIndex(f);
-			auto format = to_vk_format(field->getTypeLayout()->getType());
-			auto size = format_size(format);
+		for (uint32_t f = 0; f < type_layout->getFieldCount(); ++f)
+		{
+			auto* field	 = type_layout->getFieldByIndex(f);
+			auto  format = to_vk_format(field->getTypeLayout()->getType());
+			auto  size	 = format_size(format);
 
-			attributes.push_back({
-				.name = field->getName(),
-				.location = field->getBindingIndex(),
-				.binding = param_idx,
-				.offset = offset,
-				.format = format
-			});
+			attributes.push_back({.name		= field->getName(),
+								  .location = field->getBindingIndex(),
+								  .binding	= param_idx,
+								  .offset	= offset,
+								  .format	= format});
 
 			offset += size;
 		}
 
-		bindings.push_back({
-			.binding = param_idx,
-			.stride = offset,
-			.name = struct_name
-		});
-
+		bindings.push_back({.binding = param_idx, .stride = offset, .name = struct_name});
 	}
 
 	return {attributes, bindings};
@@ -855,7 +832,9 @@ bool FragmentDetails::matches(const ShaderDetails&) const
 // --- ComputeDetails ---
 
 ComputeDetails::ComputeDetails(slang::IComponentType* linked)
-	: local_size_x(1), local_size_y(1), local_size_z(1)
+	: local_size_x(1)
+	, local_size_y(1)
+	, local_size_z(1)
 {
 	auto* entry = get_entry_point(linked);
 	if (!entry)
@@ -876,7 +855,6 @@ bool ComputeDetails::matches(const ShaderDetails&) const
 }
 
 // --- ShaderDetails (variant wrapper) -
-
 
 ShaderDetailsBase make_shader_details(slang::IComponentType* linked)
 {
@@ -900,8 +878,6 @@ ShaderDetailsBase make_shader_details(slang::IComponentType* linked)
 			throw std::invalid_argument("Unsupported shader stage");
 	}
 }
-
-
 
 ShaderDetails::ShaderDetails(slang::IComponentType* linked)
 	: ShaderDetailsBase(make_shader_details(linked))
@@ -955,11 +931,18 @@ std::expected<Shader, std::string> Shader::create_shader(vk::Device device, std:
 	auto details		= ShaderDetails{linked->get()};
 	auto push_constants = extract_push_constants(linked->get(), stage);
 	auto descriptors	= extract_descriptors(linked->get(), stage);
-	auto module			= create_shader_module(device, spirv->get());
+
+	// Propagate module-creation failure instead of wrapping a null handle in a
+	// "successful" Shader that would later crash pipeline creation (M4).
+	auto module = create_shader_module(device, spirv->get());
+	if (!module)
+	{
+		return std::unexpected{module.error()};
+	}
 
 	Logger::instance().info("Shader '{}' created successfully ({} descriptors)", name, descriptors.size());
 
-	return Shader{device, module, stage, details, descriptors, push_constants, std::string{entry_point}};
+	return Shader{device, *module, stage, details, descriptors, push_constants, std::string{entry_point}};
 }
 
 const std::vector<DescriptorInfo>& Shader::get_descriptor_infos() const
@@ -1042,4 +1025,4 @@ Shader::Shader(const vk::Device& device, const vk::ShaderModule& shader_module, 
 	, m_entry_point(std::move(entry_point))
 {
 }
-}
+} // namespace veng

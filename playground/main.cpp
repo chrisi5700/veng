@@ -1,276 +1,73 @@
-#include <atomic>
-#include <functional>
-#include <memory>
+//
+// Reactive-core demo: the IFS prototype from the original playground, reborn on the
+// lifted L3 graph (design.md §11.3). Shows demand-driven evaluation, cross-frame
+// caching, and equality-gated invalidation — no Vulkan involved.
+//
+
+#include <cstddef>
 #include <print>
-#include <thread>
+#include <string>
 #include <vector>
+#include <veng/rendergraph/Graph.hpp>
 
-enum class State
+using namespace veng::graph;
+
+namespace
 {
-	Valid,
-	Processing,
-	Invalid,
-};
-
-struct CPUNode;
-
-struct Data
+const std::vector<int>& particles_of(const Graph& graph, DataHandle handle)
 {
-	virtual CPUNode*			  get_parent() = 0;
-	virtual void			  invalidate() = 0;
-	[[nodiscard]] const std::atomic<State>& request();
-	bool					  valid();
-
-	virtual ~Data() = default;
-};
-
-struct CPUNode
-{
-	 private:
-	std::atomic<State> m_state = State::Invalid;
-
-	 protected:
-	virtual void invalidate_output() = 0;
-	virtual void schedule(std::function<void()> f) { std::thread(f).detach(); }
-	virtual std::vector<const std::atomic<State>*> get_pending_input() = 0;
-	virtual void								   execute()		   = 0;
-
-	 public:
-	bool valid() const { return m_state == State::Valid; }
-	void invalidate()
-	{
-		m_state.store(State::Invalid, std::memory_order_relaxed);
-		invalidate_output();
-	}
-	std::atomic<State>& process()
-	{
-		auto expected = State::Invalid;
-		if (!m_state.compare_exchange_strong(expected, State::Processing, std::memory_order_acquire,
-										   std::memory_order_relaxed))
-		{
-			return m_state;
-		}
-
-		for (auto* state : get_pending_input())
-		{
-			state->wait(State::Processing, std::memory_order_acquire);
-		}
-
-		schedule(
-			[&]()
-			{
-				execute();
-				m_state.store(State::Valid, std::memory_order_release);
-				m_state.notify_all();
-			});
-		return m_state;
-	}
-
-	virtual ~CPUNode() = default;
-};
-
-const std::atomic<State>& Data::request()
-{
-	auto parent = get_parent();
-	if (not parent)
-		throw std::logic_error{"No parent node"};
-	return parent->process();
+	return dynamic_cast<const ValueData<std::vector<int>>*>(graph.get_data(handle))->value();
 }
-
-bool Data::valid()
-{
-	auto parent = get_parent();
-	if (not parent)
-		return true;
-	return parent->valid();
-}
-
-template <class T>
-class CPUData : public Data
-{
-	T				   held;
-	std::vector<CPUNode*> consumers;
-	CPUNode*			   parent;
-
-	 public:
-	explicit CPUData(const T& held, CPUNode* parent = nullptr)
-		: held(held)
-		, parent(parent)
-	{
-	}
-
-	CPUNode* get_parent() override { return parent; }
-	void  invalidate() override
-	{
-		for (auto consumer : consumers)
-		{
-			consumer->invalidate();
-		}
-	}
-
-	void add_consumer(CPUNode* consumer) { consumers.push_back(consumer); }
-	void set_data(const T& new_held)
-	{
-		held = new_held;
-	}
-	void update_data(const T& new_held)
-	{
-		held = new_held;
-		invalidate();
-	}
-	const T& get_data() { return held; }
-	~CPUData() override = default;
-};
-
-class IFSNode : public CPUNode
-{
-	CPUData<std::size_t>*	   particle_count = nullptr;
-	CPUData<std::string>*	   ifs_name		  = nullptr;
-	CPUData<std::vector<int>>* particles	  = nullptr;
-
-	 protected:
-	std::vector<const std::atomic<State>*> get_pending_input() override
-	{
-		std::vector<const std::atomic<State>*> input_states;
-
-		if (not particle_count->valid())
-		{
-			std::println("IFSNode particles count changed requesting new generation");
-			input_states.push_back(&particle_count->request());
-		}
-		if (not ifs_name->valid())
-		{
-			std::println("IFSNode name changed requesting new generation");
-			input_states.push_back(&ifs_name->request());
-		}
-		return input_states;
-	}
-
-	void execute() override
-	{
-		std::println("IFSNode: Calculating IFS");
-
-		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-		particles->set_data(std::vector<int>(particle_count->get_data()));
-		std::println("IFSNode: Done calculating IFS");
-
-	}
-	void invalidate_output() override { particles->invalidate(); }
-
-	 public:
-	static std::pair<std::unique_ptr<IFSNode>, std::unique_ptr<CPUData<std::vector<int>>>> create(
-		CPUData<std::size_t>* particle_count, CPUData<std::string>* ifs_name)
-	{
-		auto ifs			= std::make_unique<IFSNode>();
-		auto out			= std::make_unique<CPUData<std::vector<int>>>(std::vector<int>{}, ifs.get());
-		ifs->ifs_name		= ifs_name;
-		ifs->particle_count = particle_count;
-		ifs->particles		= out.get();
-		particle_count->add_consumer(ifs.get());
-		ifs_name->add_consumer(ifs.get());
-		return std::make_pair(std::move(ifs), std::move(out));
-	}
-
-	~IFSNode() override = default;
-};
-
-template <class F>
-class CPUTransformer;
-
-template <class Ret, class... Args>
-class CPUTransformer<Ret(Args...)> : public CPUNode
-{
-	CPUData<Ret>*									   output;
-	std::tuple<CPUData<std::remove_cvref_t<Args>>*...> args;
-	std::function<Ret(Args...)>						   func;
-
-	 protected:
-	void invalidate_output() override { output->invalidate(); }
-
-	std::vector<const std::atomic<State>*> get_pending_input() override
-	{
-		std::vector<const std::atomic<State>*> input_states;
-
-		[&]<std::size_t... Is>(std::index_sequence<Is...>)
-		{
-			(
-				[&](auto* arg)
-				{
-					if (not arg->valid())
-					{
-						input_states.push_back(&arg->request());
-					}
-				}(std::get<Is>(args)),
-				...);
-		}(std::make_index_sequence<sizeof...(Args)>{});
-		return input_states;
-	}
-	void execute() override
-	{
-		std::println("CPUTransformer: Executing stored function");
-		auto data = [&]<std::size_t... Is>(std::index_sequence<Is...>)
-		{
-			return func([](auto* arg) { return arg->get_data(); }(std::get<Is>(args))...);
-		}(std::make_index_sequence<sizeof...(Args)>{});
-		output->set_data(data);
-		std::println("CPUTransformer: Finished executing stored function");
-	}
-
-	 public:
-	CPUTransformer(std::tuple<CPUData<std::remove_cvref_t<Args>>*...> args, std::function<Ret(Args...)> func)
-		: output(nullptr)
-		, args(args)
-		, func(func)
-	{
-	}
-
-	static std::pair<std::unique_ptr<CPUTransformer>, std::unique_ptr<CPUData<Ret>>> create(
-		std::function<Ret(Args...)> func, CPUData<std::remove_cvref_t<Args>>*... data)
-	{
-		auto args	  = std::make_tuple(data...);
-		auto trans	  = std::make_unique<CPUTransformer>(args, func);
-		auto ret	  = std::make_unique<CPUData<Ret>>(Ret{}, trans.get());
-		trans->output = ret.get();
-		(data->add_consumer(trans.get()), ...);
-		return std::make_pair(std::move(trans), std::move(ret));
-	}
-
-
-};
+} // namespace
 
 int main()
 {
-	CPUData<std::size_t> count{1024};
-	CPUData<std::string> ifs_name{"Triangle"};
-	auto [ifs, output]		   = IFSNode::create(&count, &ifs_name);
-	auto [name_mapper, mapped] = CPUTransformer<std::vector<int>(const std::vector<int>&, const std::string&)>::create(
-		[](const std::vector<int>& data, const std::string& name)
+	Graph			graph;
+	InlineScheduler scheduler;
+
+	// Sources: externally-mutated reactive roots.
+	auto count = graph.add_source<std::size_t>(8);
+	auto name  = graph.add_source<std::string>("Triangle");
+
+	// IFS node: (count, name) -> particle buffer.
+	auto particles = graph.add_transform(
+		[](const std::size_t& n, const std::string& ifs_name)
 		{
-			std::println("Mapping name...");
-			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-			auto out = data;
-			for (auto& e : out)
+			std::println("  [IFS]    generating {} particles for '{}'", n, ifs_name);
+			return std::vector<int>(n, static_cast<int>(ifs_name.size()));
+		},
+		count, name);
+
+	// Mapper: offsets every particle by the IFS name length.
+	auto mapped = graph.add_transform(
+		[](const std::vector<int>& data, const std::string& ifs_name)
+		{
+			std::println("  [mapper] offsetting {} particles by len('{}')", data.size(), ifs_name);
+			std::vector<int> out = data;
+			for (int& value : out)
 			{
-				e += name.length();
+				value += static_cast<int>(ifs_name.size());
 			}
-			std::println("Finished mapping name");
 			return out;
 		},
-		output.get(), &ifs_name);
+		particles, name);
 
-	if (not mapped->valid())
+	const auto present = [&](const char* label)
 	{
-		auto& map_wait = mapped->request();
-		map_wait.wait(State::Processing, std::memory_order_acquire);
-		std::println("{}", mapped->get_data()[0]);
-	}
+		const auto plan = graph.frame(mapped, scheduler);
+		std::println("{}: frame {} executed {} node(s); first particle = {}", label, graph.current_revision(),
+					 plan->size(), particles_of(graph, mapped).front());
+	};
 
-	ifs_name.update_data("New Data Which is longer");
+	present("initial   "); // both nodes run
+	present("re-present"); // nothing changed -> 0 nodes (cached)
 
-	if (not mapped->valid())
-	{
-		auto& map_wait = mapped->request();
-		map_wait.wait(State::Processing, std::memory_order_acquire);
-		std::println("{}", mapped->get_data()[0]);
-	}
+	dynamic_cast<ValueData<std::string>*>(graph.get_data(name))->set("Sierpinski");
+	present("rename    "); // name feeds both nodes -> both re-run
+
+	dynamic_cast<ValueData<std::size_t>*>(graph.get_data(count))->set(8);
+	present("same count"); // equality-gated -> 0 nodes
+
+	std::println("\n--- graph (GraphViz) ---\n{}", graph.to_dot());
+	return 0;
 }

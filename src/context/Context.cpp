@@ -3,12 +3,11 @@
 //
 // VulkanContext.cpp
 
-#include <GLFW/glfw3.h>
-#include <optional>
-#include <set>
+#include <utility>
 #include <veng/context/Context.hpp>
 #include <veng/context/ContextErrors.hpp>
 #include <veng/logging/Logger.hpp>
+#include <VkBootstrap.h>
 #include <vulkan/vulkan.hpp>
 
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
@@ -22,16 +21,15 @@ constexpr bool ENABLE_VALIDATION = false;
 constexpr bool ENABLE_VALIDATION = true;
 #endif
 
-constexpr std::array VALIDATION_LAYERS = {"VK_LAYER_KHRONOS_validation"};
-
-vk::Bool32 debug_callback(vk::DebugUtilsMessageSeverityFlagBitsEXT			 severity,
-						  [[maybe_unused]] vk::DebugUtilsMessageTypeFlagsEXT type,
-						  const vk::DebugUtilsMessengerCallbackDataEXT* callback_data, [[maybe_unused]] void* user_data)
+VKAPI_ATTR vk::Bool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT			 severity,
+												[[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT type,
+												const VkDebugUtilsMessengerCallbackDataEXT*		 callback_data,
+												[[maybe_unused]] void*							 user_data)
 {
 	auto& logger  = Logger::instance();
 	auto  pattern = fmt::format("[IteratedFunction]{:<30}[%^%5l%$] %v", "[VulkanDebug]");
 	logger.set_pattern(pattern);
-	switch (static_cast<VkDebugUtilsMessageSeverityFlagBitsEXT>(severity))
+	switch (severity)
 	{
 		case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT: logger.trace("{}", callback_data->pMessage); break;
 		case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT: logger.debug("{}", callback_data->pMessage); break;
@@ -43,120 +41,15 @@ vk::Bool32 debug_callback(vk::DebugUtilsMessageSeverityFlagBitsEXT			 severity,
 	return vk::False;
 }
 
-bool check_validation_layer_support()
+namespace
 {
-	auto available_res = vk::enumerateInstanceLayerProperties();
-	if (available_res.result != vk::Result::eSuccess)
-	{
-		Logger::instance().warn("Could not query InstanceLayerProperties {}", to_string(available_res.result));
-	}
-	auto available = std::move(available_res.value);
-	for (const char* layer_name : VALIDATION_LAYERS)
-	{
-		bool found = false;
-		for (const auto& layer : available)
-		{
-			if (std::strcmp(layer_name, layer.layerName) == 0)
-			{
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-		{
-			Logger::instance().warn("Validation layer {} not available", layer_name);
-			return false;
-		}
-	}
-	return true;
-}
-
-vk::DebugUtilsMessengerCreateInfoEXT make_debug_messenger_create_info()
+// vk-bootstrap reports failures as a std::error_code plus an optional VkResult.
+// Flatten that down to the vk::Result our error types carry.
+template <class T>
+vk::Result vk_result_of(const vkb::Result<T>& result)
 {
-	return vk::DebugUtilsMessengerCreateInfoEXT()
-		.setMessageSeverity(vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
-							vk::DebugUtilsMessageSeverityFlagBitsEXT::eError)
-		.setMessageType(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
-						vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-						vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance)
-		.setPfnUserCallback(debug_callback);
-}
-
-std::expected<vk::Instance, InstanceCreationError> create_instance(std::string_view title)
-{
-	static vk::detail::DynamicLoader dl;
-	auto vkGetInstanceProcAddr = dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
-	VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
-	auto app_info = vk::ApplicationInfo()
-						.setPApplicationName(title.data())
-						.setApplicationVersion(VK_MAKE_VERSION(1, 0, 0))
-						.setPEngineName("No Engine")
-						.setEngineVersion(VK_MAKE_VERSION(1, 0, 0))
-						.setApiVersion(VK_API_VERSION_1_3);
-
-	uint32_t	 glfw_extension_count = 0;
-	const char** glfw_extensions	  = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
-
-	std::vector<const char*> extensions(glfw_extensions, glfw_extensions + glfw_extension_count);
-
-	if constexpr (ENABLE_VALIDATION)
-	{
-		extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-	}
-	extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-
-	Logger::instance().debug("Instance extensions:");
-	for (const auto* ext : extensions)
-	{
-		Logger::instance().debug("  {}", ext);
-	}
-
-	auto create_info = vk::InstanceCreateInfo().setPApplicationInfo(&app_info).setPEnabledExtensionNames(extensions);
-
-	vk::DebugUtilsMessengerCreateInfoEXT debug_create_info;
-	if constexpr (ENABLE_VALIDATION)
-	{
-		if (check_validation_layer_support())
-		{
-			create_info.setPEnabledLayerNames(VALIDATION_LAYERS);
-
-			debug_create_info = make_debug_messenger_create_info();
-			create_info.setPNext(&debug_create_info);
-
-			Logger::instance().info("Validation layers enabled");
-		}
-	}
-
-	auto instance_res = vk::createInstance(create_info);
-	if (instance_res.result != vk::Result::eSuccess)
-	{
-		Logger::instance().error("Failed to create Vulkan instance {}", to_string(instance_res.result));
-		return std::unexpected(InstanceCreationError{instance_res.result});
-	}
-	auto instance = instance_res.value;
-	VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
-	Logger::instance().debug("Created Vulkan instance");
-	return instance;
-}
-
-std::expected<vk::DebugUtilsMessengerEXT, DebugUtilsMessengerEXTCreationError> create_debug_messenger(
-	vk::Instance instance)
-{
-	if constexpr (!ENABLE_VALIDATION)
-	{
-		return nullptr;
-	}
-
-	auto create_info = make_debug_messenger_create_info();
-
-	auto debug_msngr_res = instance.createDebugUtilsMessengerEXT(create_info, nullptr);
-	if (debug_msngr_res.result != vk::Result::eSuccess)
-	{
-		Logger::instance().error("Failed to create debug messenger {}", to_string(debug_msngr_res.result));
-		return std::unexpected(DebugUtilsMessengerEXTCreationError{debug_msngr_res.result});
-	}
-	Logger::instance().debug("Created debug messenger");
-	return debug_msngr_res.value;
+	auto raw = result.vk_result();
+	return raw != VK_SUCCESS ? static_cast<vk::Result>(raw) : vk::Result::eErrorInitializationFailed;
 }
 
 void destroy_debug_messenger(vk::Instance instance, vk::DebugUtilsMessengerEXT messenger)
@@ -167,187 +60,163 @@ void destroy_debug_messenger(vk::Instance instance, vk::DebugUtilsMessengerEXT m
 	instance.destroyDebugUtilsMessengerEXT(messenger, nullptr);
 	Logger::instance().trace("Destroyed debug messenger");
 }
-
-std::expected<vk::PhysicalDevice, PhysicalDeviceCreationError> select_physical_device(vk::Instance instance)
-{
-	auto devices_res = instance.enumeratePhysicalDevices();
-	if (devices_res.result != vk::Result::eSuccess)
-	{
-		Logger::instance().error("Failed to enumerate physical devices {}", to_string(devices_res.result));
-		return std::unexpected(PhysicalDeviceCreationError{devices_res.result});
-	}
-	auto devices = std::move(devices_res.value);
-
-	for (const auto& dev : devices)
-	{
-		auto props = dev.getProperties();
-		if (props.deviceType == vk::PhysicalDeviceType::eDiscreteGpu)
-		{
-			Logger::instance().info("Selected discrete GPU: {}", props.deviceName.data());
-			return dev;
-		}
-	}
-
-	for (const auto& dev : devices)
-	{
-		auto props = dev.getProperties();
-		if (props.deviceType == vk::PhysicalDeviceType::eIntegratedGpu)
-		{
-			Logger::instance().info("Selected integrated GPU: {}", props.deviceName.data());
-			return dev;
-		}
-	}
-
-	return std::unexpected(PhysicalDeviceCreationError{vk::Result::eErrorUnknown});
-}
-
-std::expected<QueueFamilyIndices, NoQueueFamilyError> find_queue_families(vk::PhysicalDevice physical_device)
-{
-	auto queue_families = physical_device.getQueueFamilyProperties();
-
-	std::optional<uint32_t> graphics;
-	std::optional<uint32_t> compute;
-
-	for (uint32_t i = 0; i < queue_families.size(); i++)
-	{
-		const auto& family = queue_families[i];
-
-		if (family.queueFlags & vk::QueueFlagBits::eGraphics)
-		{
-			graphics = i;
-		}
-
-		if (family.queueFlags & vk::QueueFlagBits::eCompute)
-		{
-			if (!compute.has_value() || !(family.queueFlags & vk::QueueFlagBits::eGraphics))
-			{
-				compute = i;
-			}
-		}
-	}
-
-	if (!graphics || !compute)
-	{
-		return std::unexpected(NoQueueFamilyError{});
-	}
-
-	Logger::instance().debug("Queue families - graphics: {}, compute: {}", *graphics, *compute);
-
-	return QueueFamilyIndices{*graphics, *compute};
-}
-
-std::expected<vk::Device, DeviceCreationError> create_logical_device(vk::PhysicalDevice		   physical_device,
-																	 const QueueFamilyIndices& indices)
-{
-	std::vector<vk::DeviceQueueCreateInfo> queue_create_infos;
-	std::set<uint32_t>					   unique_families = {indices.graphics, indices.compute};
-
-	float queue_priority = 1.0f;
-	for (uint32_t family : unique_families)
-	{
-		auto queue_create_info =
-			vk::DeviceQueueCreateInfo().setQueueFamilyIndex(family).setQueueCount(1).setPQueuePriorities(
-				&queue_priority);
-		queue_create_infos.push_back(queue_create_info);
-	}
-
-	std::vector<const char*> extensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-
-	// Base features
-	vk::PhysicalDeviceFeatures features{};
-	features.tessellationShader = VK_TRUE;
-	features.geometryShader		= VK_TRUE;
-
-	// Vulkan 1.1 features
-	vk::PhysicalDeviceVulkan11Features vulkan11_features{};
-	vulkan11_features.shaderDrawParameters = VK_TRUE;
-
-	// Vulkan 1.2 features
-	vk::PhysicalDeviceVulkan12Features vulkan12_features{};
-	vulkan12_features.pNext = &vulkan11_features;
-
-	// Features2 container
-	vk::PhysicalDeviceFeatures2 features2{};
-	features2.features = features;
-	features2.pNext	   = &vulkan12_features;
-
-	auto create_info = vk::DeviceCreateInfo()
-						   .setQueueCreateInfos(queue_create_infos)
-						   .setPEnabledExtensionNames(extensions)
-						   .setPNext(&features2);
-
-	auto device_res = physical_device.createDevice(create_info);
-	if (device_res.result != vk::Result::eSuccess)
-	{
-		Logger::instance().error("Failed to create device {}", to_string(device_res.result));
-		return std::unexpected(DeviceCreationError{device_res.result});
-	}
-	Logger::instance().debug("Created logical device");
-	return device_res.value;
-}
+} // namespace
 
 std::expected<Context, ContextCreationError> Context::create(std::string_view title)
 {
-	struct RAIIInstance
+	// vk-bootstrap owns the handles until we hand them to Context; these guards
+	// tear them back down if we bail out part-way through.
+	struct InstanceGuard
 	{
-		vk::Instance instance;
-		vk::Instance steal() { return std::exchange(instance, nullptr); }
-		~RAIIInstance()
+		vkb::Instance instance;
+		bool		  armed = true;
+		~InstanceGuard()
 		{
-			if (instance)
-			{
-				instance.destroy();
-			}
+			if (armed)
+				vkb::destroy_instance(instance);
 		}
 	};
-	struct RAIIDebugMSG
+	struct DeviceGuard
 	{
-		vk::Instance instance;
-		vk::DebugUtilsMessengerEXT messenger;
-		vk::DebugUtilsMessengerEXT steal()
+		vkb::Device device;
+		bool		armed = true;
+		~DeviceGuard()
 		{
-			return std::exchange(messenger, nullptr);
-		}
-		~RAIIDebugMSG()
-		{
-			if (messenger)
-				destroy_debug_messenger(instance, messenger);
+			if (armed)
+				vkb::destroy_device(device);
 		}
 	};
-	auto instance_res = create_instance(title);
-	if (not instance_res)
+
+	// We drive presentation through VK_KHR_surface/swapchain but never let
+	// vk-bootstrap auto-require the platform windowing extensions (xcb/xlib/
+	// wayland): no window is created here, and headless loaders may not expose
+	// them. The surface extension is enabled explicitly so the swapchain device
+	// extension stays valid once a window is attached later.
+	// vk-bootstrap takes a const char*; string_view::data() is not guaranteed
+	// NUL-terminated, so copy into a local std::string first (M1).
+	const std::string	 app_name{title};
+	vkb::InstanceBuilder builder;
+	auto				 instance_ret = builder.set_app_name(app_name.c_str())
+											.set_engine_name("No Engine")
+											.require_api_version(1, 3, 0)
+											.set_headless()
+											.enable_extension(VK_KHR_SURFACE_EXTENSION_NAME)
+											.request_validation_layers(ENABLE_VALIDATION)
+											.set_debug_callback(debug_callback)
+											.build();
+	if (!instance_ret)
 	{
-		return std::unexpected(instance_res.error());
+		Logger::instance().error("Failed to create Vulkan instance: {}", instance_ret.error().message());
+		return std::unexpected(InstanceCreationError{vk_result_of(instance_ret)});
 	}
-	RAIIInstance instance{*instance_res};
-	auto		 debug_msg_res = create_debug_messenger(instance.instance);
-	if (not debug_msg_res)
+	InstanceGuard instance_guard{instance_ret.value()};
+	const auto&	  vkb_instance = instance_guard.instance;
+
+	// Drive vulkan.hpp's dynamic dispatcher from the loader vk-bootstrap resolved.
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(vkb_instance.fp_vkGetInstanceProcAddr);
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Instance(vkb_instance.instance));
+	Logger::instance().debug("Created Vulkan instance");
+
+	// We request the swapchain extension and defer the surface so a window can be
+	// attached later, without requiring one to exist during device selection.
+	vk::PhysicalDeviceFeatures features{};
+	features.tessellationShader = vk::True;
+	features.geometryShader		= vk::True;
+
+	vk::PhysicalDeviceVulkan11Features features11{};
+	features11.shaderDrawParameters = vk::True;
+
+	// Vulkan 1.3 core features the design mandates (design.md §L0): dynamic rendering
+	// (pipelines built with formats instead of a VkRenderPass — required for
+	// GraphicsPipelineBuilder), synchronization2 (barrier helpers), and timeline
+	// semaphores (the GPU-side revision clock, §2.7/§5).
+	vk::PhysicalDeviceVulkan13Features features13{};
+	features13.dynamicRendering = vk::True;
+	features13.synchronization2 = vk::True;
+
+	vk::PhysicalDeviceVulkan12Features features12{};
+	features12.timelineSemaphore = vk::True;
+
+	vkb::PhysicalDeviceSelector selector{vkb_instance};
+	auto						physical_ret = selector.set_minimum_version(1, 3)
+												   .defer_surface_initialization()
+												   .add_required_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME)
+												   .set_required_features(features)
+												   .set_required_features_11(features11)
+												   .set_required_features_12(features12)
+												   .set_required_features_13(features13)
+												   .select();
+	if (!physical_ret)
 	{
-		return std::unexpected(debug_msg_res.error());
+		Logger::instance().error("Failed to select physical device: {}", physical_ret.error().message());
+		return std::unexpected(PhysicalDeviceCreationError{vk_result_of(physical_ret)});
 	}
-	RAIIDebugMSG debug_msg{instance.instance, *debug_msg_res};
-	auto physical_device_res = select_physical_device(instance.instance);
-	if (not physical_device_res)
+	const auto& vkb_physical = physical_ret.value();
+	Logger::instance().info("Selected GPU: {}", vkb_physical.name);
+
+	auto device_ret = vkb::DeviceBuilder{vkb_physical}.build();
+	if (!device_ret)
 	{
-		return std::unexpected(physical_device_res.error());
+		Logger::instance().error("Failed to create device: {}", device_ret.error().message());
+		return std::unexpected(DeviceCreationError{vk_result_of(device_ret)});
 	}
-	auto queue_family_res = find_queue_families(*physical_device_res);
-	if (not queue_family_res)
+	DeviceGuard device_guard{device_ret.value()};
+	const auto& vkb_device = device_guard.device;
+
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Device(vkb_device.device));
+	Logger::instance().debug("Created logical device");
+
+	// vk-bootstrap picks a dedicated compute queue when one exists, falling back
+	// to a shared graphics/compute family otherwise.
+	auto graphics_queue = vkb_device.get_queue(vkb::QueueType::graphics);
+	auto compute_queue	= vkb_device.get_queue(vkb::QueueType::compute);
+	auto graphics_index = vkb_device.get_queue_index(vkb::QueueType::graphics);
+	auto compute_index	= vkb_device.get_queue_index(vkb::QueueType::compute);
+	if (!graphics_queue || !compute_queue || !graphics_index || !compute_index)
 	{
-		return std::unexpected(queue_family_res.error());
+		Logger::instance().error("Failed to retrieve graphics/compute queues");
+		return std::unexpected(NoQueueFamilyError{});
 	}
-	auto device_res = create_logical_device(*physical_device_res, *queue_family_res);
-	if (not device_res)
+	QueueFamilyIndices indices{graphics_index.value(), compute_index.value()};
+	Logger::instance().debug("Queue families - graphics: {}, compute: {}", indices.graphics, indices.compute);
+
+	// VMA fetches its entry points from the same dynamic dispatcher.
+	vma::VulkanFunctions	 functions = vma::functionsFromDispatcher(VULKAN_HPP_DEFAULT_DISPATCHER);
+	vma::AllocatorCreateInfo allocator_info{};
+	allocator_info.physicalDevice	= vk::PhysicalDevice(vkb_physical.physical_device);
+	allocator_info.device			= vk::Device(vkb_device.device);
+	allocator_info.instance			= vk::Instance(vkb_instance.instance);
+	allocator_info.vulkanApiVersion = VK_API_VERSION_1_3;
+	allocator_info.pVulkanFunctions = &functions;
+
+	vma::Allocator allocator;
+	if (auto result = vma::createAllocator(&allocator_info, &allocator); result != vk::Result::eSuccess)
 	{
-		return std::unexpected(device_res.error());
+		Logger::instance().error("Failed to create VMA allocator: {}", vk::to_string(result));
+		return std::unexpected(AllocatorCreationError{result});
 	}
-	auto graphics_queue = device_res->getQueue(queue_family_res->graphics, 0);
-	auto compute_queue	= device_res->getQueue(queue_family_res->compute, 0);
-	return Context{instance.steal(), debug_msg.steal(), *physical_device_res, *queue_family_res,
-				   *device_res,		 graphics_queue, compute_queue};
+	Logger::instance().debug("Created VMA allocator");
+
+	// Ownership transfers to Context, which destroys everything in its destructor.
+	instance_guard.armed = false;
+	device_guard.armed	 = false;
+	return Context{vk::Instance(vkb_instance.instance),
+				   vk::DebugUtilsMessengerEXT(vkb_instance.debug_messenger),
+				   vk::PhysicalDevice(vkb_physical.physical_device),
+				   indices,
+				   vk::Device(vkb_device.device),
+				   vk::Queue(graphics_queue.value()),
+				   vk::Queue(compute_queue.value()),
+				   allocator};
 }
+
 Context::~Context()
 {
+	if (m_allocator)
+	{
+		m_allocator.destroy();
+		Logger::instance().trace("Destroyed VMA allocator");
+	}
 
 	if (m_device)
 	{
@@ -371,6 +240,7 @@ Context::Context(Context&& other) noexcept
 	, m_device(std::exchange(other.m_device, nullptr))
 	, m_graphics_queue(other.m_graphics_queue)
 	, m_compute_queue(other.m_compute_queue)
+	, m_allocator(std::exchange(other.m_allocator, nullptr))
 {
 }
 Context& Context::operator=(Context&& other) noexcept
@@ -379,6 +249,10 @@ Context& Context::operator=(Context&& other) noexcept
 		return *this;
 
 	// Clean up
+	if (m_allocator)
+	{
+		m_allocator.destroy();
+	}
 	if (m_device)
 	{
 		m_device.destroy();
@@ -397,6 +271,7 @@ Context& Context::operator=(Context&& other) noexcept
 	m_device		  = std::exchange(other.m_device, nullptr);
 	m_graphics_queue  = other.m_graphics_queue;
 	m_compute_queue	  = other.m_compute_queue;
+	m_allocator		  = std::exchange(other.m_allocator, nullptr);
 	return *this;
 }
 

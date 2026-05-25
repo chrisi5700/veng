@@ -16,14 +16,28 @@ target_include_directories(veng_logging
 )
 
 target_add_library(veng_context)
-target_sources(veng_context PRIVATE context/Context.cpp)
-target_link_libraries(veng_context PUBLIC Vulkan::Vulkan glfw veng_logging)
+target_sources(veng_context PRIVATE context/Context.cpp context/VmaImpl.cpp)
+target_link_libraries(veng_context
+        PUBLIC Vulkan::Vulkan glfw veng_logging
+               GPUOpen::VulkanMemoryAllocator
+               unofficial::VulkanMemoryAllocator-Hpp::VulkanMemoryAllocator-Hpp
+        PRIVATE vk-bootstrap::vk-bootstrap
+)
 target_compile_definitions(veng_context PUBLIC
         VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 # Vulkan specific defines
         VULKAN_HPP_ENABLE_DYNAMIC_LOADER_TOOL=1
         VULKAN_HPP_NO_EXCEPTIONS
         VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS
+        # VulkanMemoryAllocator-Hpp imports vk::operator</>/<= etc., which vulkan.hpp
+        # only emits when the C++20 spaceship operator is disabled.
+        VULKAN_HPP_NO_SPACESHIP_OPERATOR
         GLM_FORCE_DEPTH_ZERO_TO_ONE # depth different for vulkan as opposed to opengl
+)
+target_compile_definitions(veng_context PRIVATE
+        # VMA loads Vulkan entry points through the dynamic dispatcher we feed it,
+        # matching the VULKAN_HPP_DISPATCH_LOADER_DYNAMIC setup above.
+        VMA_STATIC_VULKAN_FUNCTIONS=0
+        VMA_DYNAMIC_VULKAN_FUNCTIONS=1
 )
 
 
@@ -34,7 +48,24 @@ target_compile_definitions(veng_shader PUBLIC
         SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
 )
 
+target_add_library(veng_pipelines)
+target_sources(veng_pipelines PRIVATE pipelines/ComputePipeline.cpp pipelines/GraphicsPipeline.cpp)
+target_link_libraries(veng_pipelines PUBLIC veng_shader glm::glm)
+
+# L2.2 descriptor allocation — growable pool allocator over the layouts pipelines expose.
+target_add_library(veng_descriptors)
+target_sources(veng_descriptors PRIVATE descriptors/DescriptorAllocator.cpp)
+target_link_libraries(veng_descriptors PUBLIC veng_context)
+
+# L1 GPU resources — RAII Buffer/Image over VMA.
+target_add_library(veng_resources)
+target_sources(veng_resources PRIVATE resources/Buffer.cpp resources/Image.cpp)
+target_link_libraries(veng_resources PUBLIC veng_context)
+
+# L3 Reactive Core. Deliberately Vulkan-agnostic (design.md §3): no link to the
+# Vulkan construction layers, so it builds and unit-tests without a GPU.
 target_add_library(veng_render_graph)
-target_sources(veng_render_graph PRIVATE rendergraph/nodes/Node.cpp rendergraph/nodes/ComputeNode.cpp rendergraph/data/Data.cpp)
-target_link_libraries(veng_render_graph PUBLIC veng_shader glm::glm)
+target_sources(veng_render_graph PRIVATE rendergraph/Graph.cpp rendergraph/ThreadPoolScheduler.cpp)
+target_include_directories(veng_render_graph PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(veng_render_graph PUBLIC Threads::Threads)
 

@@ -8,6 +8,8 @@
     "glm",
     "spdlog",
     "vulkan",
+    "vk-bootstrap",
+    "vulkan-memory-allocator-hpp",
     {
       "name": "imgui",
       "features": ["vulkan-binding", "glfw-binding"]
