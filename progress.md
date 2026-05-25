@@ -5,6 +5,69 @@
 
 ---
 
+## Iteration 12 — 2026-05-25 — Step 2: the GPU bridge (L3→Vulkan seam)
+
+Vertical-slice roadmap step 2 (the directive). The L3 core stays Vulkan-agnostic; this
+adds the one seam where a frame plan's GPU work meets Vulkan.
+
+### What landed
+
+- **`veng::gpu::GpuExecContext : graph::ExecContext`** — resolves data handles and the
+  frame revision against the graph (like the CPU context) **and** exposes the recording
+  `vk::CommandBuffer`, the `Context` (device/allocator/queues), and the
+  frame-in-flight slot.
+- **`veng::gpu::GpuNode : graph::Node`** — base that performs the *single, localized*
+  `static_cast<GpuExecContext&>(ctx)` in `execute()` and forwards to a
+  `record(GpuExecContext&)` override. Concrete GPU nodes never touch the cast; the rest
+  of L3 never sees Vulkan. (Header-only `veng_gpu` INTERFACE lib.)
+- **`Graph::execute(plan, scheduler, ExecContext&)`** overload — the driver injects a
+  `GpuExecContext`; the default overload still builds the CPU context. Refactored the
+  default to delegate and **dropped the `shared_ptr<ExecContextImpl>`** in favor of a
+  stack/reference context: `execute` is frame-synchronous (band barriers block until
+  every task completes), so the context provably outlives all tasks.
+- **`Buffer::mapped()`** — captures VMA's `AllocationInfo::pMappedData`, so a
+  host-visible (`eMapped`) buffer exposes its persistent host pointer (needed for
+  staging/uniform uploads and the bridge test's readback).
+
+### Proof (end-to-end on-GPU)
+
+`tests/gpu/GpuBridgeTests.cpp` (1 case / 15 assertions): a `FillBufferNode` (a real
+`GpuNode`) is dispatched by `Graph::execute` with an injected `GpuExecContext`; it
+records `vkCmdFillBuffer` into the handed command buffer; the test submits + fences,
+then reads the host-visible target through `mapped()` and asserts the GPU wrote the
+expected value. It also asserts the seam delivered the right command buffer + frame
+slot. This is the first time graph-driven work has actually executed on the GPU.
+
+- **69/69 ctest green** (was 68; +1 bridge). Clean under the `llm-vcpkg` gate
+  (GpuBridgeTests + SchedulerTests pass under ASan/UBSan — the `execute` refactor is
+  race-free).
+
+### Documented limitation (matches the roadmap)
+
+The `GpuExecContext` carries **one** command buffer, and band dispatch currently shares
+it across the band's nodes — correct under the serial `InlineScheduler`, but real
+multi-threaded recording needs one command buffer per (queue, frame-slot, thread).
+That is exactly the **`CommandManager`** in Step 3, where **M8**'s
+threading/frames-in-flight contract also goes live.
+
+### Where to continue (next iteration) — Step 3: L2 managers
+
+- **`SwapchainManager`** over vk-bootstrap: owns the swapchain + per-frame binary
+  acquire/render-finished semaphores; exposes `extent()` (feeds the `ScreenSize`
+  source), `acquire(frame_slot)` and `present(frame_slot, wait)`, and `rebuild(extent)`.
+- **`CommandManager`**: one pool per (queue, frame slot, thread); `begin(...)` /
+  `one_shot(...)`; thin `synchronization2` barrier helpers. Resolves the single-command-
+  buffer limitation above and M8's threading contract.
+- **`SyncManager`**: one timeline semaphore per queue (the queue's revision clock) +
+  the binary swapchain-handoff semaphores.
+
+Then Step 4 (slice nodes: ScreenSize → raster→ persistent scene target → swapchain
+source → present/blit), Step 5 (driver loop), Step 6 (triangle + caching proof).
+
+### Deferred (per directive): M5, M6, M8 (until Step 3 CommandManager), L1–L7.
+
+---
+
 ## Iteration 11 — 2026-05-25 — Architect directive + Step 1: L1 GPU resources (Buffer/Image)
 
 ### Architect directive (from feedback.md, supersedes prior priorities)

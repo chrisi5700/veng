@@ -62,6 +62,11 @@ target_add_library(veng_resources)
 target_sources(veng_resources PRIVATE resources/Buffer.cpp resources/Image.cpp)
 target_link_libraries(veng_resources PUBLIC veng_context)
 
+# GPU bridge (L3 -> Vulkan seam): header-only GpuExecContext + GpuNode.
+add_library(veng_gpu INTERFACE)
+target_link_libraries(veng_gpu INTERFACE veng_render_graph veng_context veng_resources)
+target_include_directories(veng_gpu INTERFACE ${CMAKE_SOURCE_DIR}/include)
+
 # L3 Reactive Core. Deliberately Vulkan-agnostic (design.md §3): no link to the
 # Vulkan construction layers, so it builds and unit-tests without a GPU.
 target_add_library(veng_render_graph)

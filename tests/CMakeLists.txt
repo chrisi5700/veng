@@ -49,6 +49,10 @@ target_link_libraries(DescriptorAllocatorTests PRIVATE veng_descriptors Catch2::
 add_executable(ResourceTests resources/ResourceTests.cpp)
 target_link_libraries(ResourceTests PRIVATE veng_resources Catch2::Catch2WithMain)
 
+# GPU bridge tests — GpuExecContext/GpuNode seam, command recorded + executed on-GPU.
+add_executable(GpuBridgeTests gpu/GpuBridgeTests.cpp)
+target_link_libraries(GpuBridgeTests PRIVATE veng_gpu Catch2::Catch2WithMain)
+
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
 catch_discover_tests(ShaderValidationTests)
@@ -59,4 +63,5 @@ catch_discover_tests(ComputePipelineTests)
 catch_discover_tests(GraphicsPipelineTests)
 catch_discover_tests(DescriptorAllocatorTests)
 catch_discover_tests(ResourceTests)
+catch_discover_tests(GpuBridgeTests)
 

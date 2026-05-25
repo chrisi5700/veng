@@ -110,7 +110,11 @@ class Graph
 
 	/// Async execution pass: dispatch the plan through `scheduler`, applying
 	/// change-cutoff (design.md §2.4) and CAS completion (design.md §L3) per node.
+	/// The first overload uses the built-in CPU context; the second injects one — the
+	/// L4/L5 GPU path passes a `GpuExecContext` so `GpuNode`s see command buffers /
+	/// resources (design.md §L4). `ctx` must outlive the call (execute is synchronous).
 	void execute(const FramePlan& plan, Scheduler& scheduler);
+	void execute(const FramePlan& plan, Scheduler& scheduler, ExecContext& ctx);
 
 	/// Convenience: one full frame — resolve then execute.
 	[[nodiscard]] std::expected<FramePlan, GraphError> frame(std::span<const DataHandle> sinks, Scheduler& scheduler);

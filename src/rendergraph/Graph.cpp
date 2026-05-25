@@ -294,10 +294,16 @@ void Graph::run_node(Node& node, ExecContext& ctx, Revision revision, bool first
 
 void Graph::execute(const FramePlan& plan, Scheduler& scheduler)
 {
+	// Default CPU context. Lives on the stack: execute is frame-synchronous (the band
+	// barriers below block until every task completes), so it outlives all tasks.
+	ExecContextImpl ctx{*this, plan.revision()};
+	execute(plan, scheduler, ctx);
+}
+
+void Graph::execute(const FramePlan& plan, Scheduler& scheduler, ExecContext& ctx)
+{
 	const Revision revision = plan.revision();
-	// Shared so tasks outlive this call even under an asynchronous scheduler.
-	const auto ctx	 = std::make_shared<ExecContextImpl>(*this, revision);
-	const auto nodes = plan.nodes();
+	const auto	   nodes	= plan.nodes();
 
 	// Capture prior validity for the whole plan up front: a node that has never
 	// produced a valid output must always run; a previously-valid one can be cut off
@@ -331,8 +337,8 @@ void Graph::execute(const FramePlan& plan, Scheduler& scheduler)
 		{
 			Node*	   node		  = get_node(nodes[i]);
 			const bool first_time = was_valid[i] == 0;
-			scheduler.submit([this, node, ctx, revision, first_time]()
-							 { run_node(*node, *ctx, revision, first_time); });
+			scheduler.submit([this, node, &ctx, revision, first_time]()
+							 { run_node(*node, ctx, revision, first_time); });
 		}
 		// Barrier: wait for every node in the band to leave PROCESSING before moving
 		// on, so the next band sees settled inputs (and so a frame is synchronous).

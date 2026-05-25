@@ -83,6 +83,33 @@ swapchain-source-as-clock is the one input deliberately dirty every frame.
 
 ---
 
+## Review context (2026-05-25, pass 12) — directive adopted by both loops; slice underway
+
+- **The implementation loop consumed the directive and committed.** Iteration 11
+  acknowledged it, did **Step 1 (L1 resources)**, and **committed iterations 1–11 on
+  branch `reactive-engine`** — so the stale-review lag is closed; this pass grades the
+  committed tree (still also build+run-verified: **68/68 on-GPU**).
+- **L5 RESOLVED** (folded into Step 1, not just deferred): `get_node`/`get_data` now
+  validate per-slot generations (`m_node_generations`/`m_data_generations`), so a stale
+  handle returns `nullptr` instead of aliasing a future slot — the UAF/ABA guard. New
+  generation-guard test; my core regression harness still all-passes (no regression).
+- **Step 1 reviewed for real bugs → clean.** `veng::Buffer` and `veng::Image` (RAII
+  move-only over VMA) are correct: `vmaDestroyBuffer`/`destroyImage` free handle +
+  allocation together; move nulls the source (no double-free); `Image::create`
+  destroys the image if view creation fails (partial-failure cleanup); `Image::destroy`
+  frees view-then-image in order. No leaks (ASan-clean per `progress.md`). Verified
+  on-GPU.
+  - Forward INFO (not a bug): `Buffer`/`Image` hold a copy of the `vma::Allocator`
+    (and `Image` the `vk::Device`), so they must be destroyed **before** the `Context`
+    that owns the allocator/device. Standard Vulkan teardown ordering — the L5 driver
+    must free graph-owned resources before tearing down `Context`. Worth an explicit
+    ownership note when the driver lands (same family as M8's frames-in-flight).
+- **Findings remain DEFERRED per directive** (M5, M6, M8, L1–L4, L7). Not hunting new
+  polish. Review focus stays on the slice as it lands (next: Step 2 GPU bridge —
+  `GpuExecContext`/`GpuNode`, the L3→Vulkan `static_cast` seam).
+
+---
+
 ## Review context (2026-05-25, pass 11) — operating under the architect directive above
 
 Acknowledged and adopted. This pass conforms to it:
@@ -204,8 +231,6 @@ machinery. Not a bug — code works — but it's the kind of inconsistency that 
   not thread-safe across concurrent validation callbacks; pattern still says
   `"[IteratedFunction]"` (IFS copy-paste). Set once at init. *(Quick, satisfying fix —
   `progress.md` agrees.)*
-- **L5 — `Handle::generation` is ignored by `get_node`/`get_data`** — fine for
-  append-only v1; a UAF/ABA hole once eviction/removal (§6) lands.
 - **L7 — Global slang session singleton is not concurrency-safe** (`get_session()`).
   Fine single-threaded; a race if compilation moves onto the job pool. Document/guard.
 - **M2 (downgraded) — FAILED nodes re-execute every frame with no backoff.** Policy is
@@ -232,6 +257,9 @@ machinery. Not a bug — code works — but it's the kind of inconsistency that 
 
 ## Recently resolved (verified, dropped from active list)
 
+- **L5 (LOW)** — `Handle::generation` ignored by `get_node`/`get_data` → RESOLVED iter 11
+  (folded into Step 1): per-slot generation vectors; stale handle → `nullptr`. Verified
+  (generation-guard test + no core regression).
 - **M7 (MEDIUM, real bug)** — temporal reset used `== revision` (the C1 trap), missing a
   reset when the scene changed while the accumulator was undemanded → RESOLVED iter 9:
   new documented `Node::last_run_revision()`; reset is now `changed_at() >
@@ -261,9 +289,13 @@ machinery. Not a bug — code works — but it's the kind of inconsistency that 
   builders + `DescriptorAllocator`, L0 `Context`/`Shader` (now with Vk1.3
   dynamic-rendering/sync2/timeline features) — has correct RAII + move semantics and
   `std::expected` propagation throughout. The `llm-vcpkg` gate actively catches bugs.
-- `GraphicsPipelineBuilder` (iter 10) reviewed this pass: clean, no real bugs — correct
-  partial-failure cleanup and dynamic-rendering `pNext` lifetime. The L2 builder layer
-  is now complete enough to feed the L4 vertical slice.
+- `GraphicsPipelineBuilder` (iter 10) reviewed: clean — correct partial-failure cleanup
+  and dynamic-rendering `pNext` lifetime. The L2 builder layer is complete enough to
+  feed the slice.
+- **Step 1 L1 resources (iter 11) reviewed: clean** — `Buffer`/`Image` RAII is correct
+  (free handle+allocation together, null-after-move, view-then-image teardown,
+  partial-failure cleanup). The `Handle::generation` guard (L5) is in and tested. Suite
+  **68/68 on-GPU**. The loop now commits per-iteration on `reactive-engine`.
 - The temporal feature is now correct end-to-end: the `needs_refresh()` hook is minimal
   and regression-free, and the reset baseline (`last_run_revision()`) is documented as
   the canonical pattern so L4 history nodes inherit it.

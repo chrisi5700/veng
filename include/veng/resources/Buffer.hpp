@@ -35,14 +35,21 @@ class Buffer
 	[[nodiscard]] vma::Allocation allocation() const noexcept { return m_allocation; }
 	[[nodiscard]] vk::DeviceSize  size() const noexcept { return m_size; }
 
+	/// Persistently-mapped host pointer, or nullptr if not host-visible/mapped. Non-null
+	/// only when created with `vma::AllocationCreateFlagBits::eMapped` on a host-visible
+	/// allocation (e.g. staging/uniform buffers).
+	[[nodiscard]] void* mapped() const noexcept { return m_mapped; }
+
 	 private:
-	Buffer(vma::Allocator allocator, vk::Buffer buffer, vma::Allocation allocation, vk::DeviceSize size) noexcept;
+	Buffer(vma::Allocator allocator, vk::Buffer buffer, vma::Allocation allocation, vk::DeviceSize size,
+		   void* mapped) noexcept;
 	void destroy() noexcept;
 
 	vma::Allocator	m_allocator;
 	vk::Buffer		m_buffer;
 	vma::Allocation m_allocation;
 	vk::DeviceSize	m_size;
+	void*			m_mapped;
 };
 } // namespace veng
 
