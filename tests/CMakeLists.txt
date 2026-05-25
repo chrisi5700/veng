@@ -61,6 +61,10 @@ target_link_libraries(ManagerTests PRIVATE veng_managers veng_resources Catch2::
 add_executable(RasterTriangleTests nodes/RasterTriangleTests.cpp)
 target_link_libraries(RasterTriangleTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# L4/L5 slice proof — offscreen driver loop: static scene caches raster, present every frame.
+add_executable(SliceDriverTests nodes/SliceDriverTests.cpp)
+target_link_libraries(SliceDriverTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
 catch_discover_tests(ShaderValidationTests)
@@ -74,4 +78,5 @@ catch_discover_tests(ResourceTests)
 catch_discover_tests(GpuBridgeTests)
 catch_discover_tests(ManagerTests)
 catch_discover_tests(RasterTriangleTests)
+catch_discover_tests(SliceDriverTests)
 

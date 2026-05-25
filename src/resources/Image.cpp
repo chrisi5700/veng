@@ -36,24 +36,37 @@ std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Dev
 		return std::unexpected(result);
 	}
 
-	const auto view_info = vk::ImageViewCreateInfo()
-							   .setImage(image)
-							   .setViewType(vk::ImageViewType::e2D)
-							   .setFormat(format)
-							   .setSubresourceRange(vk::ImageSubresourceRange()
-														.setAspectMask(aspect)
-														.setBaseMipLevel(0)
-														.setLevelCount(1)
-														.setBaseArrayLayer(0)
-														.setLayerCount(1));
-	const auto view		 = device.createImageView(view_info);
-	if (view.result != vk::Result::eSuccess)
+	// Only create a view when the usage permits one (vkCreateImageView requires a
+	// view-capable usage). A transfer-only image (e.g. a present/blit target) gets no
+	// view; `view()` then returns a null handle.
+	constexpr vk::ImageUsageFlags VIEW_USAGES =
+		vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eColorAttachment |
+		vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eInputAttachment |
+		vk::ImageUsageFlagBits::eTransientAttachment;
+
+	vk::ImageView view{};
+	if (usage & VIEW_USAGES)
 	{
-		allocator.destroyImage(image, allocation);
-		return std::unexpected(view.result);
+		const auto view_info   = vk::ImageViewCreateInfo()
+									 .setImage(image)
+									 .setViewType(vk::ImageViewType::e2D)
+									 .setFormat(format)
+									 .setSubresourceRange(vk::ImageSubresourceRange()
+															  .setAspectMask(aspect)
+															  .setBaseMipLevel(0)
+															  .setLevelCount(1)
+															  .setBaseArrayLayer(0)
+															  .setLayerCount(1));
+		const auto view_result = device.createImageView(view_info);
+		if (view_result.result != vk::Result::eSuccess)
+		{
+			allocator.destroyImage(image, allocation);
+			return std::unexpected(view_result.result);
+		}
+		view = view_result.value;
 	}
 
-	return Image(allocator, device, image, allocation, view.value, format, extent);
+	return Image(allocator, device, image, allocation, view, format, extent);
 }
 
 Image::Image(vma::Allocator allocator, vk::Device device, vk::Image image, vma::Allocation allocation,

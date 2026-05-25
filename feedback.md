@@ -83,6 +83,34 @@ swapchain-source-as-clock is the one input deliberately dirty every frame.
 
 ---
 
+## Review context (2026-05-25, pass 15) — Step 4a: the first rendered triangle
+
+- **M9 fix committed** (was uncommitted last pass; now in commit `861c8b7`). Confirmed
+  resolved + tested.
+- **Step 4a (`RasterTriangleNode`) reviewed → clean, no bugs.** A real `GpuNode` draws a
+  triangle via `GraphicsPipelineBuilder` + dynamic rendering into a persistent scene
+  `Image` it (re)creates from `ScreenSize`. The GPU code is correct: layout barriers
+  (UNDEFINED→COLOR with `srcAccess=None`, COLOR→TRANSFER_SRC write→read), proper
+  `beginRendering`/`endRendering`, dynamic viewport+scissor, `draw(3)` for the
+  SV_VertexID triangle; the cross-frame layout settles in TRANSFER_SRC for the blit. The
+  CCW-math/CW-in-y-down cull gotcha was found and fixed (`cullMode=eNone`). **Verified
+  75/75 on-GPU — the center pixel is red over a black corner (first pixels drawn).**
+- **Two forward watch items (not current bugs — single-frame today; they bite at Step 5
+  when frames-in-flight lands):**
+  1. **Resize × frames-in-flight (design §6).** The node recreates the scene `Image`
+     **in place** (`m_scene = std::move(new)`), destroying the old one. With N frames in
+     flight, a resize on frame K could free an image a still-in-flight frame K-1's blit
+     is reading → GPU UAF. §6 prescribes rendering into a *fresh ring slot*; the driver
+     (Step 5) must ring-buffer the target or gate resize on retirement.
+  2. **Scene-`Image` is node-owned, not a graph `Data`.** The node's output edge is a
+     pure signaling token (`changed_at` bumped; value unused); the actual `Image` is
+     reached via `scene()`. The present/blit node (Step 4b) will need it by concrete
+     reference, not a `Data` edge — watch the coupling vs the design's "scene target is a
+     cacheable `Data` the present node depends on" (§L4).
+- **Deferred findings unchanged** (M5, M6, M8, L1–L4, L7).
+
+---
+
 ## Review context (2026-05-25, pass 14) — Step 3 managers reviewed; M9 already fixed
 
 - **M9 RESOLVED (fast).** Flagged pass 13; the loop fixed it within the cycle.
@@ -337,7 +365,10 @@ machinery. Not a bug — code works — but it's the kind of inconsistency that 
   graph-driven GPU work runs and reads back correctly.
 - **Step 3 part 1 managers (iter 13) reviewed: clean.** `SyncManager` (timeline-per-queue)
   and `CommandManager` (per-(slot,thread,queue) pools, sync2 barriers, correct
-  mutex-aware move) are solid; per-thread pool isolation tested. Suite **74/74 on-GPU**.
+  mutex-aware move) are solid; per-thread pool isolation tested.
+- **Step 4a `RasterTriangleNode` (iter 14) reviewed: clean — the engine's first rendered
+  frame.** Correct dynamic-rendering raster (barriers, viewport/scissor, cull fix) into a
+  persistent scene `Image`; on-GPU readback confirms the triangle. Suite **75/75 on-GPU**.
   The loop commits per-iteration on `reactive-engine` and turned M9 around within a cycle.
 - The temporal feature is now correct end-to-end: the `needs_refresh()` hook is minimal
   and regression-free, and the reset baseline (`last_run_revision()`) is documented as

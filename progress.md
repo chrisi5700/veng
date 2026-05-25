@@ -5,6 +5,72 @@
 
 ---
 
+## Iteration 15 — 2026-05-25 — Steps 4b/5/6 (offscreen): the caching thesis, PROVEN
+
+The headline milestone. The reactive rendering thesis from `design.md §1` —
+**render only what changed** — now runs and is asserted end to end (offscreen).
+
+### What landed
+
+- **Swapchain source** — a `ValueData<std::uint64_t>` "acquire clock" the driver bumps
+  every frame, so it is dirty every frame (the one deliberately-per-frame input).
+- **`veng::nodes::PresentNode`** (`GpuNode`) — depends on **both** the scene token
+  **and** the swapchain source; copies the cached scene-color target into the frame's
+  acquired image (`vkCmdCopyImage`; a real swapchain of differing size/format would
+  `vkCmdBlitImage`). Tracks `record_count()`. Honors the **wiring rule**: the raster
+  subgraph depends only on `ScreenSize`, never on the swapchain source.
+- **Offscreen driver loop** (in the slice test): each frame bumps the swapchain source,
+  records the demanded plan into a `CommandManager` buffer via a `GpuExecContext`,
+  submits, waits, and recycles — `acquire → set(swapchain) → frame(present_sink) →
+  submit`, exactly the §L5 cadence minus the real surface.
+
+### Proof (on-GPU)
+
+`tests/nodes/SliceDriverTests.cpp` (2 cases / 80 assertions):
+- **The caching thesis:** frame 0 plans `[raster, present]`; frames 1–5 (static scene)
+  plan **only `[present]`** — the raster node is **not in the plan** (runs 0 times) while
+  `present.record_count()` climbs to 6. A `ScreenSize` change puts the raster node back
+  in the plan. *Render only what changed, asserted via node-execution counts.*
+- **Present correctness:** read the acquired target back — the **triangle reached it**
+  (center red over a clear corner), so the present path actually composites.
+
+**77/77 ctest green** (was 75; +2). Clean under the `llm-vcpkg` ASan/UBSan gate, **no
+validation errors**.
+
+### Bug fixed along the way
+
+`Image::create` unconditionally created a view; a transfer-only present target has no
+view-capable usage → `vkCreateImageView` VUID error. Now the view is created only when
+the usage permits one (sampled/storage/attachment); transfer-only images get a null
+view. Cleaner wrapper + validation-clean.
+
+### State of the vertical slice
+
+Steps 1–4a, 4b, 5 (offscreen), 6 are **done and proven**. The engine demand-drives GPU
+work, caches the expensive render, and re-presents the cached result every frame — the
+whole point of the design. What remains for "a window showing a triangle":
+
+1. **Real windowed `SwapchainManager`** over vk-bootstrap (`acquire`/`present`/`rebuild`
+   + binary semaphores) — the only piece that needs a display; swaps in for the
+   offscreen target + the `OffscreenDriver`'s `set(swapchain)`.
+2. **Extract a formal `Driver`/`FrameLoop`** (the loop is test-embodied today) with
+   **frames-in-flight** (rotating targets, per-slot `CommandManager::reset_frame`,
+   `SyncManager` timelines) — where **M8**'s frames-in-flight contract and the
+   `SyncManager::next_value` serialization note go live.
+
+After that the deferred findings (M5, M6, M8, L1–L7) can resume per the directive — the
+slice is essentially complete.
+
+### Where to continue (next iteration)
+
+Extract the **`Driver`/`FrameLoop`** (L5) from the test loop with frames-in-flight
+bookkeeping (rotating present targets + `reset_frame(slot)` gated on a retired fence/
+timeline), and have it free graph resources before `Context` (the ownership rule). Then
+the windowed `SwapchainManager` as the on-screen adapter. The caching proof already
+guards the reactive behavior the driver must preserve.
+
+---
+
 ## Iteration 14 — 2026-05-25 — M9 fix + Step 4a: the first rendered triangle
 
 ### M9 (slice finding from pass 13) — GpuNode's unchecked cast — **FIXED**
