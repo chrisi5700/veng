@@ -46,8 +46,16 @@ struct AllocatorCreationError
 	explicit(false) operator vk::Result() const { return result; }
 };
 
+// Raised when a window surface could not be created from the provided factory, or the
+// selected graphics queue family cannot present to it.
+struct SurfaceCreationError
+{
+	vk::Result		result;
+	explicit(false) operator vk::Result() const { return result; }
+};
+
 using ContextCreationError =
 	ResultVariant<InstanceCreationError, DebugUtilsMessengerEXTCreationError, PhysicalDeviceCreationError,
-				  NoQueueFamilyError, DeviceCreationError, AllocatorCreationError>;
+				  NoQueueFamilyError, DeviceCreationError, AllocatorCreationError, SurfaceCreationError>;
 
 #endif // VENG_CONTEXTERRORS_HPP

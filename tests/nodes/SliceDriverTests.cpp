@@ -1,26 +1,27 @@
 //
 // L4/L5 slice proof (design.md §1, §L4, §L5): the reactive rendering thesis, offscreen.
-// A ScreenSize source -> RasterTriangleNode -> scene token; a PresentNode depends on
-// BOTH the scene token AND a swapchain *source* dirtied every frame. A minimal driver
-// loop bumps the swapchain source and runs frame(present_sink) each iteration.
+// A ScreenSize source -> RasterTriangleNode -> scene ImageData; a BlitNode blits that
+// into a destination ImageData (the offscreen stand-in for a swapchain image) that is
+// dirtied every frame. A minimal driver loop re-feeds the destination and runs
+// frame(blit_sink) each iteration.
 //
-// The assertion is the whole point: with a static scene, the present/blit runs every
-// frame but the raster node runs 0 extra times (cached); a ScreenSize change re-runs
-// the raster node. The wiring rule (scene must not depend on the swapchain source) is
-// what makes this hold.
+// The assertion is the whole point: with a static scene, the blit runs every frame but
+// the raster node runs 0 extra times (cached); a ScreenSize change re-runs the raster
+// node. The wiring rule (scene must not depend on the per-frame destination) is what
+// makes this hold.
 //
 
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <utility>
 #include <veng/context/Context.hpp>
 #include <veng/gpu/GpuExecContext.hpp>
+#include <veng/gpu/ImageRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/managers/CommandManager.hpp>
-#include <veng/nodes/PresentNode.hpp>
+#include <veng/nodes/BlitNode.hpp>
 #include <veng/nodes/RasterTriangleNode.hpp>
 #include <veng/pipelines/GraphicsPipeline.hpp>
 #include <veng/rendergraph/Graph.hpp>
@@ -62,7 +63,7 @@ constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
 constexpr std::uint32_t SIDE  = 64;
 } // namespace
 
-TEST_CASE("a static scene caches the raster node while present/blit runs every frame", "[nodes][slice][driver]")
+TEST_CASE("a static scene caches the raster node while the blit runs every frame", "[nodes][slice][driver]")
 {
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto			 ctx	= make_context();
@@ -78,49 +79,48 @@ TEST_CASE("a static scene caches the raster node while present/blit runs every f
 			.build(ctx);
 	REQUIRE(pipeline.has_value());
 
-	// The acquired present target (offscreen stand-in for a swapchain image).
+	// The blit destination (offscreen stand-in for a swapchain image).
 	auto target = veng::Image::create(ctx.allocator(), device, vk::Extent2D{SIDE, SIDE}, COLOR,
 									  vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc);
 	REQUIRE(target.has_value());
+	const veng::gpu::ImageRef target_ref{.image = target->image(), .extent = {SIDE, SIDE}, .format = COLOR};
 
-	// Graph: ScreenSize -> raster -> scene token; present depends on scene token + swapchain source.
+	// Graph: ScreenSize -> raster -> scene image; blit depends on the scene image + a
+	// destination image fed in (and re-dirtied) every frame.
 	Graph			 graph;
-	auto			 screen		   = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
-	auto			 swapchain	   = graph.add_source<std::uint64_t>(0); // dirtied every frame (the "acquire" clock)
-	const DataHandle scene_token   = graph.add(std::make_unique<ValueData<int>>(0));
-	const DataHandle present_token = graph.add(std::make_unique<ValueData<int>>(0));
+	auto			 screen		 = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 dst		 = graph.add_source<veng::gpu::ImageRef>(target_ref); // re-fed each frame
+	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
+	const DataHandle presented_image =
+		graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 
-	auto  raster	 = std::make_unique<veng::nodes::RasterTriangleNode>(std::move(pipeline.value()), COLOR,
-																		 static_cast<DataHandle>(screen), scene_token);
-	auto* raster_ptr = raster.get();
+	auto raster =
+		std::make_unique<veng::nodes::RasterTriangleNode>(std::move(pipeline.value()), COLOR, screen, scene_image);
+	auto*			 raster_ptr	 = raster.get();
 	const NodeHandle raster_node = graph.add(std::move(raster));
-	graph.set_producer(scene_token, raster_node);
+	graph.set_producer(scene_image, raster_node);
 
-	auto  present	  = std::make_unique<veng::nodes::PresentNode>(*raster_ptr, target.value(), scene_token,
-																   static_cast<DataHandle>(swapchain), present_token);
-	auto* present_ptr = present.get();
-	const NodeHandle present_node = graph.add(std::move(present));
-	graph.set_producer(present_token, present_node);
-
-	auto* swapchain_data = dynamic_cast<ValueData<std::uint64_t>*>(graph.get_data(static_cast<DataHandle>(swapchain)));
-	REQUIRE(swapchain_data != nullptr);
+	auto			 blit	   = std::make_unique<veng::nodes::BlitNode>(scene_image, dst, presented_image,
+																		 vk::ImageLayout::eTransferSrcOptimal);
+	auto*			 blit_ptr  = blit.get();
+	const NodeHandle blit_node = graph.add(std::move(blit));
+	graph.set_producer(presented_image, blit_node);
 
 	veng::CommandManager commands(ctx);
 	const auto			 fence = device.createFence({});
 	REQUIRE(fence.result == vk::Result::eSuccess);
 	InlineScheduler scheduler;
 
-	std::uint64_t acquire = 0;
-	// One driver frame: bump the swapchain source, record the demanded plan into a
-	// command buffer via a GpuExecContext, submit, wait, recycle. Returns the plan.
+	// One driver frame: re-feed the destination (dirty every frame), record the demanded
+	// plan into a command buffer via a GpuExecContext, submit, wait, recycle.
 	const auto render_frame = [&]() -> FramePlan
 	{
-		swapchain_data->set(++acquire);
+		graph.set(dst, target_ref);
 		auto cmd = commands.begin(veng::QueueKind::Graphics, 0);
 		REQUIRE(cmd.has_value());
 
 		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, *cmd, 0);
-		const std::array		  sinks{present_token};
+		const std::array		  sinks{presented_image};
 		auto					  plan = graph.resolve(sinks);
 		REQUIRE(plan.has_value());
 		graph.execute(*plan, scheduler, gpu_ctx);
@@ -134,37 +134,36 @@ TEST_CASE("a static scene caches the raster node while present/blit runs every f
 		return std::move(plan.value());
 	};
 
-	// Frame 0 is cold: the raster node and the present node both run.
+	// Frame 0 is cold: the raster node and the blit node both run.
 	const FramePlan cold = render_frame();
 	REQUIRE(plan_contains(cold, raster_node));
-	REQUIRE(plan_contains(cold, present_node));
+	REQUIRE(plan_contains(cold, blit_node));
 	REQUIRE(raster_ptr->scene() != nullptr);
 
-	// Frames 1..5 with a static scene: ONLY the present node runs each frame; the
-	// expensive raster render is cached (this is the design's headline claim).
+	// Frames 1..5 with a static scene: ONLY the blit node runs each frame; the expensive
+	// raster render is cached (this is the design's headline claim).
 	constexpr int STATIC_FRAMES = 5;
 	for (int i = 0; i < STATIC_FRAMES; ++i)
 	{
 		const FramePlan plan = render_frame();
 		REQUIRE(plan.size() == 1);
-		REQUIRE(plan_contains(plan, present_node));
+		REQUIRE(plan_contains(plan, blit_node));
 		REQUIRE_FALSE(plan_contains(plan, raster_node)); // raster cached — runs 0 times
 	}
-	REQUIRE(present_ptr->record_count() == 1 + STATIC_FRAMES); // present ran every frame
+	REQUIRE(blit_ptr->record_count() == 1 + STATIC_FRAMES); // blit ran every frame
 
 	// A scene-source change (resize) re-invalidates the raster node: it returns to the
 	// plan. (Resolve-only — executing would need a matching-size target.)
-	swapchain_data->set(++acquire);
-	dynamic_cast<ValueData<vk::Extent2D>*>(graph.get_data(static_cast<DataHandle>(screen)))
-		->set(vk::Extent2D{SIDE * 2, SIDE * 2});
-	const auto after_resize = graph.resolve(std::array{present_token});
+	graph.set(dst, target_ref);
+	graph.set(screen, vk::Extent2D{SIDE * 2, SIDE * 2});
+	const auto after_resize = graph.resolve(std::array{presented_image});
 	REQUIRE(after_resize.has_value());
 	REQUIRE(plan_contains(*after_resize, raster_node)); // resize re-runs the raster node
 
 	device.destroyFence(fence.value);
 }
 
-TEST_CASE("the presented target receives the rendered triangle", "[nodes][slice][present]")
+TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice][present]")
 {
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto			 ctx	= make_context();
@@ -183,7 +182,8 @@ TEST_CASE("the presented target receives the rendered triangle", "[nodes][slice]
 	auto target = veng::Image::create(ctx.allocator(), device, vk::Extent2D{SIDE, SIDE}, COLOR,
 									  vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc);
 	REQUIRE(target.has_value());
-	auto staging =
+	const veng::gpu::ImageRef target_ref{.image = target->image(), .extent = {SIDE, SIDE}, .format = COLOR};
+	auto					  staging =
 		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
@@ -191,16 +191,16 @@ TEST_CASE("the presented target receives the rendered triangle", "[nodes][slice]
 
 	Graph			 graph;
 	auto			 screen		 = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
-	auto			 swapchain	 = graph.add_source<std::uint64_t>(0);
-	const DataHandle scene_token = graph.add(std::make_unique<ValueData<int>>(0));
-	const DataHandle present_tok = graph.add(std::make_unique<ValueData<int>>(0));
-	auto  raster	 = std::make_unique<veng::nodes::RasterTriangleNode>(std::move(pipeline.value()), COLOR,
-																		 static_cast<DataHandle>(screen), scene_token);
-	auto* raster_ptr = raster.get();
-	graph.set_producer(scene_token, graph.add(std::move(raster)));
-	auto present = std::make_unique<veng::nodes::PresentNode>(*raster_ptr, target.value(), scene_token,
-															  static_cast<DataHandle>(swapchain), present_tok);
-	graph.set_producer(present_tok, graph.add(std::move(present)));
+	auto			 dst		 = graph.add_source<veng::gpu::ImageRef>(target_ref);
+	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
+	const DataHandle presented_image =
+		graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
+	auto raster =
+		std::make_unique<veng::nodes::RasterTriangleNode>(std::move(pipeline.value()), COLOR, screen, scene_image);
+	graph.set_producer(scene_image, graph.add(std::move(raster)));
+	auto blit = std::make_unique<veng::nodes::BlitNode>(scene_image, dst, presented_image,
+														vk::ImageLayout::eTransferSrcOptimal);
+	graph.set_producer(presented_image, graph.add(std::move(blit)));
 
 	const auto pool =
 		device.createCommandPool(vk::CommandPoolCreateInfo().setQueueFamilyIndex(ctx.queue_indices().graphics));
@@ -216,10 +216,10 @@ TEST_CASE("the presented target receives the rendered triangle", "[nodes][slice]
 
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, cmd, 0);
 	InlineScheduler			  scheduler;
-	const std::array		  sinks{present_tok};
+	const std::array		  sinks{presented_image};
 	const auto				  plan = graph.resolve(sinks);
 	REQUIRE(plan.has_value());
-	graph.execute(*plan, scheduler, gpu_ctx); // raster -> present (copy) into target, left TRANSFER_SRC
+	graph.execute(*plan, scheduler, gpu_ctx); // raster -> blit into target, left TRANSFER_SRC
 
 	const auto layers = vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);
 	cmd.copyImageToBuffer(
@@ -239,7 +239,7 @@ TEST_CASE("the presented target receives the rendered triangle", "[nodes][slice]
 
 	const auto* pixels = static_cast<const std::uint8_t*>(staging->mapped());
 	const auto	at	   = [&](std::uint32_t x, std::uint32_t y) { return (static_cast<std::size_t>(y) * SIDE + x) * 4; };
-	REQUIRE(pixels[at(SIDE / 2, SIDE / 2) + 0] == 255); // center: triangle reached the presented target
+	REQUIRE(pixels[at(SIDE / 2, SIDE / 2) + 0] == 255); // center: triangle reached the blit destination
 	REQUIRE(pixels[at(0, 0) + 0] == 0);					// corner: clear
 
 	device.destroyFence(fence.value);

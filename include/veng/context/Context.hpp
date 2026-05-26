@@ -5,6 +5,8 @@
 #ifndef VENG_CONTEXT_HPP
 #define VENG_CONTEXT_HPP
 
+#include <functional>
+#include <span>
 #include <string_view>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
@@ -26,7 +28,13 @@ struct QueueFamilyIndices
 class Context
 {
 	 public:
-	static std::expected<Context, ContextCreationError> create(std::string_view title);
+	/// Create the Vulkan context. With no extra arguments this is a headless context
+	/// (all existing tests). For windowed rendering, pass the window's required instance
+	/// extensions and a `surface_factory` that creates a VkSurfaceKHR from the instance;
+	/// the Context then owns that surface and verifies the graphics queue can present.
+	static std::expected<Context, ContextCreationError> create(
+		std::string_view title, std::span<const char* const> instance_extensions = {},
+		const std::function<VkSurfaceKHR(VkInstance)>& surface_factory = {});
 	~Context();
 
 	Context(const Context&)			   = delete;
@@ -41,11 +49,13 @@ class Context
 	[[nodiscard]] vk::Queue			 graphics_queue() const { return m_graphics_queue; }
 	[[nodiscard]] vk::Queue			 compute_queue() const { return m_compute_queue; }
 	[[nodiscard]] vma::Allocator	 allocator() const { return m_allocator; }
+	/// The window surface, or a null handle for a headless context.
+	[[nodiscard]] vk::SurfaceKHR surface() const { return m_surface; }
 
 	 private:
 	Context(vk::Instance m_instance, vk::DebugUtilsMessengerEXT m_debug_messenger, vk::PhysicalDevice m_physical_device,
 			QueueFamilyIndices m_queue_indices, vk::Device m_device, vk::Queue m_graphics_queue,
-			vk::Queue m_compute_queue, vma::Allocator m_allocator)
+			vk::Queue m_compute_queue, vma::Allocator m_allocator, vk::SurfaceKHR m_surface)
 		: m_instance(m_instance)
 		, m_debug_messenger(m_debug_messenger)
 		, m_physical_device(m_physical_device)
@@ -54,6 +64,7 @@ class Context
 		, m_graphics_queue(m_graphics_queue)
 		, m_compute_queue(m_compute_queue)
 		, m_allocator(m_allocator)
+		, m_surface(m_surface)
 	{
 		Logger::instance().info("VulkanContext VK_HEADER_VERSION: {}", VK_HEADER_VERSION);
 		Logger::instance().info("VulkanContext initialized");
@@ -66,6 +77,7 @@ class Context
 	vk::Queue				   m_graphics_queue;
 	vk::Queue				   m_compute_queue;
 	vma::Allocator			   m_allocator;
+	vk::SurfaceKHR			   m_surface; // null for headless; owned, destroyed before the instance
 };
 } // namespace veng
 #endif // VENG_CONTEXT_HPP

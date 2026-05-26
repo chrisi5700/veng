@@ -20,6 +20,7 @@
 #include <mutex>
 #include <thread>
 #include <tuple>
+#include <vector>
 #include <veng/context/Context.hpp>
 #include <veng/managers/QueueKind.hpp>
 #include <vulkan/vulkan.hpp>
@@ -39,9 +40,12 @@ class CommandManager
 	CommandManager& operator=(CommandManager&& other) noexcept;
 	~CommandManager();
 
-	/// A fresh, begun (one-time-submit) primary command buffer for `queue`/`frame_slot`
-	/// on the calling thread. Backed by a per-(queue, slot, thread) pool, so concurrent
-	/// callers never share a pool. Recycled by the next `reset_frame(frame_slot)`.
+	/// A begun (one-time-submit) primary command buffer for `queue`/`frame_slot` on the
+	/// calling thread. Backed by a per-(queue, slot, thread) pool, so concurrent callers
+	/// never share a pool. Buffers are pooled and reused: `reset_frame(frame_slot)` rewinds
+	/// the pool so the next frame re-records the same handles — calling `begin` every frame
+	/// allocates a constant, not a growing, number of command buffers. Multiple `begin`
+	/// calls within one frame (before a reset) each return a distinct buffer.
 	[[nodiscard]] std::expected<vk::CommandBuffer, vk::Result> begin(QueueKind queue, std::size_t frame_slot);
 
 	/// Recycle every command buffer in every pool belonging to `frame_slot`. Call only
@@ -58,12 +62,22 @@ class CommandManager
 	 private:
 	using PoolKey = std::tuple<std::size_t, std::thread::id, std::uint8_t>; // (slot, thread, queue)
 
+	// One Vulkan pool plus its reusable command buffers. `used` is the high-water index
+	// into `buffers` for the current frame; `reset_frame` resets it to 0 (and the pool),
+	// so handed-out handles are re-recorded next frame rather than re-allocated.
+	struct Pool
+	{
+		vk::CommandPool				   pool;
+		std::vector<vk::CommandBuffer> buffers;
+		std::size_t					   used = 0;
+	};
+
 	void destroy() noexcept;
 
-	const Context*					   m_context;
-	vk::Device						   m_device;
-	std::mutex						   m_mutex;
-	std::map<PoolKey, vk::CommandPool> m_pools;
+	const Context*			m_context;
+	vk::Device				m_device;
+	std::mutex				m_mutex;
+	std::map<PoolKey, Pool> m_pools;
 };
 } // namespace veng
 

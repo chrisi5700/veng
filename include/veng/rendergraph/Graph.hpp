@@ -78,6 +78,36 @@ class Graph
 		return TypedHandle<T>{add(std::make_unique<ValueData<T>>(std::move(initial)))};
 	}
 
+	/// Queue a typed source mutation (applied at the next frame boundary). The one place
+	/// the `ValueData<T>` downcast lives, so driver/author code mutates sources through
+	/// the compile-time-typed handle and never touches a `dynamic_cast`. A no-op if the
+	/// handle does not resolve to a `ValueData<T>` (a type mismatch the typed handle makes
+	/// unrepresentable for handles obtained from `add_source<T>`).
+	template <class T>
+	void set(TypedHandle<T> handle, T value)
+	{
+		if (auto* data = dynamic_cast<ValueData<T>*>(get_data(handle.handle)); data != nullptr)
+		{
+			data->set(std::move(value));
+		}
+	}
+
+	/// Write a source's value *immediately*, for the frame currently being executed —
+	/// NOT a queued, frame-boundary mutation and NOT a dirtiness pulse (it does not stamp
+	/// `changed_at`, so it never re-triggers planning next frame). This is the seam for an
+	/// execute-time resource the driver provides *after* planning has decided to render —
+	/// e.g. the just-acquired swapchain image handed to the present/blit. Use `set` (not
+	/// this) for reactive inputs whose change should drive recomputation. Only valid for a
+	/// source (no producer); the caller must order it before the reading node executes.
+	template <class T>
+	void set_now(TypedHandle<T> handle, T value)
+	{
+		if (auto* data = dynamic_cast<ValueData<T>*>(get_data(handle.handle)); data != nullptr)
+		{
+			static_cast<void>(data->produce(std::move(value)));
+		}
+	}
+
 	/// Add a pure CPU transform: `func` is invoked with the (const-ref) values of
 	/// `inputs` and its result becomes a new graph-owned output value.
 	template <class F, class... Args>

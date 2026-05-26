@@ -4,54 +4,63 @@
 // See PresentNode.hpp and design.md §L4.
 //
 
-#include <veng/managers/CommandManager.hpp>
+#include <veng/gpu/ImageRef.hpp>
+#include <veng/managers/QueueKind.hpp>
 #include <veng/nodes/PresentNode.hpp>
+#include <veng/rendergraph/data/Data.hpp>
 
 namespace veng::nodes
 {
-PresentNode::PresentNode(const RasterTriangleNode& scene, Image& target, graph::DataHandle scene_token,
-						 graph::DataHandle swapchain_source, graph::DataHandle output) noexcept
-	: m_scene(&scene)
-	, m_target(&target)
-	, m_inputs{scene_token, swapchain_source}
+PresentNode::PresentNode(SwapchainManager& swap, vk::Fence fence, graph::DataHandle presented_image,
+						 graph::DataHandle output) noexcept
+	: m_swap(&swap)
+	, m_fence(fence)
+	, m_input(presented_image)
 	, m_output(output)
 {
 }
 
 std::expected<bool, graph::ExecError> PresentNode::record(gpu::GpuExecContext& ctx)
 {
-	// Read the scene target fresh: a resize gives the raster node a new Image.
-	const Image* scene = m_scene->scene();
-	if (scene == nullptr)
+	const auto* presented = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));
+	if (presented == nullptr)
+	{
+		return std::unexpected(graph::ExecError::MISSING_INPUT);
+	}
+	const gpu::ImageRef image = presented->value();
+	if (!image.image || !image.acquire_wait || !image.present_signal)
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}
 
-	const vk::CommandBuffer cmd	   = ctx.command_buffer();
-	const vk::Extent2D		extent = scene->extent();
+	// Close the frame: the blit left the image in PRESENT_SRC, so all GPU work is now
+	// recorded. End the buffer and submit it — the acquire semaphore gates the blit (the
+	// swapchain image's first and only use here, a transfer), render-finished signals the
+	// presentation engine.
+	const vk::CommandBuffer cmd = ctx.command_buffer();
+	if (cmd.end() != vk::Result::eSuccess)
+	{
+		return std::unexpected(graph::ExecError::NODE_FAILED);
+	}
 
-	// Acquired target: undefined -> transfer dst (we overwrite the whole image).
-	CommandManager::image_barrier(cmd, m_target->image(), vk::ImageLayout::eUndefined,
-								  vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eTopOfPipe,
-								  vk::AccessFlagBits2::eNone, vk::PipelineStageFlagBits2::eTransfer,
-								  vk::AccessFlagBits2::eTransferWrite);
+	const vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eTransfer;
+	const auto					 submit		= vk::SubmitInfo()
+												  .setWaitSemaphores(image.acquire_wait)
+												  .setWaitDstStageMask(wait_stage)
+												  .setCommandBuffers(cmd)
+												  .setSignalSemaphores(image.present_signal);
+	if (ctx.context().graphics_queue().submit(submit, m_fence) != vk::Result::eSuccess)
+	{
+		return std::unexpected(graph::ExecError::NODE_FAILED);
+	}
 
-	// Copy the cached scene (already TRANSFER_SRC from the raster node) into it. Same
-	// size/format here, so a copy suffices; a real swapchain of differing size/format
-	// would use vkCmdBlitImage.
-	const auto layers = vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);
-	const auto region = vk::ImageCopy().setSrcSubresource(layers).setDstSubresource(layers).setExtent(
-		vk::Extent3D{extent.width, extent.height, 1});
-	cmd.copyImage(scene->image(), vk::ImageLayout::eTransferSrcOptimal, m_target->image(),
-				  vk::ImageLayout::eTransferDstOptimal, region);
-
-	// Leave the target in TRANSFER_SRC so the test (or a real present) can read/show it.
-	CommandManager::image_barrier(cmd, m_target->image(), vk::ImageLayout::eTransferDstOptimal,
-								  vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eTransfer,
-								  vk::AccessFlagBits2::eTransferWrite, vk::PipelineStageFlagBits2::eTransfer,
-								  vk::AccessFlagBits2::eTransferRead);
-
-	++m_record_count;
+	auto presented_ok = m_swap->present(ctx.context().graphics_queue(), image.index, image.present_signal);
+	if (!presented_ok.has_value())
+	{
+		return std::unexpected(graph::ExecError::NODE_FAILED);
+	}
+	m_out_of_date = presented_ok.value();
+	++m_present_count;
 	return true;
 }
 } // namespace veng::nodes

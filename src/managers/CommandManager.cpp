@@ -21,9 +21,9 @@ void CommandManager::destroy() noexcept
 	{
 		return;
 	}
-	for (const auto& [key, pool] : m_pools)
+	for (const auto& [key, slot] : m_pools)
 	{
-		m_device.destroyCommandPool(pool);
+		m_device.destroyCommandPool(slot.pool);
 	}
 	m_pools.clear();
 	m_device = nullptr;
@@ -76,19 +76,27 @@ std::expected<vk::CommandBuffer, vk::Result> CommandManager::begin(QueueKind que
 		{
 			return std::unexpected(pool.result);
 		}
-		it = m_pools.emplace(key, pool.value).first;
+		it = m_pools.emplace(key, Pool{.pool = pool.value, .buffers = {}, .used = 0}).first;
 	}
+	Pool& slot = it->second;
 
-	const auto buffers = m_device.allocateCommandBuffers(vk::CommandBufferAllocateInfo()
-															 .setCommandPool(it->second)
-															 .setLevel(vk::CommandBufferLevel::ePrimary)
-															 .setCommandBufferCount(1));
-	if (buffers.result != vk::Result::eSuccess)
+	// Reuse a buffer recorded on a previous frame (reset_frame rewinds `used`), allocating
+	// a new one only when this frame asks for more buffers than any prior frame did. The
+	// total allocated count is bounded by the per-frame high-water mark — no per-frame leak.
+	if (slot.used == slot.buffers.size())
 	{
-		return std::unexpected(buffers.result);
+		const auto buffers = m_device.allocateCommandBuffers(vk::CommandBufferAllocateInfo()
+																 .setCommandPool(slot.pool)
+																 .setLevel(vk::CommandBufferLevel::ePrimary)
+																 .setCommandBufferCount(1));
+		if (buffers.result != vk::Result::eSuccess)
+		{
+			return std::unexpected(buffers.result);
+		}
+		slot.buffers.push_back(buffers.value.front());
 	}
 
-	const vk::CommandBuffer cmd = buffers.value.front();
+	const vk::CommandBuffer cmd = slot.buffers[slot.used++];
 	if (const vk::Result begun =
 			cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
 		begun != vk::Result::eSuccess)
@@ -101,11 +109,12 @@ std::expected<vk::CommandBuffer, vk::Result> CommandManager::begin(QueueKind que
 void CommandManager::reset_frame(std::size_t frame_slot)
 {
 	const std::lock_guard lock(m_mutex);
-	for (const auto& [key, pool] : m_pools)
+	for (auto& [key, slot] : m_pools)
 	{
 		if (std::get<0>(key) == frame_slot)
 		{
-			static_cast<void>(m_device.resetCommandPool(pool));
+			static_cast<void>(m_device.resetCommandPool(slot.pool));
+			slot.used = 0; // rewind: next frame re-records the same buffers
 		}
 	}
 }

@@ -62,7 +62,9 @@ void destroy_debug_messenger(vk::Instance instance, vk::DebugUtilsMessengerEXT m
 }
 } // namespace
 
-std::expected<Context, ContextCreationError> Context::create(std::string_view title)
+std::expected<Context, ContextCreationError> Context::create(
+	std::string_view title, std::span<const char* const> instance_extensions,
+	const std::function<VkSurfaceKHR(VkInstance)>& surface_factory)
 {
 	// vk-bootstrap owns the handles until we hand them to Context; these guards
 	// tear them back down if we bail out part-way through.
@@ -96,14 +98,32 @@ std::expected<Context, ContextCreationError> Context::create(std::string_view ti
 	// NUL-terminated, so copy into a local std::string first (M1).
 	const std::string	 app_name{title};
 	vkb::InstanceBuilder builder;
-	auto				 instance_ret = builder.set_app_name(app_name.c_str())
-											.set_engine_name("No Engine")
-											.require_api_version(1, 3, 0)
-											.set_headless()
-											.enable_extension(VK_KHR_SURFACE_EXTENSION_NAME)
-											.request_validation_layers(ENABLE_VALIDATION)
-											.set_debug_callback(debug_callback)
-											.build();
+	builder.set_app_name(app_name.c_str())
+		.set_engine_name("No Engine")
+		.require_api_version(1, 3, 0)
+		.request_validation_layers(ENABLE_VALIDATION)
+		.set_debug_callback(debug_callback);
+	// vk-bootstrap's automatic windowing-extension detection is gated behind compile-time
+	// VK_USE_PLATFORM_* defines that the vcpkg build does not set, so its non-headless
+	// path always reports windowing_extensions_not_present even when the loader has the
+	// surface extensions. Keep it "headless" (which only skips that broken auto-check) and
+	// enable the surface extensions we actually need explicitly instead.
+	builder.set_headless();
+	if (instance_extensions.empty())
+	{
+		// No window: just enough to keep the swapchain device extension valid if one is
+		// attached later (the headless default, e.g. unit tests).
+		builder.enable_extension(VK_KHR_SURFACE_EXTENSION_NAME);
+	}
+	else
+	{
+		// Windowed: enable exactly the platform surface extensions the window needs.
+		for (const char* extension : instance_extensions)
+		{
+			builder.enable_extension(extension);
+		}
+	}
+	auto instance_ret = builder.build();
 	if (!instance_ret)
 	{
 		Logger::instance().error("Failed to create Vulkan instance: {}", instance_ret.error().message());
@@ -116,6 +136,35 @@ std::expected<Context, ContextCreationError> Context::create(std::string_view ti
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(vkb_instance.fp_vkGetInstanceProcAddr);
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(vk::Instance(vkb_instance.instance));
 	Logger::instance().debug("Created Vulkan instance");
+
+	// Create the window surface (windowed contexts only) now that the instance exists.
+	// The Context owns it and destroys it before the instance; this guard reclaims it if
+	// we bail out before then.
+	vk::SurfaceKHR surface{};
+	struct SurfaceGuard
+	{
+		vk::Instance   instance;
+		vk::SurfaceKHR surface{};
+		bool		   armed = false;
+		~SurfaceGuard()
+		{
+			if (armed && surface)
+			{
+				instance.destroySurfaceKHR(surface);
+			}
+		}
+	} surface_guard{vk::Instance(vkb_instance.instance)};
+	if (surface_factory)
+	{
+		surface = vk::SurfaceKHR(surface_factory(vkb_instance.instance));
+		if (!surface)
+		{
+			Logger::instance().error("Surface factory returned a null surface");
+			return std::unexpected(SurfaceCreationError{vk::Result::eErrorSurfaceLostKHR});
+		}
+		surface_guard.surface = surface;
+		surface_guard.armed	  = true;
+	}
 
 	// We request the swapchain extension and defer the surface so a window can be
 	// attached later, without requiring one to exist during device selection.
@@ -180,6 +229,23 @@ std::expected<Context, ContextCreationError> Context::create(std::string_view ti
 	QueueFamilyIndices indices{graphics_index.value(), compute_index.value()};
 	Logger::instance().debug("Queue families - graphics: {}, compute: {}", indices.graphics, indices.compute);
 
+	// With a deferred surface, vk-bootstrap could not verify present support during
+	// device selection — confirm the graphics queue family can present to the surface.
+	if (surface)
+	{
+		const auto support =
+			vk::PhysicalDevice(vkb_physical.physical_device).getSurfaceSupportKHR(indices.graphics, surface);
+		if (support.result != vk::Result::eSuccess)
+		{
+			return std::unexpected(SurfaceCreationError{support.result});
+		}
+		if (support.value != vk::True)
+		{
+			Logger::instance().error("Graphics queue family {} cannot present to the surface", indices.graphics);
+			return std::unexpected(SurfaceCreationError{vk::Result::eErrorInitializationFailed});
+		}
+	}
+
 	// VMA fetches its entry points from the same dynamic dispatcher.
 	vma::VulkanFunctions	 functions = vma::functionsFromDispatcher(VULKAN_HPP_DEFAULT_DISPATCHER);
 	vma::AllocatorCreateInfo allocator_info{};
@@ -200,6 +266,7 @@ std::expected<Context, ContextCreationError> Context::create(std::string_view ti
 	// Ownership transfers to Context, which destroys everything in its destructor.
 	instance_guard.armed = false;
 	device_guard.armed	 = false;
+	surface_guard.armed	 = false;
 	return Context{vk::Instance(vkb_instance.instance),
 				   vk::DebugUtilsMessengerEXT(vkb_instance.debug_messenger),
 				   vk::PhysicalDevice(vkb_physical.physical_device),
@@ -207,7 +274,8 @@ std::expected<Context, ContextCreationError> Context::create(std::string_view ti
 				   vk::Device(vkb_device.device),
 				   vk::Queue(graphics_queue.value()),
 				   vk::Queue(compute_queue.value()),
-				   allocator};
+				   allocator,
+				   surface};
 }
 
 Context::~Context()
@@ -222,6 +290,12 @@ Context::~Context()
 	{
 		m_device.destroy();
 		Logger::instance().trace("Destroyed logical device");
+	}
+
+	if (m_surface)
+	{
+		m_instance.destroySurfaceKHR(m_surface);
+		Logger::instance().trace("Destroyed surface");
 	}
 
 	destroy_debug_messenger(m_instance, m_debug_messenger);
@@ -241,6 +315,7 @@ Context::Context(Context&& other) noexcept
 	, m_graphics_queue(other.m_graphics_queue)
 	, m_compute_queue(other.m_compute_queue)
 	, m_allocator(std::exchange(other.m_allocator, nullptr))
+	, m_surface(std::exchange(other.m_surface, nullptr))
 {
 }
 Context& Context::operator=(Context&& other) noexcept
@@ -257,6 +332,10 @@ Context& Context::operator=(Context&& other) noexcept
 	{
 		m_device.destroy();
 	}
+	if (m_surface)
+	{
+		m_instance.destroySurfaceKHR(m_surface);
+	}
 	destroy_debug_messenger(m_instance, m_debug_messenger);
 	if (m_instance)
 	{
@@ -272,6 +351,7 @@ Context& Context::operator=(Context&& other) noexcept
 	m_graphics_queue  = other.m_graphics_queue;
 	m_compute_queue	  = other.m_compute_queue;
 	m_allocator		  = std::exchange(other.m_allocator, nullptr);
+	m_surface		  = std::exchange(other.m_surface, nullptr);
 	return *this;
 }
 

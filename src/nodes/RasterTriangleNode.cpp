@@ -6,6 +6,7 @@
 
 #include <array>
 #include <utility>
+#include <veng/gpu/ImageRef.hpp>
 #include <veng/managers/CommandManager.hpp>
 #include <veng/nodes/RasterTriangleNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
@@ -74,6 +75,12 @@ std::expected<bool, graph::ExecError> RasterTriangleNode::record(gpu::GpuExecCon
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::AccessFlagBits2::eColorAttachmentWrite,
 		vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
 
+	// Publish a ref to the rendered target (TRANSFER_SRC) on the scene edge for the blit.
+	if (auto* out = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_output)); out != nullptr)
+	{
+		(void)out->produce(gpu::ImageRef{
+			.image = m_scene->image(), .view = m_scene->view(), .extent = m_scene_extent, .format = m_color_format});
+	}
 	return true;
 }
 } // namespace veng::nodes

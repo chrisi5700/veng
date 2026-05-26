@@ -27,15 +27,15 @@ class RasterTriangleNode final : public gpu::GpuNode
 {
 	 public:
 	/// `pipeline` must have been built for `color_format` (one color attachment).
-	/// `screen_size` is a `ValueData<vk::Extent2D>` source; `output` is the node's
-	/// scene-rendered token (what the present/blit node or a test demands).
+	/// `screen_size` is a `ValueData<vk::Extent2D>` source; `output` is the scene
+	/// `ImageData` (a ref to the rendered target, left in TRANSFER_SRC) the BlitNode reads.
 	RasterTriangleNode(GraphicsPipeline pipeline, vk::Format color_format, graph::DataHandle screen_size,
 					   graph::DataHandle output) noexcept;
 
 	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return {&m_screen_size, 1}; }
 	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
 
-	/// The persistent scene-color target, or nullptr before the first render.
+	/// The persistent scene-color target, or nullptr before the first render (test lens).
 	[[nodiscard]] const Image* scene() const noexcept { return m_scene.has_value() ? &m_scene.value() : nullptr; }
 
 	 protected:

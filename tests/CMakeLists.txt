@@ -65,6 +65,10 @@ target_link_libraries(RasterTriangleTests PRIVATE veng_nodes veng_resources Catc
 add_executable(SliceDriverTests nodes/SliceDriverTests.cpp)
 target_link_libraries(SliceDriverTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# L4 cube test — depth-tested cube from a reactive angle; readback guards the MVP convention.
+add_executable(RasterCubeTests nodes/RasterCubeTests.cpp)
+target_link_libraries(RasterCubeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
 catch_discover_tests(ShaderValidationTests)
@@ -79,4 +83,5 @@ catch_discover_tests(GpuBridgeTests)
 catch_discover_tests(ManagerTests)
 catch_discover_tests(RasterTriangleTests)
 catch_discover_tests(SliceDriverTests)
+catch_discover_tests(RasterCubeTests)
 

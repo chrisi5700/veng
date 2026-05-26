@@ -1,27 +1,31 @@
 //
 // Created by chris on 5/25/26.
 //
-// L4 node — present/blit (design.md §L4 swapchain & present). Copies the cached
-// scene-color target into the frame's acquired image. It depends on BOTH the scene
-// token AND the swapchain source; only the swapchain source is dirtied each frame, so
-// this node re-runs every frame (microseconds) while the scene render stays cached.
+// L4 node — the frame terminator (design.md §L4 swapchain & present). It is the one
+// place a queue operation lives, because `vkQueuePresentKHR` is not a command that can
+// be recorded into the frame's command buffer — it must run *after* that buffer is
+// submitted. So when this node executes (last, as the graph sink) it: ends the recorded
+// command buffer, submits it (waiting on the acquire semaphore, signalling
+// render-finished), and presents. Everything upstream stays pure command-recording.
 //
-// The load-bearing wiring rule: the scene subgraph must NOT depend on the swapchain
-// source — only present does. (design.md §L4.)
+// Its single input is the written swapchain `ImageData` (BlitNode's output), which both
+// orders it after the blit and carries the acquired image index + the two present
+// semaphores. The driver only acquires and feeds that ref in; this node closes the frame.
+//
+// PRECONDITION: this must be the unique terminal node — it ends the shared command
+// buffer, so any recording node not upstream of it would be truncated.
 //
 
 #ifndef VENG_PRESENTNODE_HPP
 #define VENG_PRESENTNODE_HPP
 
-#include <array>
 #include <cstddef>
 #include <expected>
 #include <span>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
-#include <veng/nodes/RasterTriangleNode.hpp>
+#include <veng/managers/SwapchainManager.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
-#include <veng/resources/Image.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::nodes
@@ -29,28 +33,33 @@ namespace veng::nodes
 class PresentNode final : public gpu::GpuNode
 {
 	 public:
-	/// `scene` produces the cached scene-color target (read fresh each frame so a
-	/// resize is picked up). `target` is the frame's acquired image to present into
-	/// (offscreen stand-in for a swapchain image; non-owning). `scene_token` and
-	/// `swapchain_source` are this node's two inputs; `output` is the present token.
-	PresentNode(const RasterTriangleNode& scene, Image& target, graph::DataHandle scene_token,
-				graph::DataHandle swapchain_source, graph::DataHandle output) noexcept;
+	/// `swap` owns the swapchain/surface and does the present. `fence` is the per-frame
+	/// fence the submit signals (the driver waits on it before reusing the frame).
+	/// `presented_image` is the written swapchain ref to present (BlitNode's output);
+	/// `output` is the frame-done token the driver demands as the graph sink.
+	PresentNode(SwapchainManager& swap, vk::Fence fence, graph::DataHandle presented_image,
+				graph::DataHandle output) noexcept;
 
-	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return m_inputs; }
+	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return {&m_input, 1}; }
 	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
 
-	/// How many times this node has actually recorded — the lens for the caching proof.
-	[[nodiscard]] std::size_t record_count() const noexcept { return m_record_count; }
+	/// True if the last present reported the swapchain out-of-date/suboptimal — the driver
+	/// should rebuild before the next frame.
+	[[nodiscard]] bool out_of_date() const noexcept { return m_out_of_date; }
+
+	/// How many frames this node has actually closed (submitted + presented).
+	[[nodiscard]] std::size_t present_count() const noexcept { return m_present_count; }
 
 	 protected:
 	[[nodiscard]] std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override;
 
 	 private:
-	const RasterTriangleNode*		 m_scene;
-	Image*							 m_target;
-	std::array<graph::DataHandle, 2> m_inputs; // [scene_token, swapchain_source]
-	graph::DataHandle				 m_output;
-	std::size_t						 m_record_count = 0;
+	SwapchainManager* m_swap;
+	vk::Fence		  m_fence;
+	graph::DataHandle m_input;
+	graph::DataHandle m_output;
+	bool			  m_out_of_date	  = false;
+	std::size_t		  m_present_count = 0;
 };
 } // namespace veng::nodes
 

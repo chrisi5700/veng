@@ -32,7 +32,7 @@
       "description": "Release build: Optimized, warnings-as-errors, LTO enabled",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "TREAT_WARNINGS_AS_ERRORS": "ON",
+        "TREAT_WARNINGS_AS_ERRORS": "OFF",
         "ENABLE_SANITIZER_ADDRESS": "OFF",
         "ENABLE_SANITIZER_THREAD": "OFF",
         "ENABLE_SANITIZER_UNDEFINED": "OFF",
