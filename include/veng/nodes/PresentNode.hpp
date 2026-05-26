@@ -33,12 +33,12 @@ namespace veng::nodes
 class PresentNode final : public gpu::GpuNode
 {
 	 public:
-	/// `swap` owns the swapchain/surface and does the present. `fence` is the per-frame
-	/// fence the submit signals (the driver waits on it before reusing the frame).
-	/// `presented_image` is the written swapchain ref to present (BlitNode's output);
-	/// `output` is the frame-done token the driver demands as the graph sink.
-	PresentNode(SwapchainManager& swap, vk::Fence fence, graph::DataHandle presented_image,
-				graph::DataHandle output) noexcept;
+	/// `swap` owns the swapchain/surface and does the present. `presented_image` is the
+	/// written swapchain ref to present (BlitNode's output) — it carries the present
+	/// semaphores and the slot's in-flight fence that the submit signals (all managed by
+	/// the SwapchainManager). `output` is the frame-done token the driver demands as the
+	/// graph sink.
+	PresentNode(SwapchainManager& swap, graph::DataHandle presented_image, graph::DataHandle output) noexcept;
 
 	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return {&m_input, 1}; }
 	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
@@ -55,7 +55,6 @@ class PresentNode final : public gpu::GpuNode
 
 	 private:
 	SwapchainManager* m_swap;
-	vk::Fence		  m_fence;
 	graph::DataHandle m_input;
 	graph::DataHandle m_output;
 	bool			  m_out_of_date	  = false;

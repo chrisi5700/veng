@@ -65,9 +65,20 @@ target_link_libraries(RasterTriangleTests PRIVATE veng_nodes veng_resources Catc
 add_executable(SliceDriverTests nodes/SliceDriverTests.cpp)
 target_link_libraries(SliceDriverTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
-# L4 cube test — depth-tested cube from a reactive angle; readback guards the MVP convention.
-add_executable(RasterCubeTests nodes/RasterCubeTests.cpp)
-target_link_libraries(RasterCubeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+# L4 generic-graphics test — cube drawn by GraphicsNode from an MVP edge; readback guards
+# the MVP convention and the node-level caching.
+add_executable(GraphicsNodeTests nodes/GraphicsNodeTests.cpp)
+target_link_libraries(GraphicsNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
+# Real buffer-backed geometry: a MeshNode uploads vertex/index buffers an indexed
+# GraphicsNode draws — proving "actual verts" and the upload-once caching.
+add_executable(MeshNodeTests nodes/MeshNodeTests.cpp)
+target_link_libraries(MeshNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
+# Descriptor-set uniforms: a UniformNode feeds a GraphicsNode descriptor by reflected name,
+# and a new value re-invalidates the upload + draw (a reactive uniform).
+add_executable(UniformNodeTests nodes/UniformNodeTests.cpp)
+target_link_libraries(UniformNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
@@ -83,5 +94,7 @@ catch_discover_tests(GpuBridgeTests)
 catch_discover_tests(ManagerTests)
 catch_discover_tests(RasterTriangleTests)
 catch_discover_tests(SliceDriverTests)
-catch_discover_tests(RasterCubeTests)
+catch_discover_tests(GraphicsNodeTests)
+catch_discover_tests(MeshNodeTests)
+catch_discover_tests(UniformNodeTests)
 

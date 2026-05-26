@@ -75,9 +75,8 @@ target_link_libraries(veng_managers PUBLIC veng_context PRIVATE vk-bootstrap::vk
 
 # L4 nodes — concrete GPU graph nodes for the rendering slice.
 target_add_library(veng_nodes)
-target_sources(veng_nodes PRIVATE nodes/RasterTriangleNode.cpp nodes/BlitNode.cpp nodes/PresentNode.cpp
-        nodes/RasterCubeNode.cpp)
-target_link_libraries(veng_nodes PUBLIC veng_gpu veng_pipelines veng_managers)
+target_sources(veng_nodes PRIVATE nodes/BlitNode.cpp nodes/PresentNode.cpp nodes/GraphicsNode.cpp nodes/MeshNode.cpp nodes/UniformNode.cpp)
+target_link_libraries(veng_nodes PUBLIC veng_gpu veng_pipelines veng_managers veng_descriptors)
 
 # L3 Reactive Core. Deliberately Vulkan-agnostic (design.md §3): no link to the
 # Vulkan construction layers, so it builds and unit-tests without a GPU.

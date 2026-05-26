@@ -26,25 +26,31 @@
 #include <cstdint>
 #include <cstdio>
 #include <GLFW/glfw3.h> // for the GLFW_KEY_* constant used by the live pacing toggle
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <memory>
 #include <mutex>
 #include <print>
+#include <span>
 #include <thread>
 #include <utility>
+#include <vector>
 #include <veng/context/Context.hpp>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/ImageRef.hpp>
+#include <veng/gpu/MeshRef.hpp>
+#include <veng/gpu/UniformRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/managers/CommandManager.hpp>
 #include <veng/managers/QueueKind.hpp>
 #include <veng/managers/SwapchainManager.hpp>
 #include <veng/nodes/BlitNode.hpp>
+#include <veng/nodes/GraphicsNode.hpp>
+#include <veng/nodes/MeshNode.hpp>
 #include <veng/nodes/PresentNode.hpp>
-#include <veng/nodes/RasterCubeNode.hpp>
-#include <veng/pipelines/GraphicsPipeline.hpp>
+#include <veng/nodes/UniformNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/Graph.hpp>
-#include <veng/shader/Shader.hpp>
 
 #include "Window.hpp"
 
@@ -74,6 +80,59 @@ bool plan_contains(const FramePlan& plan, NodeHandle node)
 		}
 	}
 	return false;
+}
+
+// A cube vertex — must match shaders/demo/mesh.vert.slang (`float3 position; float3 color;`,
+// tightly packed, which is what Slang reflects: a 24-byte stride).
+struct Vertex
+{
+	glm::vec3 position;
+	glm::vec3 color;
+};
+
+// The cube as real geometry: 24 vertices (4 per face so each face carries its own flat
+// color) + 36 indices. The corners and per-face colors match the old SV_VertexID cube.vert,
+// so the picture is identical — only now the vertices live in a real VkBuffer.
+struct CubeMesh
+{
+	std::vector<Vertex>		   vertices;
+	std::vector<std::uint32_t> indices;
+};
+
+CubeMesh make_cube()
+{
+	constexpr std::array<glm::vec3, 8> corners{glm::vec3{-0.5F, -0.5F, -0.5F}, glm::vec3{0.5F, -0.5F, -0.5F},
+											   glm::vec3{0.5F, 0.5F, -0.5F},   glm::vec3{-0.5F, 0.5F, -0.5F},
+											   glm::vec3{-0.5F, -0.5F, 0.5F},  glm::vec3{0.5F, -0.5F, 0.5F},
+											   glm::vec3{0.5F, 0.5F, 0.5F},	   glm::vec3{-0.5F, 0.5F, 0.5F}};
+
+	// Per face: its four corners (wound for two triangles 0,1,2 / 0,2,3) and its flat color.
+	struct Face
+	{
+		std::array<std::uint32_t, 4> corner;
+		glm::vec3					 color;
+	};
+	constexpr std::array<Face, 6> faces{Face{{0, 1, 2, 3}, {1.0F, 0.25F, 0.25F}}, // front  (-z)
+										Face{{5, 4, 7, 6}, {0.25F, 1.0F, 0.35F}}, // back   (+z)
+										Face{{4, 0, 3, 7}, {0.30F, 0.45F, 1.0F}}, // left   (-x)
+										Face{{1, 5, 6, 2}, {1.0F, 0.85F, 0.25F}}, // right  (+x)
+										Face{{4, 5, 1, 0}, {1.0F, 0.35F, 1.0F}},  // bottom (-y)
+										Face{{3, 2, 6, 7}, {0.30F, 1.0F, 1.0F}}}; // top    (+y)
+
+	CubeMesh mesh;
+	for (const Face& face : faces)
+	{
+		const auto base = static_cast<std::uint32_t>(mesh.vertices.size());
+		for (const std::uint32_t corner : face.corner)
+		{
+			mesh.vertices.push_back(Vertex{.position = corners[corner], .color = face.color});
+		}
+		for (const std::uint32_t offset : {0U, 1U, 2U, 0U, 2U, 3U})
+		{
+			mesh.indices.push_back(base + offset);
+		}
+	}
+	return mesh;
 }
 } // namespace
 
@@ -105,35 +164,6 @@ int main()
 	const vk::Format	 scene_color  = swap.format();
 	constexpr vk::Format depth_format = vk::Format::eD32Sfloat;
 
-	auto vertex	  = Shader::create_shader(ctx.device(), "demo/cube.vert");
-	auto fragment = Shader::create_shader(ctx.device(), "demo/cube.frag");
-	if (!vertex.has_value() || !fragment.has_value())
-	{
-		std::println("Failed to load cube shaders");
-		return 1;
-	}
-	const std::array color_formats{scene_color};
-	auto			 pipeline =
-		GraphicsPipelineBuilder(vertex.value(), fragment.value())
-			.color_formats(color_formats)
-			.depth_format(depth_format)
-			.rasterization(vk::PolygonMode::eFill, vk::CullModeFlagBits::eNone, vk::FrontFace::eCounterClockwise)
-			.build(ctx);
-	if (!pipeline.has_value())
-	{
-		std::println("Failed to build cube pipeline: {}", to_string(pipeline.error()));
-		return 1;
-	}
-
-	const auto fence_result =
-		ctx.device().createFence(vk::FenceCreateInfo().setFlags(vk::FenceCreateFlagBits::eSignaled));
-	if (fence_result.result != vk::Result::eSuccess)
-	{
-		std::println("Failed to create fence");
-		return 1;
-	}
-	const vk::Fence fence = fence_result.value;
-
 	// --- The reactive graph, built once -------------------------------------------------
 	//   screen + angle -> cube -> scene_image
 	//   scene_image + swapchain_image (dirty each frame) -> blit -> presented_image
@@ -146,9 +176,50 @@ int main()
 	const DataHandle scene_image	 = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
 	const DataHandle presented_image = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
 	const DataHandle frame_done		 = graph.add(std::make_unique<ValueData<int>>(0));
+	const DataHandle cube_mesh		 = graph.add(std::make_unique<ValueData<gpu::MeshRef>>(gpu::MeshRef{}));
+	const DataHandle cube_tint		 = graph.add(std::make_unique<ValueData<gpu::UniformRef>>(gpu::UniformRef{}));
 
-	auto cube = std::make_unique<nodes::RasterCubeNode>(std::move(pipeline.value()), scene_color, depth_format, screen,
-														angle, scene_image);
+	// The cube's geometry is now real vertex data: a MeshNode uploads 24 vertices + 36 indices
+	// into GPU buffers once (then caches forever), publishing a MeshRef the cube node draws.
+	const CubeMesh mesh = make_cube();
+	auto mesh_node		= std::make_unique<nodes::MeshNode>(std::span<const Vertex>(mesh.vertices),
+															std::span<const std::uint32_t>(mesh.indices), cube_mesh);
+	graph.set_producer(cube_mesh, graph.add(std::move(mesh_node)));
+
+	// A global tint, uploaded into a uniform buffer by a UniformNode and bound by name into the
+	// cube node's descriptor set: the lit fragment shader multiplies each face color by it. A
+	// real descriptor-set uniform, fed declaratively as data — the user's `add_uniform`.
+	auto tint	   = graph.add_source<glm::vec4>(glm::vec4{1.0F, 0.95F, 0.85F, 1.0F}); // warm tint
+	auto tint_node = std::make_unique<nodes::UniformNode>(tint, "tint", cube_tint);
+	graph.set_producer(cube_tint, graph.add(std::move(tint_node)));
+
+	// The cube is no longer a bespoke node: a pure transform turns (angle, screen) into an
+	// MVP matrix, and a generic GraphicsNode draws the cube shaders with that MVP as a
+	// push-constant. Change the angle -> the transform recomputes -> the GraphicsNode
+	// re-renders; hold it -> both are cached. "Cube-ness" lives entirely in the shaders +
+	// this matrix edge.
+	auto mvp = graph.add_transform(
+		[](const float& spin, const vk::Extent2D& size) -> glm::mat4
+		{
+			const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
+			glm::mat4	proj   = glm::perspective(glm::radians(55.0F), aspect, 0.1F, 20.0F);
+			proj[1][1] *= -1.0F; // Vulkan y-down clip space
+			const glm::mat4 view =
+				glm::lookAt(glm::vec3(2.4F, 1.7F, 2.4F), glm::vec3(0.0F), glm::vec3(0.0F, 1.0F, 0.0F));
+			const glm::mat4 model = glm::rotate(glm::mat4(1.0F), spin, glm::normalize(glm::vec3(0.3F, 1.0F, 0.2F)));
+			return proj * view * model;
+		},
+		angle, screen);
+
+	// Buffer-backed geometry + a descriptor uniform: the mesh shader reads position + color
+	// from the vertex buffer (vs the SV_VertexID cube.vert) and the lit fragment shader tints
+	// it by the uniform; the draw count comes from the mesh, so vertex_count is 0.
+	auto cube = std::make_unique<nodes::GraphicsNode>("demo/mesh.vert", "demo/lit.frag", scene_color, depth_format, 0,
+													  screen, scene_image);
+	cube->set_mesh(cube_mesh)
+		.add_uniform(cube_tint)
+		.clear_color({0.02F, 0.02F, 0.05F, 1.0F})
+		.push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex);
 	const NodeHandle cube_node = graph.add(std::move(cube));
 	graph.set_producer(scene_image, cube_node);
 
@@ -156,7 +227,7 @@ int main()
 												  vk::ImageLayout::ePresentSrcKHR);
 	graph.set_producer(presented_image, graph.add(std::move(blit)));
 
-	auto  present	  = std::make_unique<nodes::PresentNode>(swap, fence, presented_image, frame_done);
+	auto  present	  = std::make_unique<nodes::PresentNode>(swap, presented_image, frame_done);
 	auto* present_ptr = present.get();
 	graph.set_producer(frame_done, graph.add(std::move(present)));
 
@@ -263,11 +334,8 @@ int main()
 			plan = std::move(resolved.value());
 		}
 
-		// Retire the previous frame, recycle its command pool, acquire the next image.
-		(void)device.waitForFences(fence, vk::True, UINT64_MAX);
-		(void)device.resetFences(fence);
-		commands.reset_frame(0);
-
+		// Acquire the next image; this also waits out (and resets) the slot's in-flight
+		// fence, so the previous frame has retired and the command pool is safe to recycle.
 		auto acquired = swap.acquire(0);
 		if (!acquired.has_value())
 		{
@@ -282,13 +350,15 @@ int main()
 			}
 			continue;
 		}
+		commands.reset_frame(0);
 		const SwapchainManager::Frame frame = acquired.value().value();
 		const gpu::ImageRef			  ref{.image		  = swap.image(frame.image_index),
 										  .extent		  = swap.extent(),
 										  .format		  = swap.format(),
 										  .index		  = frame.image_index,
 										  .acquire_wait	  = frame.image_available,
-										  .present_signal = frame.render_finished};
+										  .present_signal = frame.render_finished,
+										  .in_flight	  = frame.in_flight};
 
 		if (pacing == Pacing::OnDemand)
 		{
@@ -354,6 +424,5 @@ int main()
 	running.store(false);
 	writer.join();
 	(void)device.waitIdle();
-	device.destroyFence(fence);
 	return 0;
 }

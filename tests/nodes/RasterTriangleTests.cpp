@@ -1,14 +1,14 @@
 //
-// L4 slice test (design.md §L4): the engine's first rendered frame. A ScreenSize source
-// feeds a RasterTriangleNode that draws a triangle into a persistent scene-color image
-// via dynamic rendering; the graph dispatches it through a GpuExecContext, and a
-// readback proves a red triangle landed in the center over a black-cleared corner.
+// L4 slice test (design.md §L4): the engine's first rendered frame, via the generic
+// GraphicsNode. A ScreenSize source feeds a GraphicsNode (color-only, no depth) that
+// draws a triangle into its scene-color image via dynamic rendering; the graph dispatches
+// it through a GpuExecContext, and a readback proves a red triangle landed in the center
+// over a black-cleared corner. The node builds its own pipeline from the shader names.
 //
 
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <utility>
 #include <veng/context/Context.hpp>
@@ -16,11 +16,9 @@
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/managers/CommandManager.hpp>
-#include <veng/nodes/RasterTriangleNode.hpp>
-#include <veng/pipelines/GraphicsPipeline.hpp>
+#include <veng/nodes/GraphicsNode.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
-#include <veng/shader/Shader.hpp>
 
 using namespace veng::graph;
 
@@ -33,42 +31,23 @@ veng::Context make_context()
 	return std::move(result.value());
 }
 
-veng::Shader load(const veng::Context& ctx, std::string_view name)
-{
-	auto result = veng::Shader::create_shader(ctx.device(), name);
-	REQUIRE(result.has_value());
-	return std::move(result.value());
-}
-
 constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
 constexpr std::uint32_t SIDE  = 64;
 } // namespace
 
-TEST_CASE("RasterTriangleNode renders a triangle into a scene target", "[nodes][raster][slice]")
+TEST_CASE("a color-only GraphicsNode renders a triangle into a scene target", "[nodes][graphics][slice]")
 {
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto			 ctx	= make_context();
 	const vk::Device device = ctx.device();
 
-	// Pipeline from the slice triangle shaders, targeting one RGBA8 color attachment.
-	const auto		 vert = load(ctx, "tests/slice/triangle.vert");
-	const auto		 frag = load(ctx, "tests/slice/triangle.frag");
-	const std::array formats{COLOR};
-	// No culling: a single demo triangle, winding-agnostic.
-	auto pipeline =
-		veng::GraphicsPipelineBuilder(vert, frag)
-			.color_formats(formats)
-			.rasterization(vk::PolygonMode::eFill, vk::CullModeFlagBits::eNone, vk::FrontFace::eCounterClockwise)
-			.build(ctx);
-	REQUIRE(pipeline.has_value());
-
-	// Graph: ScreenSize source -> RasterTriangleNode -> scene token.
+	// Graph: ScreenSize source -> GraphicsNode (triangle shaders, no depth) -> scene image.
 	Graph			 graph;
 	auto			 screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
 	const DataHandle token	= graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
-	auto			 node	= std::make_unique<veng::nodes::RasterTriangleNode>(std::move(pipeline.value()), COLOR,
-																				static_cast<DataHandle>(screen), token);
-	auto*			 node_ptr	 = node.get();
+	auto  node = std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
+															 COLOR, vk::Format::eUndefined, 3, screen, token);
+	auto* node_ptr				 = node.get();
 	const NodeHandle node_handle = graph.add(std::move(node));
 	graph.set_producer(token, node_handle);
 

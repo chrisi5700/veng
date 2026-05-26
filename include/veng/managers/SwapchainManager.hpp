@@ -32,6 +32,7 @@ class SwapchainManager
 		std::uint32_t image_index;
 		vk::Semaphore image_available; // the submit waits on this (per frame-in-flight slot)
 		vk::Semaphore render_finished; // the submit signals, present waits (per swapchain image)
+		vk::Fence	  in_flight;	   // the submit signals this; `acquire` waited+reset it (per slot)
 	};
 
 	[[nodiscard]] static std::expected<SwapchainManager, vk::Result> create(const Context& context, vk::Extent2D extent,
@@ -47,8 +48,10 @@ class SwapchainManager
 	[[nodiscard]] vk::Format   format() const noexcept { return m_format; }
 	[[nodiscard]] vk::Image	   image(std::uint32_t index) const noexcept { return m_images[index]; }
 
-	/// Acquire the next image for `frame_slot`. A `nullopt` Frame means the swapchain is
-	/// out of date and the caller should `rebuild`.
+	/// Acquire the next image for `frame_slot`. First waits on (and resets) that slot's
+	/// in-flight fence, so the previous frame using the slot has fully retired before the
+	/// caller reuses its command pool — the caller never touches a fence itself. A `nullopt`
+	/// Frame means the swapchain is out of date and the caller should `rebuild`.
 	[[nodiscard]] std::expected<std::optional<Frame>, vk::Result> acquire(std::size_t frame_slot);
 
 	/// Present `image_index`, waiting on `wait`. Returns true if the swapchain is now
@@ -75,6 +78,7 @@ class SwapchainManager
 	vk::Extent2D			   m_extent{};
 	std::vector<vk::Semaphore> m_image_available; // size == frames_in_flight
 	std::vector<vk::Semaphore> m_render_finished; // size == image count
+	std::vector<vk::Fence>	   m_in_flight;		  // size == frames_in_flight (created signaled)
 };
 } // namespace veng
 

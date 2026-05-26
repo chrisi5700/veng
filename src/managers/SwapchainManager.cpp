@@ -45,6 +45,16 @@ std::expected<SwapchainManager, vk::Result> SwapchainManager::create(const Conte
 			return std::unexpected(semaphore.result);
 		}
 		manager.m_image_available.push_back(semaphore.value);
+
+		// Created signaled so the first acquire of each slot does not block.
+		const auto fence =
+			manager.m_device.createFence(vk::FenceCreateInfo().setFlags(vk::FenceCreateFlagBits::eSignaled));
+		if (fence.result != vk::Result::eSuccess)
+		{
+			manager.destroy();
+			return std::unexpected(fence.result);
+		}
+		manager.m_in_flight.push_back(fence.value);
 	}
 	return manager;
 }
@@ -102,17 +112,33 @@ std::expected<void, vk::Result> SwapchainManager::build_swapchain(vk::Extent2D e
 
 std::expected<std::optional<SwapchainManager::Frame>, vk::Result> SwapchainManager::acquire(std::size_t frame_slot)
 {
-	const vk::Semaphore available = m_image_available[frame_slot % m_frames_in_flight];
+	const std::size_t slot		= frame_slot % m_frames_in_flight;
+	const vk::Fence	  in_flight = m_in_flight[slot];
+
+	// Wait out the previous frame on this slot, then reset the fence for this one. Folding
+	// this into acquire is what lets the caller never see a fence: after acquire returns,
+	// the slot's command pool is safe to recycle.
+	if (m_device.waitForFences(in_flight, vk::True, UINT64_MAX) != vk::Result::eSuccess)
+	{
+		return std::unexpected(vk::Result::eErrorDeviceLost);
+	}
+
+	const vk::Semaphore available = m_image_available[slot];
 	const auto			acquired  = m_device.acquireNextImageKHR(m_swapchain, UINT64_MAX, available, nullptr);
 	if (acquired.result == vk::Result::eErrorOutOfDateKHR)
 	{
-		return std::optional<Frame>{};
+		return std::optional<Frame>{}; // leave the fence signaled; nothing was submitted
 	}
 	if (acquired.result != vk::Result::eSuccess && acquired.result != vk::Result::eSuboptimalKHR)
 	{
 		return std::unexpected(acquired.result);
 	}
-	return std::optional<Frame>{Frame{acquired.value, available, m_render_finished[acquired.value]}};
+	// Reset only once we are committed to submitting this frame (which will re-signal it).
+	if (m_device.resetFences(in_flight) != vk::Result::eSuccess)
+	{
+		return std::unexpected(vk::Result::eErrorDeviceLost);
+	}
+	return std::optional<Frame>{Frame{acquired.value, available, m_render_finished[acquired.value], in_flight}};
 }
 
 std::expected<bool, vk::Result> SwapchainManager::present(vk::Queue queue, std::uint32_t image_index,
@@ -163,8 +189,16 @@ void SwapchainManager::destroy() noexcept
 			m_device.destroySemaphore(semaphore);
 		}
 	}
+	for (const vk::Fence fence : m_in_flight)
+	{
+		if (fence)
+		{
+			m_device.destroyFence(fence);
+		}
+	}
 	m_render_finished.clear();
 	m_image_available.clear();
+	m_in_flight.clear();
 	if (m_swapchain)
 	{
 		m_device.destroySwapchainKHR(m_swapchain);
@@ -185,10 +219,12 @@ SwapchainManager::SwapchainManager(SwapchainManager&& other) noexcept
 	, m_extent(other.m_extent)
 	, m_image_available(std::move(other.m_image_available))
 	, m_render_finished(std::move(other.m_render_finished))
+	, m_in_flight(std::move(other.m_in_flight))
 {
 	other.m_images.clear();
 	other.m_image_available.clear();
 	other.m_render_finished.clear();
+	other.m_in_flight.clear();
 }
 
 SwapchainManager& SwapchainManager::operator=(SwapchainManager&& other) noexcept
@@ -207,9 +243,11 @@ SwapchainManager& SwapchainManager::operator=(SwapchainManager&& other) noexcept
 		m_extent		   = other.m_extent;
 		m_image_available  = std::move(other.m_image_available);
 		m_render_finished  = std::move(other.m_render_finished);
+		m_in_flight		   = std::move(other.m_in_flight);
 		other.m_images.clear();
 		other.m_image_available.clear();
 		other.m_render_finished.clear();
+		other.m_in_flight.clear();
 	}
 	return *this;
 }

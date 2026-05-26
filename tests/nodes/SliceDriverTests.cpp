@@ -22,12 +22,10 @@
 #include <veng/logging/Logger.hpp>
 #include <veng/managers/CommandManager.hpp>
 #include <veng/nodes/BlitNode.hpp>
-#include <veng/nodes/RasterTriangleNode.hpp>
-#include <veng/pipelines/GraphicsPipeline.hpp>
+#include <veng/nodes/GraphicsNode.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/Image.hpp>
-#include <veng/shader/Shader.hpp>
 
 using namespace veng::graph;
 
@@ -36,13 +34,6 @@ namespace
 veng::Context make_context()
 {
 	auto result = veng::Context::create("Slice Driver Test");
-	REQUIRE(result.has_value());
-	return std::move(result.value());
-}
-
-veng::Shader load(const veng::Context& ctx, std::string_view name)
-{
-	auto result = veng::Shader::create_shader(ctx.device(), name);
 	REQUIRE(result.has_value());
 	return std::move(result.value());
 }
@@ -69,16 +60,6 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	auto			 ctx	= make_context();
 	const vk::Device device = ctx.device();
 
-	const auto		 vert = load(ctx, "tests/slice/triangle.vert");
-	const auto		 frag = load(ctx, "tests/slice/triangle.frag");
-	const std::array formats{COLOR};
-	auto			 pipeline =
-		veng::GraphicsPipelineBuilder(vert, frag)
-			.color_formats(formats)
-			.rasterization(vk::PolygonMode::eFill, vk::CullModeFlagBits::eNone, vk::FrontFace::eCounterClockwise)
-			.build(ctx);
-	REQUIRE(pipeline.has_value());
-
 	// The blit destination (offscreen stand-in for a swapchain image).
 	auto target = veng::Image::create(ctx.allocator(), device, vk::Extent2D{SIDE, SIDE}, COLOR,
 									  vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc);
@@ -94,9 +75,9 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	const DataHandle presented_image =
 		graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 
-	auto raster =
-		std::make_unique<veng::nodes::RasterTriangleNode>(std::move(pipeline.value()), COLOR, screen, scene_image);
-	auto*			 raster_ptr	 = raster.get();
+	auto  raster = std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
+															   COLOR, vk::Format::eUndefined, 3, screen, scene_image);
+	auto* raster_ptr			 = raster.get();
 	const NodeHandle raster_node = graph.add(std::move(raster));
 	graph.set_producer(scene_image, raster_node);
 
@@ -169,16 +150,6 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 	auto			 ctx	= make_context();
 	const vk::Device device = ctx.device();
 
-	const auto		 vert = load(ctx, "tests/slice/triangle.vert");
-	const auto		 frag = load(ctx, "tests/slice/triangle.frag");
-	const std::array formats{COLOR};
-	auto			 pipeline =
-		veng::GraphicsPipelineBuilder(vert, frag)
-			.color_formats(formats)
-			.rasterization(vk::PolygonMode::eFill, vk::CullModeFlagBits::eNone, vk::FrontFace::eCounterClockwise)
-			.build(ctx);
-	REQUIRE(pipeline.has_value());
-
 	auto target = veng::Image::create(ctx.allocator(), device, vk::Extent2D{SIDE, SIDE}, COLOR,
 									  vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc);
 	REQUIRE(target.has_value());
@@ -195,8 +166,8 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	const DataHandle presented_image =
 		graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
-	auto raster =
-		std::make_unique<veng::nodes::RasterTriangleNode>(std::move(pipeline.value()), COLOR, screen, scene_image);
+	auto raster = std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
+															  COLOR, vk::Format::eUndefined, 3, screen, scene_image);
 	graph.set_producer(scene_image, graph.add(std::move(raster)));
 	auto blit = std::make_unique<veng::nodes::BlitNode>(scene_image, dst, presented_image,
 														vk::ImageLayout::eTransferSrcOptimal);

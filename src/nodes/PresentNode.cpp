@@ -11,10 +11,8 @@
 
 namespace veng::nodes
 {
-PresentNode::PresentNode(SwapchainManager& swap, vk::Fence fence, graph::DataHandle presented_image,
-						 graph::DataHandle output) noexcept
+PresentNode::PresentNode(SwapchainManager& swap, graph::DataHandle presented_image, graph::DataHandle output) noexcept
 	: m_swap(&swap)
-	, m_fence(fence)
 	, m_input(presented_image)
 	, m_output(output)
 {
@@ -28,7 +26,7 @@ std::expected<bool, graph::ExecError> PresentNode::record(gpu::GpuExecContext& c
 		return std::unexpected(graph::ExecError::MISSING_INPUT);
 	}
 	const gpu::ImageRef image = presented->value();
-	if (!image.image || !image.acquire_wait || !image.present_signal)
+	if (!image.image || !image.acquire_wait || !image.present_signal || !image.in_flight)
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}
@@ -49,7 +47,7 @@ std::expected<bool, graph::ExecError> PresentNode::record(gpu::GpuExecContext& c
 												  .setWaitDstStageMask(wait_stage)
 												  .setCommandBuffers(cmd)
 												  .setSignalSemaphores(image.present_signal);
-	if (ctx.context().graphics_queue().submit(submit, m_fence) != vk::Result::eSuccess)
+	if (ctx.context().graphics_queue().submit(submit, image.in_flight) != vk::Result::eSuccess)
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}

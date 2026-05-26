@@ -31,13 +31,15 @@ struct ImageRef
 	vk::Format	  format = vk::Format::eUndefined;
 
 	// Swapchain images only (0 / null for an offscreen target). `index` is the acquired
-	// image index `present` needs; the two semaphores are this frame's present handoff,
-	// carried as data so the PresentNode is fully driven by the graph (no per-frame
-	// setter): the submit waits on `acquire_wait` and signals `present_signal`, which the
-	// presentation engine then waits on.
+	// image index `present` needs; the rest is this frame's present handoff, carried as
+	// data so the PresentNode is fully driven by the graph (no per-frame setter): the
+	// submit waits on `acquire_wait`, signals `present_signal` (which the presentation
+	// engine waits on), and signals `in_flight` (which the swapchain's next acquire of this
+	// slot waits on). All three are owned/managed by the SwapchainManager.
 	std::uint32_t index = 0;
 	vk::Semaphore acquire_wait{};	// image_available
 	vk::Semaphore present_signal{}; // render_finished
+	vk::Fence	  in_flight{};		// the slot's frame-in-flight fence
 
 	// No operator== on purpose — see the file header.
 };
