@@ -94,6 +94,10 @@ target_link_libraries(SampledImageTests PRIVATE veng_nodes veng_resources Catch2
 add_executable(MultiDrawTests nodes/MultiDrawTests.cpp)
 target_link_libraries(MultiDrawTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# N-buffering integration — two frames in flight render into distinct pooled target copies.
+add_executable(NBufferingTests nodes/NBufferingTests.cpp)
+target_link_libraries(NBufferingTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
 catch_discover_tests(ShaderValidationTests)
@@ -114,4 +118,5 @@ catch_discover_tests(MeshNodeTests)
 catch_discover_tests(UniformNodeTests)
 catch_discover_tests(SampledImageTests)
 catch_discover_tests(MultiDrawTests)
+catch_discover_tests(NBufferingTests)
 
