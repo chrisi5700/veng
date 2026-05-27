@@ -49,6 +49,10 @@ target_link_libraries(DescriptorAllocatorTests PRIVATE veng_descriptors Catch2::
 add_executable(ResourceTests resources/ResourceTests.cpp)
 target_link_libraries(ResourceTests PRIVATE veng_resources Catch2::Catch2WithMain)
 
+# L1.5 — the versioned, N-buffered ResourcePool's reuse + retention logic (N-buffering core).
+add_executable(ResourcePoolTests resources/ResourcePoolTests.cpp)
+target_link_libraries(ResourcePoolTests PRIVATE veng_resources Catch2::Catch2WithMain)
+
 # GPU bridge tests — GpuExecContext/GpuNode seam, command recorded + executed on-GPU.
 add_executable(GpuBridgeTests gpu/GpuBridgeTests.cpp)
 target_link_libraries(GpuBridgeTests PRIVATE veng_gpu Catch2::Catch2WithMain)
@@ -80,6 +84,16 @@ target_link_libraries(MeshNodeTests PRIVATE veng_nodes veng_resources Catch2::Ca
 add_executable(UniformNodeTests nodes/UniformNodeTests.cpp)
 target_link_libraries(UniformNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# One pass sampling another's output: the sampled-image descriptor path + the demand cascade
+# when a sampled source is rebound (the basis of the multi-pass outline effect).
+add_executable(SampledImageTests nodes/SampledImageTests.cpp)
+target_link_libraries(SampledImageTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
+# Pass/Draw split — one GraphicsNode hosts several draws (two meshes, per-draw model matrices)
+# into one target; readback proves both draws landed with their own mesh + push constant.
+add_executable(MultiDrawTests nodes/MultiDrawTests.cpp)
+target_link_libraries(MultiDrawTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
 catch_discover_tests(ShaderValidationTests)
@@ -90,6 +104,7 @@ catch_discover_tests(ComputePipelineTests)
 catch_discover_tests(GraphicsPipelineTests)
 catch_discover_tests(DescriptorAllocatorTests)
 catch_discover_tests(ResourceTests)
+catch_discover_tests(ResourcePoolTests)
 catch_discover_tests(GpuBridgeTests)
 catch_discover_tests(ManagerTests)
 catch_discover_tests(RasterTriangleTests)
@@ -97,4 +112,6 @@ catch_discover_tests(SliceDriverTests)
 catch_discover_tests(GraphicsNodeTests)
 catch_discover_tests(MeshNodeTests)
 catch_discover_tests(UniformNodeTests)
+catch_discover_tests(SampledImageTests)
+catch_discover_tests(MultiDrawTests)
 

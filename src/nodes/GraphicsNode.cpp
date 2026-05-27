@@ -30,6 +30,14 @@ GraphicsNode::GraphicsNode(std::string vertex_shader, std::string fragment_shade
 {
 }
 
+GraphicsNode::~GraphicsNode()
+{
+	if (m_device && m_sampler)
+	{
+		m_device.destroySampler(m_sampler);
+	}
+}
+
 std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& ctx)
 {
 	const bool has_depth = m_depth_format != vk::Format::eUndefined;
@@ -60,17 +68,38 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		}
 		m_pipeline = std::move(pipeline.value());
 
-		// Remember each descriptor's binding by its reflected name, so add_uniform edges can
-		// be matched to a binding by name (the pipeline owns only the merged layout, not the
-		// names). Same merge as the pipeline builder: both stages, keyed by name.
+		// Remember each descriptor by its reflected name (binding + type), so add_uniform /
+		// add_sampled_image edges can be matched to a binding by name and written with the
+		// right kind (the pipeline owns only the merged layout, not the names). Same merge as
+		// the pipeline builder: both stages, keyed by name.
 		for (const DescriptorInfo& info : vert.value().get_descriptor_infos())
 		{
-			m_binding_by_name[info.name] = static_cast<std::uint32_t>(info.binding);
+			m_descriptors_by_name[info.name] = info;
 		}
 		for (const DescriptorInfo& info : frag.value().get_descriptor_infos())
 		{
-			m_binding_by_name[info.name] = static_cast<std::uint32_t>(info.binding);
+			m_descriptors_by_name[info.name] = info;
 		}
+	}
+
+	// A node that samples images needs a sampler; create one lazily (linear, clamp-to-edge —
+	// the right default for post-process passes reading a full-screen texture). Owned here and
+	// freed in the destructor; m_device is captured for that.
+	if (!m_sampled_images.empty() && !m_sampler)
+	{
+		m_device		   = ctx.device();
+		const auto info	   = vk::SamplerCreateInfo()
+								 .setMagFilter(vk::Filter::eLinear)
+								 .setMinFilter(vk::Filter::eLinear)
+								 .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+								 .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+								 .setAddressModeW(vk::SamplerAddressMode::eClampToEdge);
+		const auto sampler = ctx.device().createSampler(info);
+		if (sampler.result != vk::Result::eSuccess)
+		{
+			return std::unexpected(graph::ExecError::NODE_FAILED);
+		}
+		m_sampler = sampler.value;
 	}
 
 	const auto* size = dynamic_cast<graph::ValueData<vk::Extent2D>*>(ctx.data(m_inputs[0]));
@@ -89,7 +118,8 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	if (!m_color.has_value() || m_extent.width != extent.width || m_extent.height != extent.height)
 	{
 		auto color = Image::create(ctx.allocator(), ctx.device(), extent, m_color_format,
-								   vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc);
+								   vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc |
+									   vk::ImageUsageFlagBits::eSampled); // eSampled: the output may feed a later pass
 		if (!color.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -153,25 +183,17 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		0, vk::Viewport(0.0F, 0.0F, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0F, 1.0F));
 	cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
 
-	for (const PushBinding& push : m_push_constants)
+	// Descriptors: write the uniform-buffer + sampled-image edges into a set at their
+	// name-matched bindings (plus the node's sampler at every reflected SamplerState), then
+	// bind it. A uniform-only node writes the set once and reuses it (uniform buffers are
+	// persistent; m_bound_buffers catches a rare handle change). A node with sampled images
+	// rewrites every record (the bound views can change — a rebind, a resize), resetting +
+	// reallocating its pool — safe because the prior frame using the set has retired by the
+	// time this node re-records (frames-in-flight = 1, acquire waits the fence).
+	if (!m_uniforms.empty() || !m_sampled_images.empty())
 	{
-		if (const void* bytes = push.read(ctx); bytes != nullptr)
-		{
-			cmd.pushConstants<std::byte>(
-				m_pipeline->layout(), push.stage, push.offset,
-				vk::ArrayProxy<const std::byte>(push.size, static_cast<const std::byte*>(bytes)));
-		}
-	}
-
-	// Uniform descriptors: write each add_uniform edge's buffer into a set at its
-	// name-matched binding, then bind the set. The set is built once and reused — the uniform
-	// buffers are persistent, so contents change in place; we only rebuild (and reset the
-	// pool) when a buffer *handle* changes, which is safe because the prior frame using the
-	// set has retired by the time this node re-records.
-	if (!m_uniforms.empty())
-	{
-		std::vector<gpu::UniformRef> refs;
-		refs.reserve(m_uniforms.size());
+		std::vector<gpu::UniformRef> uniform_refs;
+		uniform_refs.reserve(m_uniforms.size());
 		for (const graph::DataHandle handle : m_uniforms)
 		{
 			const auto* slot = dynamic_cast<graph::ValueData<gpu::UniformRef>*>(ctx.data(handle));
@@ -179,17 +201,17 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
 			}
-			refs.push_back(slot->value());
+			uniform_refs.push_back(slot->value());
 		}
-
 		std::vector<vk::Buffer> buffers;
-		buffers.reserve(refs.size());
-		for (const gpu::UniformRef& ref : refs)
+		buffers.reserve(uniform_refs.size());
+		for (const gpu::UniformRef& ref : uniform_refs)
 		{
 			buffers.push_back(ref.buffer);
 		}
 
-		if (!m_descriptor_set || buffers != m_bound_buffers)
+		const bool sampled = !m_sampled_images.empty();
+		if (sampled || !m_descriptor_set || buffers != m_bound_buffers)
 		{
 			if (!m_descriptors.has_value())
 			{
@@ -202,25 +224,70 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 				return std::unexpected(graph::ExecError::NODE_FAILED);
 			}
 
-			std::vector<vk::DescriptorBufferInfo> infos;
+			// Reserved so .back() addresses stay stable for the WriteDescriptorSet proxies.
+			std::vector<vk::DescriptorBufferInfo> buffer_infos;
+			std::vector<vk::DescriptorImageInfo>  image_infos;
 			std::vector<vk::WriteDescriptorSet>	  writes;
-			infos.reserve(refs.size());
-			writes.reserve(refs.size());
-			for (const gpu::UniformRef& ref : refs)
+			buffer_infos.reserve(uniform_refs.size());
+			image_infos.reserve(m_sampled_images.size() + m_descriptors_by_name.size());
+			writes.reserve(uniform_refs.size() + m_sampled_images.size() + m_descriptors_by_name.size());
+
+			for (const gpu::UniformRef& ref : uniform_refs)
 			{
-				const auto binding = m_binding_by_name.find(ref.name);
-				if (binding == m_binding_by_name.end())
+				const auto it = m_descriptors_by_name.find(ref.name);
+				if (it == m_descriptors_by_name.end())
 				{
 					return std::unexpected(graph::ExecError::NODE_FAILED); // no such reflected binding
 				}
-				infos.push_back(vk::DescriptorBufferInfo().setBuffer(ref.buffer).setOffset(0).setRange(ref.size));
+				buffer_infos.push_back(
+					vk::DescriptorBufferInfo().setBuffer(ref.buffer).setOffset(0).setRange(ref.size));
 				writes.push_back(vk::WriteDescriptorSet()
 									 .setDstSet(set.value())
-									 .setDstBinding(binding->second)
+									 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
 									 .setDstArrayElement(0)
 									 .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-									 .setBufferInfo(infos.back())); // infos is reserved -> address stable
+									 .setBufferInfo(buffer_infos.back()));
 			}
+
+			for (const SampledBinding& binding : m_sampled_images)
+			{
+				const auto* slot =
+					dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[binding.input_index]));
+				const auto it = m_descriptors_by_name.find(binding.name);
+				if (slot == nullptr)
+				{
+					return std::unexpected(graph::ExecError::MISSING_INPUT);
+				}
+				if (it == m_descriptors_by_name.end() || !slot->value().view)
+				{
+					return std::unexpected(graph::ExecError::NODE_FAILED);
+				}
+				image_infos.push_back(vk::DescriptorImageInfo()
+										  .setImageView(slot->value().view)
+										  .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal));
+				writes.push_back(vk::WriteDescriptorSet()
+									 .setDstSet(set.value())
+									 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
+									 .setDstArrayElement(0)
+									 .setDescriptorType(vk::DescriptorType::eSampledImage)
+									 .setImageInfo(image_infos.back()));
+			}
+
+			// One node-owned sampler -> every reflected SamplerState binding.
+			for (const auto& [name, info] : m_descriptors_by_name)
+			{
+				if (info.type == vk::DescriptorType::eSampler)
+				{
+					image_infos.push_back(vk::DescriptorImageInfo().setSampler(m_sampler));
+					writes.push_back(vk::WriteDescriptorSet()
+										 .setDstSet(set.value())
+										 .setDstBinding(static_cast<std::uint32_t>(info.binding))
+										 .setDstArrayElement(0)
+										 .setDescriptorType(vk::DescriptorType::eSampler)
+										 .setImageInfo(image_infos.back()));
+				}
+			}
+
 			ctx.device().updateDescriptorSets(writes, {});
 			m_descriptor_set = set.value();
 			m_bound_buffers	 = std::move(buffers);
@@ -229,40 +296,79 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_pipeline->layout(), 0, m_descriptor_set, {});
 	}
 
-	// Buffer-backed geometry (a MeshNode) when a mesh edge is bound, else the SV_VertexID
-	// draw of the constructor's vertex_count.
-	if (m_mesh.has_value())
+	// Record each draw: its push constants, then its geometry. All draws share the pipeline,
+	// target and descriptor set bound above — only the push constants and the mesh vary. A node
+	// with no configured draws falls back to a single SV_VertexID draw of vertex_count (the
+	// fullscreen / triangle case). Buffer-backed geometry (a MeshNode) is drawn indexed when the
+	// ref carries an index buffer, else a non-indexed draw of its vertex count.
+	const auto record_draw = [&](const Draw& draw) -> std::expected<void, graph::ExecError>
 	{
-		const auto* mesh_data = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(*m_mesh));
-		if (mesh_data == nullptr)
+		for (const PushBinding& push : draw.push_constants)
 		{
-			return std::unexpected(graph::ExecError::MISSING_INPUT);
+			if (const void* bytes = push.read(ctx); bytes != nullptr)
+			{
+				cmd.pushConstants<std::byte>(
+					m_pipeline->layout(), push.stage, push.offset,
+					vk::ArrayProxy<const std::byte>(push.size, static_cast<const std::byte*>(bytes)));
+			}
 		}
-		const gpu::MeshRef	 mesh	= mesh_data->value();
-		const vk::DeviceSize offset = 0;
-		cmd.bindVertexBuffers(0, mesh.vertex_buffer, offset);
-		if (mesh.index_buffer)
+		if (draw.mesh.has_value())
 		{
-			cmd.bindIndexBuffer(mesh.index_buffer, 0, mesh.index_type);
-			cmd.drawIndexed(mesh.index_count, 1, 0, 0, 0);
+			const auto* mesh_data = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(*draw.mesh));
+			if (mesh_data == nullptr)
+			{
+				return std::unexpected(graph::ExecError::MISSING_INPUT);
+			}
+			const gpu::MeshRef	 mesh	= mesh_data->value();
+			const vk::DeviceSize offset = 0;
+			cmd.bindVertexBuffers(0, mesh.vertex_buffer, offset);
+			if (mesh.index_buffer)
+			{
+				cmd.bindIndexBuffer(mesh.index_buffer, 0, mesh.index_type);
+				cmd.drawIndexed(mesh.index_count, 1, 0, 0, 0);
+			}
+			else
+			{
+				cmd.draw(mesh.vertex_count, 1, 0, 0);
+			}
 		}
 		else
 		{
-			cmd.draw(mesh.vertex_count, 1, 0, 0);
+			cmd.draw(draw.vertex_count, 1, 0, 0);
+		}
+		return {};
+	};
+
+	if (m_draws.empty())
+	{
+		if (auto drawn = record_draw(Draw{.vertex_count = m_vertex_count}); !drawn.has_value())
+		{
+			return std::unexpected(drawn.error());
 		}
 	}
 	else
 	{
-		cmd.draw(m_vertex_count, 1, 0, 0);
+		for (const Draw& draw : m_draws)
+		{
+			if (auto drawn = record_draw(draw); !drawn.has_value())
+			{
+				return std::unexpected(drawn.error());
+			}
+		}
 	}
 	cmd.endRendering();
 
+	// Leave the target in its consumer's layout: TRANSFER_SRC for a blit/readback (waited on by
+	// a transfer read), or SHADER_READ_ONLY for an output a later pass will sample (waited on by
+	// a fragment-shader sampled read — this barrier is also the cross-pass sync for that read).
+	const bool to_sampled = m_final_layout == vk::ImageLayout::eShaderReadOnlyOptimal;
 	CommandManager::image_barrier(
-		cmd, m_color->image(), vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::eTransferSrcOptimal,
+		cmd, m_color->image(), vk::ImageLayout::eColorAttachmentOptimal, m_final_layout,
 		vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::AccessFlagBits2::eColorAttachmentWrite,
-		vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
+		to_sampled ? vk::PipelineStageFlagBits2::eFragmentShader : vk::PipelineStageFlagBits2::eTransfer,
+		to_sampled ? vk::AccessFlagBits2::eShaderSampledRead : vk::AccessFlagBits2::eTransferRead);
 
-	// Publish a ref to the rendered target (TRANSFER_SRC) on the scene edge for the blit.
+	// Publish a ref to the rendered target (now in m_final_layout) on the output edge.
 	if (auto* out = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_output)); out != nullptr)
 	{
 		(void)out->produce(gpu::ImageRef{

@@ -13,9 +13,20 @@
 //
 // Geometry is either buffer-backed — `set_mesh(handle)` binds a `gpu::MeshRef` produced by
 // a MeshNode and the node draws it (indexed when the ref has an index buffer) — or, with no
-// mesh bound, a `vertex_count` draw of vertices fabricated in the shader from SV_VertexID.
+// mesh bound, a `vertex_count` draw of vertices fabricated in the shader from SV_VertexID (a
+// fullscreen post-process triangle is just `vertex_count = 3` + a fullscreen vertex shader).
+// One node can host *several* draws via `add_draw(mesh)` — they share its pipeline, target,
+// uniforms and sampled images, so N meshes land in one pass (a scene), each with its own push
+// constants (e.g. a per-object model matrix). `set_mesh`/`push_constant` are the single-draw
+// shorthand for the first such draw.
 // `add_uniform(handle)` binds a `gpu::UniformRef` (from a UniformNode) into the node's own
-// descriptor set, matched to the shader's reflected binding by name.
+// descriptor set, matched to the shader's reflected binding by name. `add_sampled_image(
+// handle, name)` binds a `gpu::ImageRef` as a sampled texture (matched the same way, with a
+// node-owned sampler) — this is what lets one pass read another's output, the basis of
+// multi-pass effects. `set_sampled_image(name, handle)` rebinds such an input at runtime: a
+// rebind that drops an upstream branch makes that branch undemanded, so it stops executing.
+// `final_layout(...)` chooses the layout the output rests in: `eTransferSrcOptimal` (default,
+// for a blit/readback) or `eShaderReadOnlyOptimal` (for an output another pass will sample).
 //
 
 #ifndef VENG_GRAPHICSNODE_HPP
@@ -30,6 +41,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <veng/descriptors/DescriptorAllocator.hpp>
 #include <veng/gpu/GpuExecContext.hpp>
@@ -38,6 +50,7 @@
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Image.hpp>
+#include <veng/shader/Shader.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::nodes
@@ -55,6 +68,14 @@ class GraphicsNode final : public gpu::GpuNode
 				 vk::Format depth_format, std::uint32_t vertex_count, graph::DataHandle screen_size,
 				 graph::DataHandle output) noexcept;
 
+	// Owns a raw vk::Sampler, so it is non-copyable and (being held in a unique_ptr and never
+	// moved) non-movable; the destructor frees the sampler.
+	GraphicsNode(const GraphicsNode&)			 = delete;
+	GraphicsNode& operator=(const GraphicsNode&) = delete;
+	GraphicsNode(GraphicsNode&&)				 = delete;
+	GraphicsNode& operator=(GraphicsNode&&)		 = delete;
+	~GraphicsNode();
+
 	/// Bind a push-constant value edge. `T` is the value type on `handle`; its bytes are
 	/// pushed at `offset` for `stage` each time the node records. The edge is a reactive
 	/// input — changing it re-renders the node. Returns *this for chaining; call before
@@ -63,15 +84,7 @@ class GraphicsNode final : public gpu::GpuNode
 	GraphicsNode& push_constant(graph::DataHandle handle, vk::ShaderStageFlags stage = vk::ShaderStageFlagBits::eVertex,
 								std::uint32_t offset = 0)
 	{
-		m_push_constants.push_back(
-			PushBinding{.stage	= stage,
-						.offset = offset,
-						.size	= static_cast<std::uint32_t>(sizeof(T)),
-						.read	= [handle](graph::ExecContext& ctx) -> const void*
-						{
-							const auto* slot = dynamic_cast<graph::ValueData<T>*>(ctx.data(handle));
-							return slot != nullptr ? static_cast<const void*>(&slot->value()) : nullptr;
-						}});
+		default_draw().push_constants.push_back(make_push<T>(handle, stage, offset));
 		m_inputs.push_back(handle); // a push-constant edge is a dirtiness input
 		return *this;
 	}
@@ -85,9 +98,57 @@ class GraphicsNode final : public gpu::GpuNode
 	/// node to the graph (it extends the input set).
 	GraphicsNode& set_mesh(graph::DataHandle handle)
 	{
-		m_mesh = handle;
+		default_draw().mesh = handle;
 		m_inputs.push_back(handle);
 		return *this;
+	}
+
+	/// Per-draw configuration returned by `add_draw`: attach push-constant edges to that one
+	/// draw (e.g. a per-object model matrix). Pass-level state (uniforms, sampled images, the
+	/// target, clear color, final layout) lives on the node and is shared by every draw.
+	class DrawConfig
+	{
+		 public:
+		/// Bind a push-constant edge to this draw only (see GraphicsNode::push_constant). The
+		/// edge is a reactive input — changing it re-renders the pass.
+		template <class T>
+		DrawConfig& push_constant(graph::DataHandle	   handle,
+								  vk::ShaderStageFlags stage  = vk::ShaderStageFlagBits::eVertex,
+								  std::uint32_t		   offset = 0)
+		{
+			m_node->m_draws[m_index].push_constants.push_back(GraphicsNode::make_push<T>(handle, stage, offset));
+			m_node->m_inputs.push_back(handle);
+			return *this;
+		}
+
+		 private:
+		friend class GraphicsNode;
+		DrawConfig(GraphicsNode* node, std::size_t index) noexcept
+			: m_node(node)
+			, m_index(index)
+		{
+		}
+		GraphicsNode* m_node;
+		std::size_t	  m_index;
+	};
+
+	/// Append a draw to this pass. With a valid `mesh` (a `ValueData<gpu::MeshRef>`, from a
+	/// MeshNode) it draws that buffer-backed geometry (indexed when the ref carries indices);
+	/// otherwise it draws `vertex_count` SV_VertexID vertices. Returns a DrawConfig to attach
+	/// this draw's push constants. Every draw shares the node's pipeline, target, uniforms and
+	/// sampled images — so this is how N meshes render into one pass, each with its own
+	/// transform. Call before adding the node to the graph (it extends the input set).
+	DrawConfig add_draw(graph::DataHandle mesh = {}, std::uint32_t vertex_count = 0)
+	{
+		Draw draw;
+		draw.vertex_count = vertex_count;
+		if (mesh.valid())
+		{
+			draw.mesh = mesh;
+			m_inputs.push_back(mesh);
+		}
+		m_draws.push_back(std::move(draw));
+		return DrawConfig{this, m_draws.size() - 1};
 	}
 
 	/// Bind a uniform edge: `handle` (a `ValueData<gpu::UniformRef>`, produced by a
@@ -99,6 +160,42 @@ class GraphicsNode final : public gpu::GpuNode
 	{
 		m_uniforms.push_back(handle);
 		m_inputs.push_back(handle);
+		return *this;
+	}
+
+	/// Bind a sampled-image edge: `handle` (a `ValueData<gpu::ImageRef>`, e.g. another pass's
+	/// output) is sampled by the shader's `Texture2D` named `name`, via a node-owned sampler
+	/// auto-bound to the shader's `SamplerState`. The source image must rest in
+	/// `eShaderReadOnlyOptimal` (its producer's `final_layout`). A reactive input — its
+	/// producer is pulled into demand. Returns *this; call before adding the node to the graph.
+	GraphicsNode& add_sampled_image(graph::DataHandle handle, std::string name)
+	{
+		m_sampled_images.push_back(SampledBinding{.input_index = m_inputs.size(), .name = std::move(name)});
+		m_inputs.push_back(handle);
+		return *this;
+	}
+
+	/// Rebind the sampled input named `name` to a new source edge at runtime (apply at a frame
+	/// boundary). Because `inputs()` is read fresh each resolve, repointing away from a branch
+	/// makes that branch undemanded — it stops executing, by design, with no explicit gate.
+	void set_sampled_image(std::string_view name, graph::DataHandle handle)
+	{
+		for (const SampledBinding& binding : m_sampled_images)
+		{
+			if (binding.name == name)
+			{
+				m_inputs[binding.input_index] = handle;
+				return;
+			}
+		}
+	}
+
+	/// The layout the output target is left in for its consumer: `eTransferSrcOptimal` (default,
+	/// for a BlitNode/readback) or `eShaderReadOnlyOptimal` (when a later pass will sample it).
+	/// Returns *this for chaining; call before adding the node to the graph.
+	GraphicsNode& final_layout(vk::ImageLayout layout) noexcept
+	{
+		m_final_layout = layout;
 		return *this;
 	}
 
@@ -128,26 +225,76 @@ class GraphicsNode final : public gpu::GpuNode
 		std::function<const void*(graph::ExecContext&)> read;
 	};
 
-	std::string						 m_vertex_shader;
-	std::string						 m_fragment_shader;
-	vk::Format						 m_color_format;
-	vk::Format						 m_depth_format; // eUndefined => no depth attachment
-	std::uint32_t					 m_vertex_count;
-	graph::DataHandle				 m_output;
-	std::vector<graph::DataHandle>	 m_inputs; // [screen_size, push-constant + mesh + uniform edges...]
-	std::vector<PushBinding>		 m_push_constants;
-	std::optional<graph::DataHandle> m_mesh;	 // buffer-backed geometry, else SV_VertexID draw
-	std::vector<graph::DataHandle>	 m_uniforms; // descriptor-bound uniform edges
-	std::array<float, 4>			 m_clear_color{0.0F, 0.0F, 0.0F, 1.0F};
-	std::optional<GraphicsPipeline>	 m_pipeline; // built lazily on first record
+	// Build a type-erased push-constant binding: it captures sizeof(T) and a reader that
+	// resolves `handle` to a ValueData<T> at record time. Shared by push_constant (first draw)
+	// and DrawConfig::push_constant (any draw).
+	template <class T>
+	static PushBinding make_push(graph::DataHandle handle, vk::ShaderStageFlags stage, std::uint32_t offset)
+	{
+		return PushBinding{.stage  = stage,
+						   .offset = offset,
+						   .size   = static_cast<std::uint32_t>(sizeof(T)),
+						   .read   = [handle](graph::ExecContext& ctx) -> const void*
+						   {
+							   const auto* slot = dynamic_cast<graph::ValueData<T>*>(ctx.data(handle));
+							   return slot != nullptr ? static_cast<const void*>(&slot->value()) : nullptr;
+						   }};
+	}
 
-	// Uniform descriptor state, populated on first record (alongside the pipeline). The set is
-	// written once and reused: the uniform buffers are persistent, so only their contents
-	// change across frames — m_bound_buffers detects the rare handle change that needs a rewrite.
-	std::map<std::string, std::uint32_t> m_binding_by_name; // reflected descriptor name -> binding
-	std::optional<DescriptorAllocator>	 m_descriptors;
-	vk::DescriptorSet					 m_descriptor_set;
-	std::vector<vk::Buffer>				 m_bound_buffers;
+	// One draw within the pass: its geometry (a mesh edge, or `vertex_count` SV_VertexID
+	// vertices) and the push constants pushed for it. Many draws share the node's pipeline,
+	// target, uniforms and sampled images.
+	struct Draw
+	{
+		std::optional<graph::DataHandle> mesh{}; // unset => SV_VertexID draw of vertex_count
+		std::uint32_t					 vertex_count = 0;
+		std::vector<PushBinding>		 push_constants{};
+	};
+
+	// The first draw, created on demand: set_mesh / push_constant configure it, so the
+	// single-draw API is just the first entry of the draw list.
+	Draw& default_draw()
+	{
+		if (m_draws.empty())
+		{
+			m_draws.push_back(Draw{.vertex_count = m_vertex_count});
+		}
+		return m_draws.front();
+	}
+
+	// A sampled-image input: its current source edge lives at m_inputs[input_index] (so a
+	// runtime rebind updates inputs() too), bound to the reflected Texture2D named `name`.
+	struct SampledBinding
+	{
+		std::size_t input_index;
+		std::string name;
+	};
+
+	std::string						m_vertex_shader;
+	std::string						m_fragment_shader;
+	vk::Format						m_color_format;
+	vk::Format						m_depth_format; // eUndefined => no depth attachment
+	std::uint32_t					m_vertex_count;
+	graph::DataHandle				m_output;
+	std::vector<graph::DataHandle>	m_inputs;	// [screen_size, push-constant + mesh + uniform + sampled edges...]
+	std::vector<Draw>				m_draws;	// >=1 draw (see default_draw): per-draw geometry + push constants
+	std::vector<graph::DataHandle>	m_uniforms; // descriptor-bound uniform-buffer edges
+	std::vector<SampledBinding>		m_sampled_images; // descriptor-bound sampled-image edges
+	std::array<float, 4>			m_clear_color{0.0F, 0.0F, 0.0F, 1.0F};
+	vk::ImageLayout					m_final_layout = vk::ImageLayout::eTransferSrcOptimal;
+	std::optional<GraphicsPipeline> m_pipeline; // built lazily on first record
+
+	// Descriptor state, populated on first record (alongside the pipeline). For a uniform-only
+	// node the set is written once and reused (uniform buffers are persistent; m_bound_buffers
+	// catches the rare handle change). A node with sampled images rewrites every record (the
+	// bound views can change — a rebind, a resize), which is cheap. The sampler is lazily
+	// created and auto-bound to every reflected SamplerState binding.
+	std::map<std::string, DescriptorInfo> m_descriptors_by_name; // reflected name -> info (binding + type)
+	std::optional<DescriptorAllocator>	  m_descriptors;
+	vk::DescriptorSet					  m_descriptor_set;
+	std::vector<vk::Buffer>				  m_bound_buffers;
+	vk::Sampler							  m_sampler; // lazily created when there are sampled images
+	vk::Device							  m_device;	 // captured to free m_sampler in the destructor
 
 	std::optional<Image> m_color;
 	std::optional<Image> m_depth;

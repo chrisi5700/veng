@@ -1,0 +1,166 @@
+//
+// See ResourcePool.hpp.
+//
+
+#include <utility>
+#include <veng/resources/ResourcePool.hpp>
+
+namespace veng
+{
+ResourcePool::ResourcePool(vk::Device device, vma::Allocator allocator, std::size_t frames_in_flight) noexcept
+	: m_device(device)
+	, m_allocator(allocator)
+	, m_frames_in_flight(static_cast<std::int64_t>(frames_in_flight == 0 ? 1 : frames_in_flight))
+{
+}
+
+void ResourcePool::destroy() noexcept
+{
+	// Image/Buffer are RAII (each owns its allocator+device handles), so clearing the copy
+	// lists frees every GPU resource regardless of this pool's own (non-owning) handles.
+	m_images.clear();
+	m_buffers.clear();
+	m_device	= nullptr;
+	m_allocator = nullptr;
+}
+
+ResourcePool::ResourcePool(ResourcePool&& other) noexcept
+	: m_device(std::exchange(other.m_device, nullptr))
+	, m_allocator(std::exchange(other.m_allocator, nullptr))
+	, m_frames_in_flight(other.m_frames_in_flight)
+	, m_frame(other.m_frame)
+	, m_images(std::move(other.m_images))
+	, m_buffers(std::move(other.m_buffers))
+{
+}
+
+ResourcePool& ResourcePool::operator=(ResourcePool&& other) noexcept
+{
+	if (this != &other)
+	{
+		destroy();
+		m_device		   = std::exchange(other.m_device, nullptr);
+		m_allocator		   = std::exchange(other.m_allocator, nullptr);
+		m_frames_in_flight = other.m_frames_in_flight;
+		m_frame			   = other.m_frame;
+		m_images		   = std::move(other.m_images);
+		m_buffers		   = std::move(other.m_buffers);
+	}
+	return *this;
+}
+
+ResourcePool::~ResourcePool()
+{
+	destroy();
+}
+
+ImageId ResourcePool::declare_image(vk::Format format, vk::ImageUsageFlags usage, vk::ImageAspectFlags aspect)
+{
+	m_images.push_back(ImageResource{.format = format, .usage = usage, .aspect = aspect});
+	return static_cast<ImageId>(m_images.size() - 1);
+}
+
+BufferId ResourcePool::declare_buffer(vk::BufferUsageFlags usage)
+{
+	m_buffers.push_back(BufferResource{.usage = usage});
+	return static_cast<BufferId>(m_buffers.size() - 1);
+}
+
+std::expected<Image*, vk::Result> ResourcePool::acquire_image(ImageId id, vk::Extent2D extent)
+{
+	ImageResource& res = m_images[id];
+
+	// A resize reallocates: the producer drives this only when its screen-size edge changed, and
+	// the driver waits the device idle on resize, so dropping the old copies is safe.
+	if (res.extent != extent)
+	{
+		res.copies.clear();
+		res.extent	= extent;
+		res.current = NONE;
+	}
+
+	// Reuse the first copy whose last touch (write OR read) is older than the in-flight window;
+	// such a copy has retired on the GPU and no in-flight frame still references it.
+	std::size_t pick = NONE;
+	for (std::size_t i = 0; i < res.copies.size(); ++i)
+	{
+		if (res.copies[i]->last_use <= retired_through())
+		{
+			pick = i;
+			break;
+		}
+	}
+	if (pick == NONE)
+	{
+		auto image = Image::create(m_allocator, m_device, extent, res.format, res.usage, res.aspect);
+		if (!image.has_value())
+		{
+			return std::unexpected(image.error());
+		}
+		res.copies.push_back(std::make_unique<Copy<Image>>(std::move(image.value())));
+		pick = res.copies.size() - 1;
+	}
+
+	res.copies[pick]->last_use = m_frame;
+	res.current				   = pick;
+	return &res.copies[pick]->resource;
+}
+
+Image* ResourcePool::read_image(ImageId id) noexcept
+{
+	ImageResource& res = m_images[id];
+	if (res.current == NONE)
+	{
+		return nullptr;
+	}
+	res.copies[res.current]->last_use = m_frame; // retain while this frame is in flight
+	return &res.copies[res.current]->resource;
+}
+
+std::expected<Buffer*, vk::Result> ResourcePool::acquire_buffer(BufferId id, vk::DeviceSize size)
+{
+	BufferResource& res = m_buffers[id];
+	if (res.size != size)
+	{
+		res.copies.clear();
+		res.size	= size;
+		res.current = NONE;
+	}
+
+	std::size_t pick = NONE;
+	for (std::size_t i = 0; i < res.copies.size(); ++i)
+	{
+		if (res.copies[i]->last_use <= retired_through())
+		{
+			pick = i;
+			break;
+		}
+	}
+	if (pick == NONE)
+	{
+		auto buffer = Buffer::create(m_allocator, size, res.usage, vma::MemoryUsage::eAuto,
+									 vma::AllocationCreateFlagBits::eMapped |
+										 vma::AllocationCreateFlagBits::eHostAccessSequentialWrite);
+		if (!buffer.has_value() || buffer->mapped() == nullptr)
+		{
+			return std::unexpected(buffer.has_value() ? vk::Result::eErrorMemoryMapFailed : buffer.error());
+		}
+		res.copies.push_back(std::make_unique<Copy<Buffer>>(std::move(buffer.value())));
+		pick = res.copies.size() - 1;
+	}
+
+	res.copies[pick]->last_use = m_frame;
+	res.current				   = pick;
+	return &res.copies[pick]->resource;
+}
+
+std::size_t ResourcePool::image_copy_count(ImageId id) const noexcept
+{
+	return m_images[id].copies.size();
+}
+
+std::size_t ResourcePool::buffer_copy_count(BufferId id) const noexcept
+{
+	return m_buffers[id].copies.size();
+}
+} // namespace veng

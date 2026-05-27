@@ -30,6 +30,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <print>
 #include <span>
 #include <thread>
@@ -51,6 +52,7 @@
 #include <veng/nodes/UniformNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/Graph.hpp>
+#include <veng/resources/Image.hpp>
 
 #include "Window.hpp"
 
@@ -134,6 +136,49 @@ CubeMesh make_cube()
 	}
 	return mesh;
 }
+
+// A 1x1 opaque-black texture left in SHADER_READ_ONLY: the composite's "ring" input while the
+// outline is OFF. Sampling black and adding it leaves the scene untouched, so disabling the
+// outline takes no shader branch — just rebinding this one input (which, being off the
+// outline branch, drops silhouette+blur out of the demanded plan entirely). Created with a
+// one-shot clear + transition.
+std::optional<Image> make_black_texture(const Context& ctx, vk::Format format)
+{
+	auto image = Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{1, 1}, format,
+							   vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst);
+	if (!image.has_value())
+	{
+		return std::nullopt;
+	}
+	const vk::Device device = ctx.device();
+	const auto		 pool =
+		device.createCommandPool(vk::CommandPoolCreateInfo().setQueueFamilyIndex(ctx.queue_indices().graphics));
+	const auto				cmds = device.allocateCommandBuffers(vk::CommandBufferAllocateInfo()
+																	 .setCommandPool(pool.value)
+																	 .setLevel(vk::CommandBufferLevel::ePrimary)
+																	 .setCommandBufferCount(1));
+	const vk::CommandBuffer cmd	 = cmds.value.front();
+	(void)cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+	CommandManager::image_barrier(cmd, image->image(), vk::ImageLayout::eUndefined,
+								  vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eTopOfPipe,
+								  vk::AccessFlagBits2::eNone, vk::PipelineStageFlagBits2::eTransfer,
+								  vk::AccessFlagBits2::eTransferWrite);
+	const auto range =
+		vk::ImageSubresourceRange().setAspectMask(vk::ImageAspectFlagBits::eColor).setLevelCount(1).setLayerCount(1);
+	cmd.clearColorImage(image->image(), vk::ImageLayout::eTransferDstOptimal,
+						vk::ClearColorValue(std::array{0.0F, 0.0F, 0.0F, 1.0F}), range);
+	CommandManager::image_barrier(cmd, image->image(), vk::ImageLayout::eTransferDstOptimal,
+								  vk::ImageLayout::eShaderReadOnlyOptimal, vk::PipelineStageFlagBits2::eTransfer,
+								  vk::AccessFlagBits2::eTransferWrite, vk::PipelineStageFlagBits2::eFragmentShader,
+								  vk::AccessFlagBits2::eShaderSampledRead);
+	(void)cmd.end();
+	const auto fence = device.createFence({});
+	(void)ctx.graphics_queue().submit(vk::SubmitInfo().setCommandBuffers(cmd), fence.value);
+	(void)device.waitForFences(fence.value, vk::True, UINT64_MAX);
+	device.destroyFence(fence.value);
+	device.destroyCommandPool(pool.value);
+	return std::move(image.value());
+}
 } // namespace
 
 int main()
@@ -164,20 +209,40 @@ int main()
 	const vk::Format	 scene_color  = swap.format();
 	constexpr vk::Format depth_format = vk::Format::eD32Sfloat;
 
+	// The composite's ring input falls back to this 1x1 black texture when the outline is off.
+	auto black = make_black_texture(ctx, scene_color);
+	if (!black.has_value())
+	{
+		std::println("Failed to create fallback texture");
+		return 1;
+	}
+	const gpu::ImageRef black_ref{
+		.image = black->image(), .view = black->view(), .extent = {1, 1}, .format = scene_color};
+
 	// --- The reactive graph, built once -------------------------------------------------
-	//   screen + angle -> cube -> scene_image
-	//   scene_image + swapchain_image (dirty each frame) -> blit -> presented_image
-	//   presented_image -> present (submit + present) -> frame_done  (the demanded sink)
+	//   screen + angle -> cube -> scene_image ----------------------------------┐
+	//   cube_mesh + mvp -> silhouette -> blur_h -> ring (the outline branch) ----┤
+	//   scene_image + (ring | black) -> composite -> outlined_image             │
+	//   outlined_image + swapchain_image (each frame) -> blit -> presented_image │
+	//   presented_image -> present (submit + present) -> frame_done  (the sink)  ┘
+	// Press O to rebind the composite's ring input between `ring_image` and `black`: with black
+	// nothing demands silhouette/blur_h/ring, so they leave the plan — the outline disables by
+	// design, not by a gate.
 	Graph graph;
 	auto  screen		  = graph.add_source<vk::Extent2D>(swap.extent());
 	auto  angle			  = graph.add_source<float>(0.0F);
 	auto  swapchain_image = graph.add_source<gpu::ImageRef>(gpu::ImageRef{});
+	auto  black_source	  = graph.add_source<gpu::ImageRef>(black_ref);
 
-	const DataHandle scene_image	 = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle presented_image = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle frame_done		 = graph.add(std::make_unique<ValueData<int>>(0));
-	const DataHandle cube_mesh		 = graph.add(std::make_unique<ValueData<gpu::MeshRef>>(gpu::MeshRef{}));
-	const DataHandle cube_tint		 = graph.add(std::make_unique<ValueData<gpu::UniformRef>>(gpu::UniformRef{}));
+	const DataHandle scene_image	  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle silhouette_image = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle blurred_h_image  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle ring_image		  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle outlined_image	  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle presented_image  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle frame_done		  = graph.add(std::make_unique<ValueData<int>>(0));
+	const DataHandle cube_mesh		  = graph.add(std::make_unique<ValueData<gpu::MeshRef>>(gpu::MeshRef{}));
+	const DataHandle cube_tint		  = graph.add(std::make_unique<ValueData<gpu::UniformRef>>(gpu::UniformRef{}));
 
 	// The cube's geometry is now real vertex data: a MeshNode uploads 24 vertices + 36 indices
 	// into GPU buffers once (then caches forever), publishing a MeshRef the cube node draws.
@@ -213,17 +278,62 @@ int main()
 
 	// Buffer-backed geometry + a descriptor uniform: the mesh shader reads position + color
 	// from the vertex buffer (vs the SV_VertexID cube.vert) and the lit fragment shader tints
-	// it by the uniform; the draw count comes from the mesh, so vertex_count is 0.
+	// it by the uniform; the draw count comes from the mesh, so vertex_count is 0. The scene is
+	// now sampled by the composite (not blitted directly), so it rests in SHADER_READ_ONLY.
 	auto cube = std::make_unique<nodes::GraphicsNode>("demo/mesh.vert", "demo/lit.frag", scene_color, depth_format, 0,
 													  screen, scene_image);
 	cube->set_mesh(cube_mesh)
 		.add_uniform(cube_tint)
 		.clear_color({0.02F, 0.02F, 0.05F, 1.0F})
+		.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal)
 		.push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex);
 	const NodeHandle cube_node = graph.add(std::move(cube));
 	graph.set_producer(scene_image, cube_node);
 
-	auto blit = std::make_unique<nodes::BlitNode>(scene_image, swapchain_image, presented_image,
+	// --- The outline branch: silhouette -> separable gaussian -> ring ----------------------
+	// 1/extent for the blur taps (in UV space), so the glow width is resolution-independent.
+	auto texel = graph.add_transform(
+		[](const vk::Extent2D& size) -> glm::vec2
+		{ return glm::vec2(1.0F / static_cast<float>(size.width), 1.0F / static_cast<float>(size.height)); }, screen);
+
+	// Silhouette: the cube mesh as a solid white mask (same MVP as the cube), left readable.
+	auto silhouette = std::make_unique<nodes::GraphicsNode>("demo/mesh.vert", "demo/silhouette.frag", scene_color,
+															vk::Format::eUndefined, 0, screen, silhouette_image);
+	silhouette->set_mesh(cube_mesh)
+		.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal)
+		.push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex);
+	const NodeHandle silhouette_node = graph.add(std::move(silhouette));
+	graph.set_producer(silhouette_image, silhouette_node);
+
+	// Horizontal gaussian of the silhouette (fullscreen pass sampling it).
+	auto blur_h = std::make_unique<nodes::GraphicsNode>("demo/fullscreen.vert", "demo/blur_h.frag", scene_color,
+														vk::Format::eUndefined, 3, screen, blurred_h_image);
+	blur_h->add_sampled_image(silhouette_image, "silhouette")
+		.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal)
+		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment);
+	const NodeHandle blur_h_node = graph.add(std::move(blur_h));
+	graph.set_producer(blurred_h_image, blur_h_node);
+
+	// Vertical gaussian + ring extraction (blurred minus sharp silhouette, tinted).
+	auto ring = std::make_unique<nodes::GraphicsNode>("demo/fullscreen.vert", "demo/ring.frag", scene_color,
+													  vk::Format::eUndefined, 3, screen, ring_image);
+	ring->add_sampled_image(blurred_h_image, "blurredH")
+		.add_sampled_image(silhouette_image, "silhouette")
+		.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal)
+		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment);
+	const NodeHandle ring_node = graph.add(std::move(ring));
+	graph.set_producer(ring_image, ring_node);
+
+	// Composite (fullscreen): scene + ring. The ring input starts on `black` (outline off) and
+	// O rebinds it to `ring_image`. Output is TRANSFER_SRC for the present blit.
+	auto composite = std::make_unique<nodes::GraphicsNode>("demo/fullscreen.vert", "demo/composite.frag", scene_color,
+														   vk::Format::eUndefined, 3, screen, outlined_image);
+	composite->add_sampled_image(scene_image, "scene").add_sampled_image(black_source, "ring");
+	auto*			 composite_ptr	= composite.get();
+	const NodeHandle composite_node = graph.add(std::move(composite));
+	graph.set_producer(outlined_image, composite_node);
+
+	auto blit = std::make_unique<nodes::BlitNode>(outlined_image, swapchain_image, presented_image,
 												  vk::ImageLayout::ePresentSrcKHR);
 	graph.set_producer(presented_image, graph.add(std::move(blit)));
 
@@ -263,10 +373,11 @@ int main()
 			}
 		});
 
-	const vk::Device device		  = ctx.device();
-	std::uint64_t	 presents	  = 0;
-	std::uint64_t	 cube_renders = 0;
-	auto			 stats_at	  = std::chrono::steady_clock::now();
+	const vk::Device device			 = ctx.device();
+	std::uint64_t	 presents		 = 0;
+	std::uint64_t	 cube_renders	 = 0;
+	std::uint64_t	 outline_renders = 0;
+	auto			 stats_at		 = std::chrono::steady_clock::now();
 
 	const auto rebuild_for_resize = [&](vk::Extent2D size)
 	{
@@ -281,6 +392,8 @@ int main()
 	};
 
 	bool space_was_down = false;
+	bool o_was_down		= false;
+	bool outline_on		= false;
 	while (!window.should_close())
 	{
 		window.poll();
@@ -295,6 +408,25 @@ int main()
 			std::fflush(stdout);
 		}
 		space_was_down = space;
+
+		// O toggles the outline. We only rebind the composite's ring input between the live ring
+		// image and the static black texture — the rest is the engine's doing: with black bound,
+		// nothing demands the silhouette/blur/ring passes, so they drop out of the plan entirely
+		// (and the additive composite emits the plain scene). Disabled by design, not by a gate.
+		const bool o_key = window.key_down(GLFW_KEY_O);
+		if (o_key && !o_was_down)
+		{
+			outline_on				  = !outline_on;
+			const DataHandle ring_src = outline_on ? ring_image : static_cast<DataHandle>(black_source);
+			{
+				const std::scoped_lock lock(graph_mutex);
+				composite_ptr->set_sampled_image("ring", ring_src);
+			}
+			wake.notify_one(); // nudge the OnDemand thread so the change shows immediately
+			std::println("\n>> outline: {}", outline_on ? "ON" : "off");
+			std::fflush(stdout);
+		}
+		o_was_down = o_key;
 
 		vk::Extent2D fb = window.framebuffer_extent();
 		if (fb.width == 0 || fb.height == 0)
@@ -403,21 +535,27 @@ int main()
 		{
 			++cube_renders;
 		}
+		if (plan_contains(plan, ring_node)) // the outline branch ran this frame
+		{
+			++outline_renders;
+		}
 
 		const auto now = std::chrono::steady_clock::now();
 		if (now - stats_at >= std::chrono::seconds(1))
 		{
 			const double seconds = std::chrono::duration<double>(now - stats_at).count();
-			std::println("[{}] present {:7.0f} fps | cube re-render {:6.0f} fps | cached {:5.1f}%",
+			std::println("[{}] present {:7.0f} fps | cube {:6.0f} fps | outline {:>3} {:6.0f} fps | cached {:5.1f}%",
 						 pacing == Pacing::Continuous ? "continuous" : "on-demand ",
 						 static_cast<double>(presents) / seconds, static_cast<double>(cube_renders) / seconds,
+						 outline_on ? "ON" : "off", static_cast<double>(outline_renders) / seconds,
 						 presents > 0
 							 ? 100.0 * static_cast<double>(presents - cube_renders) / static_cast<double>(presents)
 							 : 0.0);
 			std::fflush(stdout); // a live monitor: flush each tick rather than at exit
-			presents	 = 0;
-			cube_renders = 0;
-			stats_at	 = now;
+			presents		= 0;
+			cube_renders	= 0;
+			outline_renders = 0;
+			stats_at		= now;
 		}
 	}
 

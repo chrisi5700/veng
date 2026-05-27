@@ -57,9 +57,9 @@ target_add_library(veng_descriptors)
 target_sources(veng_descriptors PRIVATE descriptors/DescriptorAllocator.cpp)
 target_link_libraries(veng_descriptors PUBLIC veng_context)
 
-# L1 GPU resources — RAII Buffer/Image over VMA.
+# L1 GPU resources — RAII Buffer/Image over VMA, plus the versioned N-buffered ResourcePool.
 target_add_library(veng_resources)
-target_sources(veng_resources PRIVATE resources/Buffer.cpp resources/Image.cpp)
+target_sources(veng_resources PRIVATE resources/Buffer.cpp resources/Image.cpp resources/ResourcePool.cpp)
 target_link_libraries(veng_resources PUBLIC veng_context)
 
 # GPU bridge (L3 -> Vulkan seam): header-only GpuExecContext + GpuNode.
