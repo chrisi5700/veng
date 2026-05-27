@@ -19,25 +19,24 @@ std::expected<bool, graph::ExecError> UniformNode::record(gpu::GpuExecContext& c
 		return std::unexpected(graph::ExecError::MISSING_INPUT);
 	}
 
-	// Allocate the persistent host-visible uniform buffer once; thereafter just refresh its
-	// contents in place (the handle stays stable, so the consumer's descriptor set is valid).
-	if (!m_buffer.has_value())
+	// The uniform buffer is N-buffered by the pool: declare it once, then write this frame's
+	// physical copy. A new value the CPU writes therefore never stomps a buffer an in-flight
+	// frame is still reading (the previous single-buffered design was only safe at 1 in flight).
+	if (!m_declared)
 	{
-		auto buffer = Buffer::create(
-			ctx.allocator(), m_size, vk::BufferUsageFlagBits::eUniformBuffer, vma::MemoryUsage::eAuto,
-			vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessSequentialWrite);
-		if (!buffer.has_value() || buffer->mapped() == nullptr)
-		{
-			return std::unexpected(graph::ExecError::NODE_FAILED);
-		}
-		m_buffer = std::move(buffer.value());
+		m_buffer_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
+		m_declared	= true;
 	}
-
-	std::memcpy(m_buffer->mapped(), bytes, m_size);
+	auto buffer = ctx.pool().acquire_buffer(m_buffer_id, m_size);
+	if (!buffer.has_value())
+	{
+		return std::unexpected(graph::ExecError::NODE_FAILED);
+	}
+	std::memcpy(buffer.value()->mapped(), bytes, m_size);
 
 	if (auto* out = dynamic_cast<graph::ValueData<gpu::UniformRef>*>(ctx.data(m_output)); out != nullptr)
 	{
-		(void)out->produce(gpu::UniformRef{.buffer = m_buffer->buffer(), .size = m_size, .name = m_name});
+		(void)out->produce(gpu::UniformRef{.buffer = buffer.value()->buffer(), .size = m_size, .name = m_name});
 	}
 	return true;
 }

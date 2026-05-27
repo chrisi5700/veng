@@ -210,8 +210,9 @@ class GraphicsNode final : public gpu::GpuNode
 	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return m_inputs; }
 	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
 
-	/// The persistent color target, or nullptr before the first render (test lens).
-	[[nodiscard]] const Image* scene() const noexcept { return m_color.has_value() ? &m_color.value() : nullptr; }
+	/// The color target written by the most recent record (a ResourcePool copy), or nullptr
+	/// before the first render (test lens).
+	[[nodiscard]] const Image* scene() const noexcept { return m_last_color; }
 
 	 protected:
 	[[nodiscard]] std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override;
@@ -284,21 +285,24 @@ class GraphicsNode final : public gpu::GpuNode
 	vk::ImageLayout					m_final_layout = vk::ImageLayout::eTransferSrcOptimal;
 	std::optional<GraphicsPipeline> m_pipeline; // built lazily on first record
 
-	// Descriptor state, populated on first record (alongside the pipeline). For a uniform-only
-	// node the set is written once and reused (uniform buffers are persistent; m_bound_buffers
-	// catches the rare handle change). A node with sampled images rewrites every record (the
-	// bound views can change — a rebind, a resize), which is cheap. The sampler is lazily
-	// created and auto-bound to every reflected SamplerState binding.
+	// Descriptor state, populated on first record (alongside the pipeline). The set is allocated
+	// and rewritten PER frame slot (one set per in-flight frame): a slot's set was last used by
+	// the frame that previously held that slot, which has retired, so re-writing it is safe at any
+	// frames-in-flight. The sampler is lazily created and auto-bound to every reflected
+	// SamplerState binding.
 	std::map<std::string, DescriptorInfo> m_descriptors_by_name; // reflected name -> info (binding + type)
 	std::optional<DescriptorAllocator>	  m_descriptors;
-	vk::DescriptorSet					  m_descriptor_set;
-	std::vector<vk::Buffer>				  m_bound_buffers;
-	vk::Sampler							  m_sampler; // lazily created when there are sampled images
-	vk::Device							  m_device;	 // captured to free m_sampler in the destructor
+	std::vector<vk::DescriptorSet>		  m_descriptor_sets; // one per frame slot, allocated lazily
+	vk::Sampler							  m_sampler;		 // lazily created when there are sampled images
+	vk::Device							  m_device;			 // captured to free m_sampler in the destructor
 
-	std::optional<Image> m_color;
-	std::optional<Image> m_depth;
-	vk::Extent2D		 m_extent{};
+	// Targets live in the engine's ResourcePool (N-buffered), not in the node: declared once,
+	// a physical copy acquired each record. m_last_color is the copy written this record, kept
+	// for the scene() readback lens.
+	bool		 m_declared	  = false;
+	ImageId		 m_color_id	  = 0;
+	ImageId		 m_depth_id	  = 0;
+	const Image* m_last_color = nullptr;
 };
 } // namespace veng::nodes
 

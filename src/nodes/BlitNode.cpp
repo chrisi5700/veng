@@ -37,6 +37,13 @@ std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}
 
+	// Retain the pooled source copy we read while this frame is in flight (the dst is the
+	// swapchain / a test target — not pool-owned, so it carries no pool id).
+	if (source.pool_id != gpu::ImageRef::INVALID_POOL_ID)
+	{
+		ctx.pool().touch(source.pool_id);
+	}
+
 	const vk::CommandBuffer cmd = ctx.command_buffer();
 
 	// Target: undefined -> transfer dst. We overwrite the whole image, so its prior

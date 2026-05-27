@@ -22,6 +22,7 @@
 #include <veng/nodes/GraphicsNode.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
+#include <veng/resources/ResourcePool.hpp>
 
 using namespace veng::graph;
 
@@ -100,6 +101,11 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 	REQUIRE(fence.result == vk::Result::eSuccess);
 	InlineScheduler scheduler;
 
+	// One pool for the whole test (resources persist across both renders); the frame counter
+	// advances the pool's retirement window so the single-buffered copies recycle between renders.
+	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	std::uint64_t	   frame_counter = 0;
+
 	// Resolve + execute the demanded plan into a one-shot buffer, copy out_image to the staging
 	// buffer, submit and wait; returns the plan (for assertions). The center pixel is then read
 	// from `staging`.
@@ -114,7 +120,8 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 		REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 				vk::Result::eSuccess);
 
-		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, cmd, 0);
+		res_pool.begin_frame(frame_counter++);
+		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 		auto					  plan = graph.resolve(std::array{out_image});
 		REQUIRE(plan.has_value());
 		graph.execute(*plan, scheduler, gpu_ctx);

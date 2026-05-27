@@ -27,6 +27,7 @@
 #include <veng/nodes/UniformNode.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
+#include <veng/resources/ResourcePool.hpp>
 
 using namespace veng::graph;
 
@@ -117,7 +118,9 @@ TEST_CASE("a UniformNode feeds a GraphicsNode descriptor by reflected name", "[n
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, cmd, 0);
+	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	res_pool.begin_frame(0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;
 	const auto				  plan = graph.resolve(std::array{token});
 	REQUIRE(plan.has_value());

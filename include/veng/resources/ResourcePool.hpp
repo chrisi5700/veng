@@ -72,6 +72,12 @@ class ResourcePool
 	/// Stamps its last-use to the current frame so it is retained while this frame is in flight.
 	[[nodiscard]] Image* read_image(ImageId id) noexcept;
 
+	/// Retention-only consumer stamp: marks the current copy of `id` used this frame, without
+	/// needing its `Image*` (the consumer already has the view via the published `ImageRef`). A
+	/// no-op for an id never produced or out of range. This is what keeps a copy a cached
+	/// producer's output is still being sampled from being recycled out from under the reader.
+	void touch(ImageId id) noexcept;
+
 	/// Producer side for a uniform/transient buffer: a copy to write this frame (reused/allocated
 	/// like images). Consumers read the buffer through the handle the producer publishes, so there
 	/// is no buffer `read_*`; the copy is retained for the in-flight window from its write stamp.
@@ -113,8 +119,8 @@ class ResourcePool
 
 	static constexpr std::size_t NONE = ~static_cast<std::size_t>(0);
 
-	void						   destroy() noexcept;
-	[[nodiscard]] std::int64_t	   retired_through() const noexcept { return m_frame - m_frames_in_flight; }
+	void					   destroy() noexcept;
+	[[nodiscard]] std::int64_t retired_through() const noexcept { return m_frame - m_frames_in_flight; }
 
 	vk::Device					m_device;
 	vma::Allocator				m_allocator;

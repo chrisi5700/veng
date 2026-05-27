@@ -41,6 +41,13 @@ struct ImageRef
 	vk::Semaphore present_signal{}; // render_finished
 	vk::Fence	  in_flight{};		// the slot's frame-in-flight fence
 
+	// The ResourcePool resource this ref's physical image is a copy of, or INVALID for an
+	// image the pool does not own (the swapchain, a test-owned target). A consumer that reads a
+	// pooled ref must `pool.touch(pool_id)` so the copy it is sampling is retained while in
+	// flight (N-buffering); see [[pass-draw-redesign]] and ResourcePool.
+	static constexpr std::uint32_t INVALID_POOL_ID = ~0U;
+	std::uint32_t				   pool_id		   = INVALID_POOL_ID;
+
 	// No operator== on purpose — see the file header.
 };
 } // namespace veng::gpu

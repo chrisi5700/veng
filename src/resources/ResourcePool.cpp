@@ -117,6 +117,19 @@ Image* ResourcePool::read_image(ImageId id) noexcept
 	return &res.copies[res.current]->resource;
 }
 
+void ResourcePool::touch(ImageId id) noexcept
+{
+	if (id >= m_images.size())
+	{
+		return;
+	}
+	ImageResource& res = m_images[id];
+	if (res.current != NONE)
+	{
+		res.copies[res.current]->last_use = m_frame;
+	}
+}
+
 std::expected<Buffer*, vk::Result> ResourcePool::acquire_buffer(BufferId id, vk::DeviceSize size)
 {
 	BufferResource& res = m_buffers[id];

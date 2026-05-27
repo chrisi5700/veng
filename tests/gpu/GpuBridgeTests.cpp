@@ -19,6 +19,7 @@
 #include <veng/logging/Logger.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
+#include <veng/resources/ResourcePool.hpp>
 
 using veng::gpu::GpuExecContext;
 using veng::gpu::GpuNode;
@@ -108,9 +109,12 @@ TEST_CASE("a GpuNode records through the injected GpuExecContext and the command
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
+	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	res_pool.begin_frame(0);
+
 	// Drive the graph with a GPU context: resolve the plan, then execute with the
 	// injected GpuExecContext so the GpuNode records into `cmd`.
-	GpuExecContext	 gpu_ctx(graph, ctx, cmd, /*frame_slot=*/0);
+	GpuExecContext	 gpu_ctx(graph, ctx, res_pool, cmd, /*frame_slot=*/0);
 	InlineScheduler	 scheduler;
 	const std::array sinks{out};
 	const auto		 plan = graph.resolve(sinks);

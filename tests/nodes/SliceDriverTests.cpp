@@ -26,6 +26,7 @@
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/Image.hpp>
+#include <veng/resources/ResourcePool.hpp>
 
 using namespace veng::graph;
 
@@ -88,7 +89,9 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	graph.set_producer(presented_image, blit_node);
 
 	veng::CommandManager commands(ctx);
-	const auto			 fence = device.createFence({});
+	veng::ResourcePool	 res_pool(ctx.device(), ctx.allocator(), 1);
+	std::uint64_t		 frame_index = 0;
+	const auto			 fence		 = device.createFence({});
 	REQUIRE(fence.result == vk::Result::eSuccess);
 	InlineScheduler scheduler;
 
@@ -96,11 +99,12 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	// plan into a command buffer via a GpuExecContext, submit, wait, recycle.
 	const auto render_frame = [&]() -> FramePlan
 	{
+		res_pool.begin_frame(frame_index++);
 		graph.set(dst, target_ref);
 		auto cmd = commands.begin(veng::QueueKind::Graphics, 0);
 		REQUIRE(cmd.has_value());
 
-		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, *cmd, 0);
+		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, *cmd, 0);
 		const std::array		  sinks{presented_image};
 		auto					  plan = graph.resolve(sinks);
 		REQUIRE(plan.has_value());
@@ -185,7 +189,9 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, cmd, 0);
+	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	res_pool.begin_frame(0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;
 	const std::array		  sinks{presented_image};
 	const auto				  plan = graph.resolve(sinks);

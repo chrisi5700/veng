@@ -25,6 +25,7 @@
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
+#include <veng/resources/ResourcePool.hpp>
 #include <veng/shader/Shader.hpp>
 
 using namespace veng::graph;
@@ -105,7 +106,9 @@ TEST_CASE("a generic GraphicsNode draws a centered cube from an MVP edge and cac
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, cmd, 0);
+	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	res_pool.begin_frame(0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;
 	const auto				  plan = graph.resolve(std::array{token});
 	REQUIRE(plan.has_value());

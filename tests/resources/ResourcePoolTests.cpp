@@ -23,16 +23,16 @@ veng::Context make_context()
 	return std::move(result.value());
 }
 
-constexpr vk::Format	   FORMAT = vk::Format::eR8G8B8A8Unorm;
-constexpr vk::ImageUsageFlags USAGE  = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
-constexpr vk::Extent2D	   EXTENT{4, 4};
+constexpr vk::Format		  FORMAT = vk::Format::eR8G8B8A8Unorm;
+constexpr vk::ImageUsageFlags USAGE	 = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc;
+constexpr vk::Extent2D		  EXTENT{4, 4};
 } // namespace
 
 TEST_CASE("single-buffered ResourcePool reuses one copy every frame", "[resources][pool]")
 {
 	veng::Logger::instance().set_level(spdlog::level::warn);
-	auto			   ctx = make_context();
-	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 1);
+	auto				ctx = make_context();
+	veng::ResourcePool	pool(ctx.device(), ctx.allocator(), 1);
 	const veng::ImageId id = pool.declare_image(FORMAT, USAGE);
 
 	pool.begin_frame(0);
@@ -50,8 +50,8 @@ TEST_CASE("single-buffered ResourcePool reuses one copy every frame", "[resource
 
 TEST_CASE("a producer writing every frame settles at frames_in_flight copies", "[resources][pool]")
 {
-	auto			   ctx = make_context();
-	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 2);
+	auto				ctx = make_context();
+	veng::ResourcePool	pool(ctx.device(), ctx.allocator(), 2);
 	const veng::ImageId id = pool.declare_image(FORMAT, USAGE);
 
 	for (std::uint64_t frame = 0; frame < 6; ++frame)
@@ -66,8 +66,8 @@ TEST_CASE("a producer writing every frame settles at frames_in_flight copies", "
 
 TEST_CASE("a copy a consumer keeps reading is not recycled when the producer resumes", "[resources][pool]")
 {
-	auto			   ctx = make_context();
-	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 2);
+	auto				ctx = make_context();
+	veng::ResourcePool	pool(ctx.device(), ctx.allocator(), 2);
 	const veng::ImageId id = pool.declare_image(FORMAT, USAGE);
 
 	// Frame 0: the producer writes copy A; the consumer reads it.
@@ -95,8 +95,8 @@ TEST_CASE("a copy a consumer keeps reading is not recycled when the producer res
 
 TEST_CASE("a resize reallocates a logical image's copies", "[resources][pool]")
 {
-	auto			   ctx = make_context();
-	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 2);
+	auto				ctx = make_context();
+	veng::ResourcePool	pool(ctx.device(), ctx.allocator(), 2);
 	const veng::ImageId id = pool.declare_image(FORMAT, USAGE);
 
 	pool.begin_frame(0);
@@ -113,8 +113,8 @@ TEST_CASE("a resize reallocates a logical image's copies", "[resources][pool]")
 
 TEST_CASE("ResourcePool buffers reuse a copy once retired", "[resources][pool]")
 {
-	auto			   ctx = make_context();
-	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 1);
+	auto				 ctx = make_context();
+	veng::ResourcePool	 pool(ctx.device(), ctx.allocator(), 1);
 	const veng::BufferId id = pool.declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
 
 	pool.begin_frame(0);

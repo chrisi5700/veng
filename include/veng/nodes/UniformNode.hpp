@@ -69,7 +69,8 @@ class UniformNode final : public gpu::GpuNode
 	std::string										m_name;
 	vk::DeviceSize									m_size;
 	std::function<const void*(graph::ExecContext&)> m_read;
-	std::optional<Buffer>							m_buffer; // persistent, allocated on first record
+	bool											m_declared	= false; // m_buffer_id declared in the pool?
+	BufferId										m_buffer_id = 0;	 // pool-owned, N-buffered uniform buffer
 };
 } // namespace veng::nodes
 

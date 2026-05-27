@@ -15,6 +15,7 @@
 #include <veng/context/Context.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rendergraph/nodes/Node.hpp>
+#include <veng/resources/ResourcePool.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -23,10 +24,11 @@ namespace veng::gpu
 class GpuExecContext final : public graph::ExecContext
 {
 	 public:
-	GpuExecContext(const graph::Graph& graph, const Context& context, vk::CommandBuffer command_buffer,
-				   std::size_t frame_slot) noexcept
+	GpuExecContext(const graph::Graph& graph, const Context& context, ResourcePool& pool,
+				   vk::CommandBuffer command_buffer, std::size_t frame_slot) noexcept
 		: m_graph(&graph)
 		, m_context(&context)
+		, m_pool(&pool)
 		, m_command_buffer(command_buffer)
 		, m_frame_slot(frame_slot)
 	{
@@ -43,9 +45,14 @@ class GpuExecContext final : public graph::ExecContext
 	[[nodiscard]] vma::Allocator	allocator() const noexcept { return m_context->allocator(); }
 	[[nodiscard]] std::size_t		frame_slot() const noexcept { return m_frame_slot; }
 
+	// The engine's transient-resource pool: where GpuNodes get their N-buffered render targets
+	// and uniform buffers (the driver advances it once per frame via begin_frame).
+	[[nodiscard]] ResourcePool& pool() const noexcept { return *m_pool; }
+
 	 private:
 	const graph::Graph* m_graph;
 	const Context*		m_context;
+	ResourcePool*		m_pool;
 	vk::CommandBuffer	m_command_buffer;
 	std::size_t			m_frame_slot;
 };

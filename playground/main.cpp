@@ -53,6 +53,7 @@
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Image.hpp>
+#include <veng/resources/ResourcePool.hpp>
 
 #include "Window.hpp"
 
@@ -196,13 +197,19 @@ int main()
 	}
 	Context ctx = std::move(ctx_result.value());
 
-	auto swap_result = SwapchainManager::create(ctx, window.framebuffer_extent(), 1);
+	constexpr std::size_t FRAMES_IN_FLIGHT = 2; // N-buffered: CPU records frame N+1 while the GPU runs frame N
+	auto				  swap_result = SwapchainManager::create(ctx, window.framebuffer_extent(), FRAMES_IN_FLIGHT);
 	if (!swap_result.has_value())
 	{
 		std::println("Failed to create swapchain: {}", vk::to_string(swap_result.error()));
 		return 1;
 	}
 	SwapchainManager swap = std::move(swap_result.value());
+
+	// The engine-owned transient resource pool: render targets + uniform buffers are declared by
+	// the nodes and handed out per frame, N-buffered (a copy per in-flight frame) and recycled
+	// only once retired — so frame N+1 never stomps a resource frame N's GPU work is still using.
+	ResourcePool pool(ctx.device(), ctx.allocator(), FRAMES_IN_FLIGHT);
 
 	// The cube renders into a scene target of the swapchain's format, so the present blit
 	// is a straight copy; the depth target is D32.
@@ -391,9 +398,10 @@ int main()
 		return true;
 	};
 
-	bool space_was_down = false;
-	bool o_was_down		= false;
-	bool outline_on		= false;
+	std::uint64_t frame_index	 = 0;
+	bool		  space_was_down = false;
+	bool		  o_was_down	 = false;
+	bool		  outline_on	 = false;
 	while (!window.should_close())
 	{
 		window.poll();
@@ -467,8 +475,11 @@ int main()
 		}
 
 		// Acquire the next image; this also waits out (and resets) the slot's in-flight
-		// fence, so the previous frame has retired and the command pool is safe to recycle.
-		auto acquired = swap.acquire(0);
+		// fence, so the previous frame has retired and the command pool + this slot's pooled
+		// resources are safe to recycle. begin_frame advances the pool's retirement window.
+		const std::size_t slot = frame_index % FRAMES_IN_FLIGHT;
+		pool.begin_frame(frame_index);
+		auto acquired = swap.acquire(slot);
 		if (!acquired.has_value())
 		{
 			std::println("acquire failed: {}", vk::to_string(acquired.error()));
@@ -482,7 +493,7 @@ int main()
 			}
 			continue;
 		}
-		commands.reset_frame(0);
+		commands.reset_frame(slot);
 		const SwapchainManager::Frame frame = acquired.value().value();
 		const gpu::ImageRef			  ref{.image		  = swap.image(frame.image_index),
 										  .extent		  = swap.extent(),
@@ -513,7 +524,7 @@ int main()
 			plan = std::move(resolved.value());
 		}
 
-		auto cmd = commands.begin(QueueKind::Graphics, 0);
+		auto cmd = commands.begin(QueueKind::Graphics, slot);
 		if (!cmd.has_value())
 		{
 			std::println("command buffer begin failed");
@@ -522,7 +533,7 @@ int main()
 
 		// Execute records the cube + blit and, as the sink, the PresentNode ends the
 		// command buffer, submits it, and presents — all GPU/queue work lives in the graph.
-		gpu::GpuExecContext gpu(graph, ctx, cmd.value(), 0);
+		gpu::GpuExecContext gpu(graph, ctx, pool, cmd.value(), slot);
 		graph.execute(plan, scheduler, gpu);
 
 		if (present_ptr->out_of_date() && !rebuild_for_resize(window.framebuffer_extent()))
@@ -531,6 +542,7 @@ int main()
 		}
 
 		++presents;
+		++frame_index;
 		if (plan_contains(plan, cube_node))
 		{
 			++cube_renders;
