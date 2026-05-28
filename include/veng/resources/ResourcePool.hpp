@@ -20,10 +20,12 @@
 #ifndef VENG_RESOURCEPOOL_HPP
 #define VENG_RESOURCEPOOL_HPP
 
+#include <array>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <vector>
+#include <veng/gpu/ImageRef.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/Image.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
@@ -31,6 +33,8 @@
 
 namespace veng
 {
+class Context;
+
 /// Opaque, stable handle to a logical resource declared on the pool. A node declares once
 /// (lazily, on first record) and keeps the id; the physical copy behind it varies per frame.
 using ImageId  = std::uint32_t;
@@ -62,6 +66,15 @@ class ResourcePool
 	/// Declare a transient host-visible buffer (persistently mapped). Size is supplied per
 	/// `acquire_buffer`.
 	[[nodiscard]] BufferId declare_buffer(vk::BufferUsageFlags usage);
+
+	/// Declare an *immutable* image initialized to a clear color via an immediate submit on the
+	/// Context's graphics queue, transitioned to `SHADER_READ_ONLY_OPTIMAL`, and never recycled.
+	/// Returns a `gpu::ImageRef` ready to be fed as a graph source — this is the clean
+	/// replacement for hand-rolled command-pool + fence + clear sequences in user code (the leak
+	/// the old `make_black_texture` opened up).
+	[[nodiscard]] std::expected<gpu::ImageRef, vk::Result> constant_image(const Context& ctx, vk::Extent2D extent,
+																		  vk::Format		   format,
+																		  std::array<float, 4> clear);
 
 	/// Producer side: a physical copy to write this frame. Reuses a retired copy or allocates a
 	/// fresh one (and reallocates all copies if `extent` changed since last time). Marks the copy
@@ -107,7 +120,8 @@ class ResourcePool
 		vk::Extent2D		 extent{};
 		// unique_ptr so a returned Image* stays valid when the copy list grows.
 		std::vector<std::unique_ptr<Copy<Image>>> copies{};
-		std::size_t								  current = NONE;
+		std::size_t								  current	  = NONE;
+		bool									  is_constant = false; // immutable: one copy, never recycled
 	};
 	struct BufferResource
 	{

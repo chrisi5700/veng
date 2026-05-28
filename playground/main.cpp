@@ -138,48 +138,6 @@ CubeMesh make_cube()
 	return mesh;
 }
 
-// A 1x1 opaque-black texture left in SHADER_READ_ONLY: the composite's "ring" input while the
-// outline is OFF. Sampling black and adding it leaves the scene untouched, so disabling the
-// outline takes no shader branch — just rebinding this one input (which, being off the
-// outline branch, drops silhouette+blur out of the demanded plan entirely). Created with a
-// one-shot clear + transition.
-std::optional<Image> make_black_texture(const Context& ctx, vk::Format format)
-{
-	auto image = Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{1, 1}, format,
-							   vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst);
-	if (!image.has_value())
-	{
-		return std::nullopt;
-	}
-	const vk::Device device = ctx.device();
-	const auto		 pool =
-		device.createCommandPool(vk::CommandPoolCreateInfo().setQueueFamilyIndex(ctx.queue_indices().graphics));
-	const auto				cmds = device.allocateCommandBuffers(vk::CommandBufferAllocateInfo()
-																	 .setCommandPool(pool.value)
-																	 .setLevel(vk::CommandBufferLevel::ePrimary)
-																	 .setCommandBufferCount(1));
-	const vk::CommandBuffer cmd	 = cmds.value.front();
-	(void)cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
-	CommandManager::image_barrier(cmd, image->image(), vk::ImageLayout::eUndefined,
-								  vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eTopOfPipe,
-								  vk::AccessFlagBits2::eNone, vk::PipelineStageFlagBits2::eTransfer,
-								  vk::AccessFlagBits2::eTransferWrite);
-	const auto range =
-		vk::ImageSubresourceRange().setAspectMask(vk::ImageAspectFlagBits::eColor).setLevelCount(1).setLayerCount(1);
-	cmd.clearColorImage(image->image(), vk::ImageLayout::eTransferDstOptimal,
-						vk::ClearColorValue(std::array{0.0F, 0.0F, 0.0F, 1.0F}), range);
-	CommandManager::image_barrier(cmd, image->image(), vk::ImageLayout::eTransferDstOptimal,
-								  vk::ImageLayout::eShaderReadOnlyOptimal, vk::PipelineStageFlagBits2::eTransfer,
-								  vk::AccessFlagBits2::eTransferWrite, vk::PipelineStageFlagBits2::eFragmentShader,
-								  vk::AccessFlagBits2::eShaderSampledRead);
-	(void)cmd.end();
-	const auto fence = device.createFence({});
-	(void)ctx.graphics_queue().submit(vk::SubmitInfo().setCommandBuffers(cmd), fence.value);
-	(void)device.waitForFences(fence.value, vk::True, UINT64_MAX);
-	device.destroyFence(fence.value);
-	device.destroyCommandPool(pool.value);
-	return std::move(image.value());
-}
 } // namespace
 
 int main()
@@ -216,15 +174,17 @@ int main()
 	const vk::Format	 scene_color  = swap.format();
 	constexpr vk::Format depth_format = vk::Format::eD32Sfloat;
 
-	// The composite's ring input falls back to this 1x1 black texture when the outline is off.
-	auto black = make_black_texture(ctx, scene_color);
-	if (!black.has_value())
+	// The composite's "ring" input falls back to a 1x1 opaque-black image when the outline is
+	// off: a pool-owned constant resource, initialized by the engine via one immediate submit.
+	// Sampling black and adding it leaves the scene untouched, so disabling the outline takes no
+	// shader branch — and there is no longer a hand-rolled pool/fence/clear in user code.
+	auto black_result = pool.constant_image(ctx, {1, 1}, scene_color, {0.0F, 0.0F, 0.0F, 1.0F});
+	if (!black_result.has_value())
 	{
-		std::println("Failed to create fallback texture");
+		std::println("Failed to create fallback texture: {}", vk::to_string(black_result.error()));
 		return 1;
 	}
-	const gpu::ImageRef black_ref{
-		.image = black->image(), .view = black->view(), .extent = {1, 1}, .format = scene_color};
+	const gpu::ImageRef black_ref = black_result.value();
 
 	// --- The reactive graph, built once -------------------------------------------------
 	//   screen + angle -> cube -> scene_image ----------------------------------┐

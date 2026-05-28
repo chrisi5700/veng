@@ -2,11 +2,46 @@
 // See ResourcePool.hpp.
 //
 
+#include <array>
 #include <utility>
+#include <veng/context/Context.hpp>
 #include <veng/resources/ResourcePool.hpp>
 
 namespace veng
 {
+namespace
+{
+// A two-stage layout transition + clear, recorded into the caller's command buffer. Used by
+// constant_image to bring its single copy from Undefined -> TransferDst -> clear -> ShaderReadOnly
+// in one immediate submit.
+void clear_to_shader_readonly(vk::CommandBuffer cmd, vk::Image image, std::array<float, 4> clear)
+{
+	const auto range =
+		vk::ImageSubresourceRange().setAspectMask(vk::ImageAspectFlagBits::eColor).setLevelCount(1).setLayerCount(1);
+	const auto to_dst = vk::ImageMemoryBarrier2()
+							.setSrcStageMask(vk::PipelineStageFlagBits2::eTopOfPipe)
+							.setSrcAccessMask(vk::AccessFlagBits2::eNone)
+							.setDstStageMask(vk::PipelineStageFlagBits2::eTransfer)
+							.setDstAccessMask(vk::AccessFlagBits2::eTransferWrite)
+							.setOldLayout(vk::ImageLayout::eUndefined)
+							.setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+							.setImage(image)
+							.setSubresourceRange(range);
+	cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(to_dst));
+	cmd.clearColorImage(image, vk::ImageLayout::eTransferDstOptimal, vk::ClearColorValue(clear), range);
+	const auto to_read = vk::ImageMemoryBarrier2()
+							 .setSrcStageMask(vk::PipelineStageFlagBits2::eTransfer)
+							 .setSrcAccessMask(vk::AccessFlagBits2::eTransferWrite)
+							 .setDstStageMask(vk::PipelineStageFlagBits2::eFragmentShader)
+							 .setDstAccessMask(vk::AccessFlagBits2::eShaderSampledRead)
+							 .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+							 .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+							 .setImage(image)
+							 .setSubresourceRange(range);
+	cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(to_read));
+}
+} // namespace
+
 ResourcePool::ResourcePool(vk::Device device, vma::Allocator allocator, std::size_t frames_in_flight) noexcept
 	: m_device(device)
 	, m_allocator(allocator)
@@ -124,10 +159,40 @@ void ResourcePool::touch(ImageId id) noexcept
 		return;
 	}
 	ImageResource& res = m_images[id];
-	if (res.current != NONE)
+	if (res.is_constant || res.current == NONE)
 	{
-		res.copies[res.current]->last_use = m_frame;
+		return; // constants are never recycled, so stamping their last_use is pointless (and
+				// would actually *expose* them to reuse since the initial sentinel is INT64_MAX).
 	}
+	res.copies[res.current]->last_use = m_frame;
+}
+
+std::expected<gpu::ImageRef, vk::Result> ResourcePool::constant_image(const Context& ctx, vk::Extent2D extent,
+																	  vk::Format format, std::array<float, 4> clear)
+{
+	const vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
+	const ImageId			  id	= declare_image(format, usage);
+
+	ImageResource& res = m_images[id];
+	res.is_constant	   = true;
+	res.extent		   = extent;
+	auto image		   = Image::create(m_allocator, m_device, extent, format, usage);
+	if (!image.has_value())
+	{
+		return std::unexpected(image.error());
+	}
+	res.copies.push_back(std::make_unique<Copy<Image>>(std::move(image.value())));
+	res.copies.back()->last_use = INT64_MAX; // never recycled
+	res.current					= 0;
+
+	Image&			 img = res.copies.back()->resource;
+	const vk::Result init =
+		ctx.immediate_submit([&](vk::CommandBuffer cmd) { clear_to_shader_readonly(cmd, img.image(), clear); });
+	if (init != vk::Result::eSuccess)
+	{
+		return std::unexpected(init);
+	}
+	return gpu::ImageRef{.image = img.image(), .view = img.view(), .extent = extent, .format = format, .pool_id = id};
 }
 
 std::expected<Buffer*, vk::Result> ResourcePool::acquire_buffer(BufferId id, vk::DeviceSize size)

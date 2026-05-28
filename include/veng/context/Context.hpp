@@ -52,6 +52,12 @@ class Context
 	/// The window surface, or a null handle for a headless context.
 	[[nodiscard]] vk::SurfaceKHR surface() const { return m_surface; }
 
+	/// One-shot recording on the graphics queue: allocates a transient command buffer, calls
+	/// `record(cmd)`, ends + submits with a private fence, waits for completion, frees. The
+	/// engine's "do this on the GPU now" primitive — replaces ad-hoc pool/fence/submit/wait
+	/// sequences in user code (e.g. resource uploads, constant-image initialization).
+	[[nodiscard]] vk::Result immediate_submit(const std::function<void(vk::CommandBuffer)>& record) const;
+
 	 private:
 	Context(vk::Instance m_instance, vk::DebugUtilsMessengerEXT m_debug_messenger, vk::PhysicalDevice m_physical_device,
 			QueueFamilyIndices m_queue_indices, vk::Device m_device, vk::Queue m_graphics_queue,

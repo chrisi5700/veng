@@ -15,6 +15,56 @@ VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
 namespace veng
 {
 
+vk::Result Context::immediate_submit(const std::function<void(vk::CommandBuffer)>& record) const
+{
+	// A transient pool so cleanup is trivial: destroying it frees the buffer + any state. We
+	// submit + wait synchronously, so this is safe to use at startup or between frames.
+	const auto pool = m_device.createCommandPool(vk::CommandPoolCreateInfo()
+													 .setQueueFamilyIndex(m_queue_indices.graphics)
+													 .setFlags(vk::CommandPoolCreateFlagBits::eTransient));
+	if (pool.result != vk::Result::eSuccess)
+	{
+		return pool.result;
+	}
+	const auto cmds = m_device.allocateCommandBuffers(vk::CommandBufferAllocateInfo()
+														  .setCommandPool(pool.value)
+														  .setLevel(vk::CommandBufferLevel::ePrimary)
+														  .setCommandBufferCount(1));
+	if (cmds.result != vk::Result::eSuccess)
+	{
+		m_device.destroyCommandPool(pool.value);
+		return cmds.result;
+	}
+	const vk::CommandBuffer cmd = cmds.value.front();
+	if (const vk::Result begin =
+			cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+		begin != vk::Result::eSuccess)
+	{
+		m_device.destroyCommandPool(pool.value);
+		return begin;
+	}
+	record(cmd);
+	if (const vk::Result end = cmd.end(); end != vk::Result::eSuccess)
+	{
+		m_device.destroyCommandPool(pool.value);
+		return end;
+	}
+	const auto fence = m_device.createFence({});
+	if (fence.result != vk::Result::eSuccess)
+	{
+		m_device.destroyCommandPool(pool.value);
+		return fence.result;
+	}
+	const vk::Result submitted = m_graphics_queue.submit(vk::SubmitInfo().setCommandBuffers(cmd), fence.value);
+	if (submitted == vk::Result::eSuccess)
+	{
+		(void)m_device.waitForFences(fence.value, vk::True, UINT64_MAX);
+	}
+	m_device.destroyFence(fence.value);
+	m_device.destroyCommandPool(pool.value);
+	return submitted;
+}
+
 #ifdef NDEBUG
 constexpr bool ENABLE_VALIDATION = false;
 #else

@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <utility>
 #include <veng/context/Context.hpp>
+#include <veng/gpu/ImageRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/resources/ResourcePool.hpp>
 
@@ -109,6 +110,28 @@ TEST_CASE("a resize reallocates a logical image's copies", "[resources][pool]")
 	pool.begin_frame(2);
 	REQUIRE(pool.acquire_image(id, vk::Extent2D{8, 8}).has_value());
 	REQUIRE(pool.image_copy_count(id) == 1);
+}
+
+TEST_CASE("constant_image allocates one immutable copy that is never recycled", "[resources][pool][constant]")
+{
+	auto			   ctx = make_context();
+	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 2);
+
+	auto ref_result = pool.constant_image(ctx, vk::Extent2D{1, 1}, FORMAT, {0.0F, 0.0F, 0.0F, 1.0F});
+	REQUIRE(ref_result.has_value());
+	const veng::gpu::ImageRef ref = ref_result.value();
+	REQUIRE(ref.image);
+	REQUIRE(ref.view);
+	REQUIRE(ref.pool_id != veng::gpu::ImageRef::INVALID_POOL_ID);
+	REQUIRE(pool.image_copy_count(ref.pool_id) == 1);
+
+	// Many frames pass and consumers touch the constant; it must not be recycled or duplicated.
+	for (std::uint64_t i = 0; i < 10; ++i)
+	{
+		pool.begin_frame(i);
+		pool.touch(ref.pool_id);
+	}
+	REQUIRE(pool.image_copy_count(ref.pool_id) == 1);
 }
 
 TEST_CASE("ResourcePool buffers reuse a copy once retired", "[resources][pool]")
