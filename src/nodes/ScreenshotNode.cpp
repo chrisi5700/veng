@@ -18,6 +18,20 @@ ScreenshotNode::ScreenshotNode(graph::DataHandle source, graph::DataHandle outpu
 {
 }
 
+std::vector<gpu::ImageUsage> ScreenshotNode::image_usages(graph::ExecContext& ctx)
+{
+	// Read-side dependency for the executor: copyImageToBuffer needs the source in TRANSFER_SRC.
+	const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));
+	if (src == nullptr || src->value().pool_id == gpu::ImageRef::INVALID_POOL_ID)
+	{
+		return {};
+	}
+	return {gpu::ImageUsage{.id		= src->value().pool_id,
+							.layout = vk::ImageLayout::eTransferSrcOptimal,
+							.stage	= vk::PipelineStageFlagBits2::eTransfer,
+							.access = vk::AccessFlagBits2::eTransferRead}};
+}
+
 std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext& ctx)
 {
 	const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));

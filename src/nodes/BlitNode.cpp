@@ -21,6 +21,22 @@ BlitNode::BlitNode(graph::DataHandle src, graph::DataHandle dst, graph::DataHand
 {
 }
 
+std::vector<gpu::ImageUsage> BlitNode::image_usages(graph::ExecContext& ctx)
+{
+	// Read-side dependency for the executor: the source must be in TRANSFER_SRC before the blit
+	// runs. The destination is the swapchain (or a test-owned image) — not pool-backed — and is
+	// transitioned manually in record(), because nothing else in the engine tracks its layout.
+	const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[0]));
+	if (src == nullptr || src->value().pool_id == gpu::ImageRef::INVALID_POOL_ID)
+	{
+		return {};
+	}
+	return {gpu::ImageUsage{.id		= src->value().pool_id,
+							.layout = vk::ImageLayout::eTransferSrcOptimal,
+							.stage	= vk::PipelineStageFlagBits2::eTransfer,
+							.access = vk::AccessFlagBits2::eTransferRead}};
+}
+
 std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 {
 	const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[0]));

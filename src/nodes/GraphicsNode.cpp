@@ -38,6 +38,34 @@ GraphicsNode::~GraphicsNode()
 	}
 }
 
+std::vector<gpu::ImageUsage> GraphicsNode::image_usages(graph::ExecContext& ctx)
+{
+	// Declare the read-side dependencies for the executor's auto-barrier pass: each pool-backed
+	// sampled input must be in SHADER_READ_ONLY before record begins. Producer-side transitions
+	// (this node's own color/depth targets) stay in record() — they need a freshly-acquired copy
+	// and an extent that prepare_for cannot supply.
+	std::vector<gpu::ImageUsage> usages;
+	usages.reserve(m_sampled_images.size());
+	for (const SampledBinding& binding : m_sampled_images)
+	{
+		const auto* slot = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[binding.input_index]));
+		if (slot == nullptr)
+		{
+			continue;
+		}
+		const gpu::ImageRef ref = slot->value();
+		if (ref.pool_id == gpu::ImageRef::INVALID_POOL_ID)
+		{
+			continue;
+		}
+		usages.push_back(gpu::ImageUsage{.id	 = ref.pool_id,
+										 .layout = vk::ImageLayout::eShaderReadOnlyOptimal,
+										 .stage	 = vk::PipelineStageFlagBits2::eFragmentShader,
+										 .access = vk::AccessFlagBits2::eShaderSampledRead});
+	}
+	return usages;
+}
+
 std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& ctx)
 {
 	const bool has_depth = m_depth_format != vk::Format::eUndefined;
@@ -149,17 +177,17 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 
 	const vk::CommandBuffer cmd = ctx.command_buffer();
 
-	CommandManager::image_barrier(
-		cmd, color_image->image(), vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
-		vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::AccessFlagBits2::eNone,
-		vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::AccessFlagBits2::eColorAttachmentWrite);
+	// Auto-tracked transitions: the pool inserts the barrier and updates its tracker, so the
+	// CONSUMER side (prepare_for, for sampled inputs) can reason about layout correctly without
+	// a desync between actual GPU state and the pool's record.
+	ctx.pool().transition_image(m_color_id, cmd, vk::ImageLayout::eColorAttachmentOptimal,
+								vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+								vk::AccessFlagBits2::eColorAttachmentWrite);
 	if (has_depth)
 	{
-		CommandManager::image_barrier(
-			cmd, depth_image->image(), vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal,
-			vk::PipelineStageFlagBits2::eEarlyFragmentTests, vk::AccessFlagBits2::eNone,
-			vk::PipelineStageFlagBits2::eEarlyFragmentTests, vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
-			vk::ImageAspectFlagBits::eDepth);
+		ctx.pool().transition_image(m_depth_id, cmd, vk::ImageLayout::eDepthStencilAttachmentOptimal,
+									vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+									vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
 	}
 
 	const auto color_clear		= vk::ClearValue().setColor(vk::ClearColorValue(m_clear_color));
@@ -362,10 +390,11 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// Leave the target in its consumer's layout: TRANSFER_SRC for a blit/readback (waited on by
 	// a transfer read), or SHADER_READ_ONLY for an output a later pass will sample (waited on by
 	// a fragment-shader sampled read — this barrier is also the cross-pass sync for that read).
+	// End-of-pass transition to the layout the consumer needs (TRANSFER_SRC for a blit/readback,
+	// SHADER_READ_ONLY for a sampler), still pool-tracked so prepare_for sees the right state.
 	const bool to_sampled = m_final_layout == vk::ImageLayout::eShaderReadOnlyOptimal;
-	CommandManager::image_barrier(
-		cmd, color_image->image(), vk::ImageLayout::eColorAttachmentOptimal, m_final_layout,
-		vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::AccessFlagBits2::eColorAttachmentWrite,
+	ctx.pool().transition_image(
+		m_color_id, cmd, m_final_layout,
 		to_sampled ? vk::PipelineStageFlagBits2::eFragmentShader : vk::PipelineStageFlagBits2::eTransfer,
 		to_sampled ? vk::AccessFlagBits2::eShaderSampledRead : vk::AccessFlagBits2::eTransferRead);
 

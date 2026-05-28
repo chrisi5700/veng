@@ -45,6 +45,7 @@ class ScreenshotNode final : public gpu::GpuNode
 	 protected:
 	[[nodiscard]] std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override;
 	void												on_retired(gpu::SubmitContext& ctx) noexcept override;
+	std::vector<gpu::ImageUsage>						image_usages(graph::ExecContext& ctx) override;
 
 	 private:
 	graph::DataHandle	  m_input;

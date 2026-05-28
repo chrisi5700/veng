@@ -45,6 +45,7 @@ class BlitNode final : public gpu::GpuNode
 
 	 protected:
 	[[nodiscard]] std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override;
+	std::vector<gpu::ImageUsage>						image_usages(graph::ExecContext& ctx) override;
 
 	 private:
 	std::array<graph::DataHandle, 2> m_inputs; // [src, dst]

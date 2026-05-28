@@ -12,13 +12,28 @@
 #define VENG_GPUNODE_HPP
 
 #include <expected>
+#include <vector>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/SubmitContext.hpp>
 #include <veng/rendergraph/nodes/Node.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
+#include <veng/resources/ResourcePool.hpp>
+#include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
 {
+/// A pool-backed image this node touches and the layout/stage/access it needs the image in
+/// before `record` runs. The driver/executor reads these from each `GpuNode` in the plan and
+/// inserts the barrier transitions for them — nodes no longer record their own layout
+/// transitions for pool-backed targets ([[pass-draw-redesign]]).
+struct ImageUsage
+{
+	ImageId					id;
+	vk::ImageLayout			layout;
+	vk::PipelineStageFlags2 stage;
+	vk::AccessFlags2		access;
+};
+
 class GpuNode : public graph::Node
 {
 	 public:
@@ -51,12 +66,38 @@ class GpuNode : public graph::Node
 	/// overrides it to write the captured pixels to disk.
 	virtual void on_retired(SubmitContext& ctx) noexcept { (void)ctx; }
 
+	/// Declare the pool-backed images this node touches and the layout/stage/access it needs
+	/// each in *before* `record` runs. The executor (`GpuExecContext::prepare_for`) reads this
+	/// and inserts the matching barriers via `ResourcePool::transition_image`. Nodes that touch
+	/// no pool-backed images (or only external/swapchain images) return an empty vector. Called
+	/// with the live context so usages that need to resolve a graph edge's pool_id can do so.
+	virtual std::vector<ImageUsage> image_usages(graph::ExecContext& ctx)
+	{
+		(void)ctx;
+		return {};
+	}
+
 	 protected:
 	// Record this node's GPU work into `ctx.command_buffer()`. Returns whether the
 	// output changed (drives change-cutoff, design.md §2.4), same contract as
 	// graph::Node::execute.
 	[[nodiscard]] virtual std::expected<bool, graph::ExecError> record(GpuExecContext& ctx) = 0;
 };
+
+// Inline definition of GpuExecContext::prepare_for — placed here, after gpu::GpuNode is fully
+// defined, to avoid circular includes (GpuNode.hpp already includes GpuExecContext.hpp).
+inline void GpuExecContext::prepare_for(graph::Node& node) noexcept
+{
+	auto* gnode = dynamic_cast<GpuNode*>(&node);
+	if (gnode == nullptr)
+	{
+		return;
+	}
+	for (const ImageUsage& usage : gnode->image_usages(*this))
+	{
+		m_pool->transition_image(usage.id, m_command_buffer, usage.layout, usage.stage, usage.access);
+	}
+}
 } // namespace veng::gpu
 
 #endif // VENG_GPUNODE_HPP

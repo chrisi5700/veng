@@ -38,6 +38,11 @@ class GpuExecContext final : public graph::ExecContext
 	[[nodiscard]] graph::Data*	  data(graph::DataHandle handle) const override { return m_graph->get_data(handle); }
 	[[nodiscard]] graph::Revision revision() const noexcept override { return m_graph->current_revision(); }
 
+	// Auto-barrier hook (definition lives in GpuNode.hpp where gpu::GpuNode is complete): walks
+	// the node's declared `image_usages` and calls `ResourcePool::transition_image` on the
+	// recording CB. CPU context's `prepare_for` stays a no-op.
+	void prepare_for(graph::Node& node) noexcept override;
+
 	// GPU surface for GpuNode::record.
 	[[nodiscard]] const Context&	context() const noexcept { return *m_context; }
 	[[nodiscard]] vk::CommandBuffer command_buffer() const noexcept { return m_command_buffer; }

@@ -22,6 +22,8 @@
 
 namespace veng::graph
 {
+class Node; // defined below; ExecContext::prepare_for takes Node&
+
 /// Resolves handles to live data during the execute pass. An interface so the L4
 /// GPU implementation can layer command recording / resource lookup on top while
 /// the core and its tests use the plain Graph-backed one (design.md §L3).
@@ -37,6 +39,14 @@ class ExecContext
 
 	[[nodiscard]] virtual Data*	   data(DataHandle handle) const = 0;
 	[[nodiscard]] virtual Revision revision() const noexcept	 = 0;
+
+	/// Pre-execute hook: called once per node by `Graph::run_node` *before* `node.execute(ctx)`.
+	/// The default is a no-op; the GPU context (`gpu::GpuExecContext`) overrides it to query
+	/// the node's declared `image_usages()` and insert the necessary layout/barrier transitions
+	/// on the recording command buffer. Lets the executor — not the node — own resource
+	/// transitions, so node implementations no longer record their own `image_barrier` calls
+	/// for pool-backed targets.
+	virtual void prepare_for(Node& node) noexcept { (void)node; }
 };
 
 /// The dependency-injection seam for execution (design.md §5, §L5, §10). The real

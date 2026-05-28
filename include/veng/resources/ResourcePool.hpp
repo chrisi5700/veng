@@ -91,6 +91,15 @@ class ResourcePool
 	/// producer's output is still being sampled from being recycled out from under the reader.
 	void touch(ImageId id) noexcept;
 
+	/// Transition the current copy of `id` to `new_layout` on `cmd` if it is not already there,
+	/// using the prior usage's stage+access as the source of the barrier. This is the engine's
+	/// auto-barrier primitive: nodes declare what layout/stage/access they need via
+	/// `GpuNode::image_usages`, and the executor calls this for them — no node records its own
+	/// layout transitions for pool-backed images anymore. A no-op for an id never produced /
+	/// out of range / already in the target layout.
+	void transition_image(ImageId id, vk::CommandBuffer cmd, vk::ImageLayout new_layout,
+						  vk::PipelineStageFlags2 new_stage, vk::AccessFlags2 new_access) noexcept;
+
 	/// Producer side for a uniform/transient buffer: a copy to write this frame (reused/allocated
 	/// like images). Consumers read the buffer through the handle the producer publishes, so there
 	/// is no buffer `read_*`; the copy is retained for the in-flight window from its write stamp.
@@ -112,6 +121,20 @@ class ResourcePool
 		T			 resource;
 		std::int64_t last_use = -1; // frame index that last wrote or read this copy
 	};
+	// An image copy also tracks its recorded layout + the producer's (stage, access) — the
+	// executor's auto-barrier path reads these to compute the right transition.
+	struct ImageCopy
+	{
+		explicit ImageCopy(Image&& moved) noexcept
+			: resource(std::move(moved))
+		{
+		}
+		Image					resource;
+		std::int64_t			last_use	   = -1;
+		vk::ImageLayout			current_layout = vk::ImageLayout::eUndefined;
+		vk::PipelineStageFlags2 last_stage	   = vk::PipelineStageFlagBits2::eTopOfPipe;
+		vk::AccessFlags2		last_access	   = vk::AccessFlagBits2::eNone;
+	};
 	struct ImageResource
 	{
 		vk::Format			 format{};
@@ -119,9 +142,9 @@ class ResourcePool
 		vk::ImageAspectFlags aspect{};
 		vk::Extent2D		 extent{};
 		// unique_ptr so a returned Image* stays valid when the copy list grows.
-		std::vector<std::unique_ptr<Copy<Image>>> copies{};
-		std::size_t								  current	  = NONE;
-		bool									  is_constant = false; // immutable: one copy, never recycled
+		std::vector<std::unique_ptr<ImageCopy>> copies{};
+		std::size_t								current		= NONE;
+		bool									is_constant = false; // immutable: one copy, never recycled
 	};
 	struct BufferResource
 	{

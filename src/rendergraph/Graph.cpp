@@ -257,6 +257,10 @@ void Graph::run_node(Node& node, ExecContext& ctx, Revision revision, bool first
 	std::expected<bool, ExecError> result;
 	try
 	{
+		// Pre-execute hook: lets the executor own resource transitions (layout/barrier
+		// inference). The CPU context's default is a no-op; the GPU context inserts barriers
+		// from the node's declared image_usages().
+		ctx.prepare_for(node);
 		result = node.execute(ctx);
 	}
 	catch (...)

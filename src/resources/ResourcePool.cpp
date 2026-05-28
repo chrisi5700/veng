@@ -132,7 +132,7 @@ std::expected<Image*, vk::Result> ResourcePool::acquire_image(ImageId id, vk::Ex
 		{
 			return std::unexpected(image.error());
 		}
-		res.copies.push_back(std::make_unique<Copy<Image>>(std::move(image.value())));
+		res.copies.push_back(std::make_unique<ImageCopy>(std::move(image.value())));
 		pick = res.copies.size() - 1;
 	}
 
@@ -167,6 +167,43 @@ void ResourcePool::touch(ImageId id) noexcept
 	res.copies[res.current]->last_use = m_frame;
 }
 
+void ResourcePool::transition_image(ImageId id, vk::CommandBuffer cmd, vk::ImageLayout new_layout,
+									vk::PipelineStageFlags2 new_stage, vk::AccessFlags2 new_access) noexcept
+{
+	if (id >= m_images.size())
+	{
+		return;
+	}
+	ImageResource& res = m_images[id];
+	if (res.current == NONE)
+	{
+		return;
+	}
+	ImageCopy& copy = *res.copies[res.current];
+	if (copy.current_layout == new_layout)
+	{
+		return; // already in the requested layout
+	}
+	const auto barrier = vk::ImageMemoryBarrier2()
+							 .setSrcStageMask(copy.last_stage)
+							 .setSrcAccessMask(copy.last_access)
+							 .setDstStageMask(new_stage)
+							 .setDstAccessMask(new_access)
+							 .setOldLayout(copy.current_layout)
+							 .setNewLayout(new_layout)
+							 .setImage(copy.resource.image())
+							 .setSubresourceRange(vk::ImageSubresourceRange()
+													  .setAspectMask(res.aspect)
+													  .setBaseMipLevel(0)
+													  .setLevelCount(1)
+													  .setBaseArrayLayer(0)
+													  .setLayerCount(1));
+	cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
+	copy.current_layout = new_layout;
+	copy.last_stage		= new_stage;
+	copy.last_access	= new_access;
+}
+
 std::expected<gpu::ImageRef, vk::Result> ResourcePool::constant_image(const Context& ctx, vk::Extent2D extent,
 																	  vk::Format format, std::array<float, 4> clear)
 {
@@ -181,7 +218,7 @@ std::expected<gpu::ImageRef, vk::Result> ResourcePool::constant_image(const Cont
 	{
 		return std::unexpected(image.error());
 	}
-	res.copies.push_back(std::make_unique<Copy<Image>>(std::move(image.value())));
+	res.copies.push_back(std::make_unique<ImageCopy>(std::move(image.value())));
 	res.copies.back()->last_use = INT64_MAX; // never recycled
 	res.current					= 0;
 
@@ -192,6 +229,11 @@ std::expected<gpu::ImageRef, vk::Result> ResourcePool::constant_image(const Cont
 	{
 		return std::unexpected(init);
 	}
+	// Record the post-init layout so the auto-barrier path skips a no-op transition for the
+	// constant on every sample (it lives in SHADER_READ_ONLY forever).
+	res.copies.back()->current_layout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	res.copies.back()->last_stage	  = vk::PipelineStageFlagBits2::eFragmentShader;
+	res.copies.back()->last_access	  = vk::AccessFlagBits2::eShaderSampledRead;
 	return gpu::ImageRef{.image = img.image(), .view = img.view(), .extent = extent, .format = format, .pool_id = id};
 }
 
