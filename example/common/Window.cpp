@@ -12,7 +12,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-namespace demo
+namespace example
 {
 namespace
 {
@@ -58,6 +58,19 @@ Window::Window(const char* title, int width, int height)
 		glfwTerminate();
 		throw std::runtime_error("glfwCreateWindow failed");
 	}
+
+	// Install scroll callback before any events fire. The user-pointer is `this`, so the
+	// trampoline can route the delta back into m_scroll_y without a global.
+	glfwSetWindowUserPointer(m_window, this);
+	glfwSetScrollCallback(m_window,
+						  [](GLFWwindow* window, double /*x_off*/, double y_off) noexcept
+						  {
+							  auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
+							  if (self != nullptr)
+							  {
+								  self->m_scroll_y += y_off;
+							  }
+						  });
 
 	std::uint32_t	   count	  = 0;
 	const char* const* extensions = glfwGetRequiredInstanceExtensions(&count);
@@ -123,6 +136,25 @@ bool Window::key_down(int key) const
 	return glfwGetKey(m_window, key) == GLFW_PRESS;
 }
 
+Window::CursorPos Window::cursor_pos() const
+{
+	CursorPos out;
+	glfwGetCursorPos(m_window, &out.x, &out.y);
+	return out;
+}
+
+bool Window::mouse_down(int button) const
+{
+	return glfwGetMouseButton(m_window, button) == GLFW_PRESS;
+}
+
+double Window::consume_scroll_y()
+{
+	const double v = m_scroll_y;
+	m_scroll_y	   = 0.0;
+	return v;
+}
+
 VkSurfaceKHR Window::create_surface(VkInstance instance) const
 {
 	VkSurfaceKHR surface = VK_NULL_HANDLE;
@@ -132,4 +164,4 @@ VkSurfaceKHR Window::create_surface(VkInstance instance) const
 	}
 	return surface;
 }
-} // namespace demo
+} // namespace example

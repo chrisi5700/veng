@@ -124,6 +124,31 @@ class GraphicsNode final : public gpu::GpuNode
 			return *this;
 		}
 
+		/// Set this draw's `instanceCount` to a fixed value (default 1). The shader reads
+		/// `SV_InstanceID` to know which instance it is on; for a non-instanced draw leave it
+		/// unset.
+		DrawConfig& set_instances(std::uint32_t count) noexcept
+		{
+			m_node->m_draws[m_index].instance_count = count;
+			m_node->m_draws[m_index].instance_count_source.reset();
+			m_node->mark_dirty();
+			return *this;
+		}
+
+		/// Drive this draw's `instanceCount` reactively from a `ValueData<gpu::BufferRef>`
+		/// edge — typically the same storage buffer that supplies the per-instance data. Each
+		/// record reads `BufferRef::count` to decide how many instances to emit; a resize of
+		/// the source array is therefore a single producer write that drives both the upload
+		/// and the draw size. Adds the edge as a reactive input so a count change re-runs the
+		/// draw.
+		DrawConfig& set_instances_from(graph::DataHandle handle)
+		{
+			m_node->m_draws[m_index].instance_count_source = handle;
+			m_node->m_inputs.push_back(handle);
+			m_node->mark_dirty();
+			return *this;
+		}
+
 		 private:
 		friend class GraphicsNode;
 		DrawConfig(GraphicsNode* node, std::size_t index) noexcept
@@ -168,6 +193,22 @@ class GraphicsNode final : public gpu::GpuNode
 		return *this;
 	}
 
+	/// Bind a storage-buffer edge: `handle` (a `ValueData<gpu::BufferRef>`, produced by a
+	/// StorageBufferNode) is written into this node's descriptor set at the binding whose
+	/// reflected name matches the ref's `name` — the shader sees it as a `StructuredBuffer<T>`
+	/// (or `RWStructuredBuffer<T>` for the storage-image equivalent). A reactive input —
+	/// re-uploading the array re-renders the node. The published ref's `count` is what the
+	/// `set_instances_from(handle)` shorthand reads to drive `instanceCount`, so the same edge
+	/// can also configure the draw size. Returns *this for chaining; call before adding the
+	/// node to the graph (it extends the input set).
+	GraphicsNode& add_storage_buffer(graph::DataHandle handle)
+	{
+		m_storage_buffers.push_back(handle);
+		m_inputs.push_back(handle);
+		mark_dirty();
+		return *this;
+	}
+
 	/// Bind a sampled-image edge: `handle` (a `ValueData<gpu::ImageRef>`, e.g. another pass's
 	/// output) is sampled by the shader's `Texture2D` named `name`, via a node-owned sampler
 	/// auto-bound to the shader's `SamplerState`. The source image must rest in
@@ -202,6 +243,44 @@ class GraphicsNode final : public gpu::GpuNode
 	GraphicsNode& clear_color(std::array<float, 4> rgba) noexcept
 	{
 		m_clear_color = rgba;
+		mark_dirty();
+		return *this;
+	}
+
+	/// Set the primitive topology for this pass's pipeline (default triangle list). Use
+	/// `vk::PrimitiveTopology::eLineList` for debug-line rendering — the consuming mesh's
+	/// vertex pairs are then drawn as line segments. Call before the first record (the
+	/// pipeline is built lazily on first record).
+	GraphicsNode& topology(vk::PrimitiveTopology topology) noexcept
+	{
+		m_topology = topology;
+		mark_dirty();
+		return *this;
+	}
+
+	/// Disable depth writes for this pass (writes are on by default when a depth format is
+	/// configured). Use for debug overlays you want layered on top without affecting depth.
+	GraphicsNode& depth_write(bool enabled) noexcept
+	{
+		m_depth_write = enabled;
+		mark_dirty();
+		return *this;
+	}
+
+	/// Default-draw shorthand for `DrawConfig::set_instances` — see that method.
+	GraphicsNode& set_instances(std::uint32_t count) noexcept
+	{
+		default_draw().instance_count = count;
+		default_draw().instance_count_source.reset();
+		mark_dirty();
+		return *this;
+	}
+
+	/// Default-draw shorthand for `DrawConfig::set_instances_from` — see that method.
+	GraphicsNode& set_instances_from(graph::DataHandle handle)
+	{
+		default_draw().instance_count_source = handle;
+		m_inputs.push_back(handle);
 		mark_dirty();
 		return *this;
 	}
@@ -243,12 +322,17 @@ class GraphicsNode final : public gpu::GpuNode
 	}
 
 	// One draw within the pass: its geometry (a mesh edge, or `vertex_count` SV_VertexID
-	// vertices) and the push constants pushed for it. Many draws share the node's pipeline,
-	// target, uniforms and sampled images.
+	// vertices), its push constants, and its instance count. Many draws share the node's
+	// pipeline, target, uniforms, sampled images and storage buffers. `instance_count_source`
+	// (a `ValueData<gpu::BufferRef>` edge) overrides `instance_count` when set, reading the
+	// count from the published BufferRef each record — so the per-instance storage buffer
+	// drives both the data and the draw size.
 	struct Draw
 	{
 		std::optional<graph::DataHandle> mesh{}; // unset => SV_VertexID draw of vertex_count
-		std::uint32_t					 vertex_count = 0;
+		std::uint32_t					 vertex_count	= 0;
+		std::uint32_t					 instance_count = 1;
+		std::optional<graph::DataHandle> instance_count_source{}; // set => count from BufferRef
 		std::vector<PushBinding>		 push_constants{};
 	};
 
@@ -280,9 +364,12 @@ class GraphicsNode final : public gpu::GpuNode
 	std::vector<graph::DataHandle>	m_inputs;	// [screen_size, push-constant + mesh + uniform + sampled edges...]
 	std::vector<Draw>				m_draws;	// >=1 draw (see default_draw): per-draw geometry + push constants
 	std::vector<graph::DataHandle>	m_uniforms; // descriptor-bound uniform-buffer edges
-	std::vector<SampledBinding>		m_sampled_images; // descriptor-bound sampled-image edges
+	std::vector<graph::DataHandle>	m_storage_buffers; // descriptor-bound SSBO edges (StructuredBuffer<T>)
+	std::vector<SampledBinding>		m_sampled_images;  // descriptor-bound sampled-image edges
 	std::array<float, 4>			m_clear_color{0.0F, 0.0F, 0.0F, 1.0F};
-	std::optional<GraphicsPipeline> m_pipeline; // built lazily on first record
+	vk::PrimitiveTopology			m_topology	  = vk::PrimitiveTopology::eTriangleList;
+	bool							m_depth_write = true; // depth writes (when depth attached)
+	std::optional<GraphicsPipeline> m_pipeline;			  // built lazily on first record
 
 	// Descriptor state, populated on first record (alongside the pipeline). The set is allocated
 	// and rewritten PER frame slot (one set per in-flight frame): a slot's set was last used by

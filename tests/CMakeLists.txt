@@ -84,6 +84,22 @@ target_link_libraries(MeshNodeTests PRIVATE veng_nodes veng_resources Catch2::Ca
 add_executable(UniformNodeTests nodes/UniformNodeTests.cpp)
 target_link_libraries(UniformNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# Array-of-T descriptor: a StorageBufferNode uploads a vector<T> into an SSBO and publishes a
+# BufferRef carrying stride/count/name; a reactive re-upload re-invalidates downstream draws.
+add_executable(StorageBufferNodeTests nodes/StorageBufferNodeTests.cpp)
+target_link_libraries(StorageBufferNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
+# Instanced draw end-to-end: a StorageBufferNode + a GraphicsNode with add_storage_buffer +
+# set_instances_from render N triangles whose per-instance offsets came from the SSBO; the
+# count of instances ALSO came from the SSBO's published ref. Readback proves N landed.
+add_executable(InstancedDrawTests nodes/InstancedDrawTests.cpp)
+target_link_libraries(InstancedDrawTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
+# Line-topology + dynamic vertex upload: a DynamicMeshNode feeds a GraphicsNode in
+# eLineList topology — proves both the new topology() setter and reactive VB upload work.
+add_executable(DebugLineTests nodes/DebugLineTests.cpp)
+target_link_libraries(DebugLineTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
 # One pass sampling another's output: the sampled-image descriptor path + the demand cascade
 # when a sampled source is rebound (the basis of the multi-pass outline effect).
 add_executable(SampledImageTests nodes/SampledImageTests.cpp)
@@ -120,6 +136,9 @@ catch_discover_tests(SliceDriverTests)
 catch_discover_tests(GraphicsNodeTests)
 catch_discover_tests(MeshNodeTests)
 catch_discover_tests(UniformNodeTests)
+catch_discover_tests(StorageBufferNodeTests)
+catch_discover_tests(InstancedDrawTests)
+catch_discover_tests(DebugLineTests)
 catch_discover_tests(SampledImageTests)
 catch_discover_tests(MultiDrawTests)
 catch_discover_tests(NBufferingTests)

@@ -90,6 +90,12 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::depth_format(vk::Format format
 	return *this;
 }
 
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::depth_write(bool enabled)
+{
+	m_depth_write = enabled;
+	return *this;
+}
+
 GraphicsPipelineBuilder& GraphicsPipelineBuilder::topology(vk::PrimitiveTopology topology)
 {
 	m_topology = topology;
@@ -221,7 +227,7 @@ std::expected<GraphicsPipeline, PipelineError> GraphicsPipelineBuilder::build(co
 	const bool has_depth	 = m_depth_format != vk::Format::eUndefined;
 	const auto depth_stencil = vk::PipelineDepthStencilStateCreateInfo()
 								   .setDepthTestEnable(static_cast<vk::Bool32>(has_depth))
-								   .setDepthWriteEnable(static_cast<vk::Bool32>(has_depth))
+								   .setDepthWriteEnable(static_cast<vk::Bool32>(has_depth && m_depth_write))
 								   .setDepthCompareOp(vk::CompareOp::eLess);
 
 	// One non-blended, write-all attachment per color format.

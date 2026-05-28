@@ -30,7 +30,7 @@ find_package(unofficial-vulkan-memory-allocator-hpp CONFIG REQUIRED)
 enable_testing()
 
 add_subdirectory(src)
-add_subdirectory(playground)
+add_subdirectory(example)
 add_subdirectory(bench)
 add_subdirectory(tests)
 # add_subdirectory(libs/SFML) # for example to add other cmake dependencies

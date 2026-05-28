@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <utility>
 #include <vector>
+#include <veng/gpu/BufferRef.hpp>
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/gpu/MeshRef.hpp>
 #include <veng/gpu/UniformRef.hpp>
@@ -84,10 +85,11 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		const std::array		color_formats{m_color_format};
 		GraphicsPipelineBuilder builder(vert.value(), frag.value());
 		builder.color_formats(color_formats)
+			.topology(m_topology)
 			.rasterization(vk::PolygonMode::eFill, vk::CullModeFlagBits::eNone, vk::FrontFace::eCounterClockwise);
 		if (has_depth)
 		{
-			builder.depth_format(m_depth_format);
+			builder.depth_format(m_depth_format).depth_write(m_depth_write);
 		}
 		auto pipeline = builder.build(ctx.context());
 		if (!pipeline.has_value())
@@ -224,7 +226,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// PER frame slot and rewritten each record: a slot's set was last used by the frame that
 	// previously held that slot (now retired), so re-writing it is safe at any frames-in-flight,
 	// and it always reflects this frame's uniform-buffer copies + sampled views (both N-buffered).
-	if (!m_uniforms.empty() || !m_sampled_images.empty())
+	if (!m_uniforms.empty() || !m_storage_buffers.empty() || !m_sampled_images.empty())
 	{
 		const std::size_t slot = ctx.frame_slot();
 		if (!m_descriptors.has_value())
@@ -250,9 +252,10 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		std::vector<vk::DescriptorBufferInfo> buffer_infos;
 		std::vector<vk::DescriptorImageInfo>  image_infos;
 		std::vector<vk::WriteDescriptorSet>	  writes;
-		buffer_infos.reserve(m_uniforms.size());
+		buffer_infos.reserve(m_uniforms.size() + m_storage_buffers.size());
 		image_infos.reserve(m_sampled_images.size() + m_descriptors_by_name.size());
-		writes.reserve(m_uniforms.size() + m_sampled_images.size() + m_descriptors_by_name.size());
+		writes.reserve(m_uniforms.size() + m_storage_buffers.size() + m_sampled_images.size() +
+					   m_descriptors_by_name.size());
 
 		for (const graph::DataHandle handle : m_uniforms)
 		{
@@ -273,6 +276,33 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 								 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
 								 .setDstArrayElement(0)
 								 .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+								 .setBufferInfo(buffer_infos.back()));
+		}
+
+		// Storage-buffer edges (SSBOs / StructuredBuffers): identical to the uniform path but
+		// the descriptor type is eStorageBuffer, and the published BufferRef carries the
+		// per-element stride + count (the count drives `instanceCount` of any draw that opts
+		// in via set_instances_from). The shader sees the raw array; we do not bind by stride
+		// here — std430 layout in the shader is the contract.
+		for (const graph::DataHandle handle : m_storage_buffers)
+		{
+			const auto* storage = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(handle));
+			if (storage == nullptr)
+			{
+				return std::unexpected(graph::ExecError::MISSING_INPUT);
+			}
+			const gpu::BufferRef ref = storage->value();
+			const auto			 it	 = m_descriptors_by_name.find(ref.name);
+			if (it == m_descriptors_by_name.end())
+			{
+				return std::unexpected(graph::ExecError::NODE_FAILED); // no such reflected binding
+			}
+			buffer_infos.push_back(vk::DescriptorBufferInfo().setBuffer(ref.buffer).setOffset(0).setRange(ref.size));
+			writes.push_back(vk::WriteDescriptorSet()
+								 .setDstSet(set)
+								 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
+								 .setDstArrayElement(0)
+								 .setDescriptorType(vk::DescriptorType::eStorageBuffer)
 								 .setBufferInfo(buffer_infos.back()));
 		}
 
@@ -341,6 +371,27 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 					vk::ArrayProxy<const std::byte>(push.size, static_cast<const std::byte*>(bytes)));
 			}
 		}
+
+		// Compute the instance count: a `set_instances_from(handle)` reads the count off the
+		// published BufferRef each record (so a CPU resize of the source array drives the
+		// draw size); otherwise the fixed `instance_count` (default 1) applies. A 0-count
+		// storage-driven instanced draw emits no instances and is a legitimate no-op (the
+		// physics scene has no bodies this step) — not a node failure.
+		std::uint32_t instance_count = draw.instance_count;
+		if (draw.instance_count_source.has_value())
+		{
+			const auto* slot = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(*draw.instance_count_source));
+			if (slot == nullptr)
+			{
+				return std::unexpected(graph::ExecError::MISSING_INPUT);
+			}
+			instance_count = slot->value().count;
+		}
+		if (instance_count == 0)
+		{
+			return {}; // nothing to draw this frame — empty body list, no work
+		}
+
 		if (draw.mesh.has_value())
 		{
 			const auto* mesh_data = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(*draw.mesh));
@@ -354,16 +405,16 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			if (mesh.index_buffer)
 			{
 				cmd.bindIndexBuffer(mesh.index_buffer, 0, mesh.index_type);
-				cmd.drawIndexed(mesh.index_count, 1, 0, 0, 0);
+				cmd.drawIndexed(mesh.index_count, instance_count, 0, 0, 0);
 			}
 			else
 			{
-				cmd.draw(mesh.vertex_count, 1, 0, 0);
+				cmd.draw(mesh.vertex_count, instance_count, 0, 0);
 			}
 		}
 		else
 		{
-			cmd.draw(draw.vertex_count, 1, 0, 0);
+			cmd.draw(draw.vertex_count, instance_count, 0, 0);
 		}
 		return {};
 	};

@@ -63,6 +63,7 @@ class GraphicsPipelineBuilder
 
 	GraphicsPipelineBuilder& color_formats(std::span<const vk::Format> formats);
 	GraphicsPipelineBuilder& depth_format(vk::Format format);
+	GraphicsPipelineBuilder& depth_write(bool enabled);
 	GraphicsPipelineBuilder& topology(vk::PrimitiveTopology topology);
 	GraphicsPipelineBuilder& rasterization(vk::PolygonMode polygon, vk::CullModeFlags cull, vk::FrontFace front);
 
@@ -74,6 +75,7 @@ class GraphicsPipelineBuilder
 	const Shader*			m_fragment;
 	std::vector<vk::Format> m_color_formats;
 	vk::Format				m_depth_format = vk::Format::eUndefined;
+	bool					m_depth_write  = true;
 	vk::PrimitiveTopology	m_topology	   = vk::PrimitiveTopology::eTriangleList;
 	vk::PolygonMode			m_polygon	   = vk::PolygonMode::eFill;
 	vk::CullModeFlags		m_cull		   = vk::CullModeFlagBits::eBack;
