@@ -105,6 +105,13 @@ class Node
 
 	[[nodiscard]] ExecutionState state() const noexcept { return m_state.load(std::memory_order_acquire); }
 
+	/// Force this node back to `INVALID`, so the next `resolve` re-plans it regardless of input
+	/// stamps. Use when a *runtime* mutation extends the node's input set or changes how it
+	/// draws (a new push-constant edge, a new mesh draw, a different sampled-image binding) —
+	/// those edits would otherwise not be observable to the planner's `input.changed_at >
+	/// verified_at` check, leaving the node silently stale until something else dirties it.
+	void mark_dirty() noexcept { m_state.store(ExecutionState::INVALID, std::memory_order_release); }
+
 	 protected:
 	friend class Graph;
 

@@ -86,6 +86,7 @@ class GraphicsNode final : public gpu::GpuNode
 	{
 		default_draw().push_constants.push_back(make_push<T>(handle, stage, offset));
 		m_inputs.push_back(handle); // a push-constant edge is a dirtiness input
+		mark_dirty();				// extending m_inputs at runtime must re-plan us
 		return *this;
 	}
 
@@ -100,6 +101,7 @@ class GraphicsNode final : public gpu::GpuNode
 	{
 		default_draw().mesh = handle;
 		m_inputs.push_back(handle);
+		mark_dirty();
 		return *this;
 	}
 
@@ -118,6 +120,7 @@ class GraphicsNode final : public gpu::GpuNode
 		{
 			m_node->m_draws[m_index].push_constants.push_back(GraphicsNode::make_push<T>(handle, stage, offset));
 			m_node->m_inputs.push_back(handle);
+			m_node->mark_dirty();
 			return *this;
 		}
 
@@ -148,6 +151,7 @@ class GraphicsNode final : public gpu::GpuNode
 			m_inputs.push_back(mesh);
 		}
 		m_draws.push_back(std::move(draw));
+		mark_dirty();
 		return DrawConfig{this, m_draws.size() - 1};
 	}
 
@@ -160,6 +164,7 @@ class GraphicsNode final : public gpu::GpuNode
 	{
 		m_uniforms.push_back(handle);
 		m_inputs.push_back(handle);
+		mark_dirty();
 		return *this;
 	}
 
@@ -172,6 +177,7 @@ class GraphicsNode final : public gpu::GpuNode
 	{
 		m_sampled_images.push_back(SampledBinding{.input_index = m_inputs.size(), .name = std::move(name)});
 		m_inputs.push_back(handle);
+		mark_dirty();
 		return *this;
 	}
 
@@ -185,6 +191,7 @@ class GraphicsNode final : public gpu::GpuNode
 			if (binding.name == name)
 			{
 				m_inputs[binding.input_index] = handle;
+				mark_dirty(); // a rebind to a same-revision producer wouldn't dirty us otherwise
 				return;
 			}
 		}
@@ -195,6 +202,7 @@ class GraphicsNode final : public gpu::GpuNode
 	GraphicsNode& clear_color(std::array<float, 4> rgba) noexcept
 	{
 		m_clear_color = rgba;
+		mark_dirty();
 		return *this;
 	}
 
