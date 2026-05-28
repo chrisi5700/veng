@@ -93,8 +93,12 @@ std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 								  to_present ? vk::AccessFlagBits2::eNone : vk::AccessFlagBits2::eTransferRead);
 
 	// Forward the written target so the next node is ordered after us and sees the image
-	// (carries the swapchain index + present semaphores the PresentNode needs).
-	(void)out->produce(target);
+	// (carries the swapchain index + present semaphores the PresentNode needs). Bump the
+	// version so the published ImageRef compares unequal across consecutive blits even when
+	// the swapchain hands us the same underlying image.
+	gpu::ImageRef forwarded = target;
+	forwarded.version		= ++m_version;
+	(void)out->produce(forwarded);
 	++m_record_count;
 	return true;
 }

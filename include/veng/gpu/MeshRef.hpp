@@ -9,10 +9,10 @@
 // indices} -> GraphicsNode.add_mesh(...)` into real buffer-backed geometry (vs the
 // SV_VertexID path).
 //
-// Like ImageRef, deliberately NOT equality-comparable: `ValueData<T>` then treats every
-// re-produce as "changed" (Data.hpp). A MeshNode normally uploads once and is cached
-// forever after, so this only matters on the rare re-upload — where the buffer contents
-// genuinely changed and must propagate to the draw.
+// Equality is value-based, including a `version` the producing `MeshNode` bumps on every
+// `produce` — so a re-upload (where the underlying buffer handle is reused but contents
+// changed) compares unequal and re-dirties the consuming draw. (`MeshNode` normally uploads
+// once cold and caches forever after; this is the safety net for the rare re-upload.)
 //
 
 #ifndef VENG_MESHREF_HPP
@@ -32,7 +32,10 @@ struct MeshRef
 	std::uint32_t index_count  = 0; // indices in the index buffer (indexed draw count)
 	vk::IndexType index_type   = vk::IndexType::eUint32;
 
-	// No operator== on purpose — see the file header.
+	// Producer-bumped version (see the file header).
+	std::uint64_t version = 0;
+
+	friend bool operator==(const MeshRef&, const MeshRef&) noexcept = default;
 };
 } // namespace veng::gpu
 

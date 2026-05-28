@@ -9,16 +9,16 @@
 // writes the buffer into a descriptor set. This is the user's `UniformNode{value, "name"}
 // -> GraphicsNode.add_uniform(...)`.
 //
-// Like ImageRef/MeshRef, deliberately NOT equality-comparable (it has a std::string member
-// but no operator==): `ValueData<T>` then treats every re-produce as "changed" (Data.hpp).
-// A uniform's buffer handle is stable across re-uploads (the contents change in place), so
-// a comparable ref would be mistaken for "unchanged" and the dependent draw cached away —
-// exactly the staleness we must avoid.
+// Equality is value-based, including a `version` the producing `UniformNode` bumps on every
+// `produce` — critical because the buffer handle is *stable* across re-uploads (contents
+// change in place), so without a version a structural comparison would call two distinct
+// upload values "equal" and silently cache away the consuming draw.
 //
 
 #ifndef VENG_UNIFORMREF_HPP
 #define VENG_UNIFORMREF_HPP
 
+#include <cstdint>
 #include <string>
 #include <vulkan/vulkan.hpp>
 
@@ -30,7 +30,10 @@ struct UniformRef
 	vk::DeviceSize size = 0;
 	std::string	   name; // the reflected descriptor binding this fills (DescriptorInfo.name)
 
-	// No operator== on purpose — see the file header.
+	// Producer-bumped version (see the file header).
+	std::uint64_t version = 0;
+
+	friend bool operator==(const UniformRef&, const UniformRef&) noexcept = default;
 };
 } // namespace veng::gpu
 

@@ -8,11 +8,12 @@
 // GPU. Passing a reference (not a copy) is what lets `GraphicsPipeline -> ImageData ->
 // BlitNode -> SwapchainImageData -> PresentNode` mean exactly what it reads as.
 //
-// Deliberately NOT equality-comparable: `ValueData<T>` falls back to "always changed"
-// for non-comparable T (Data.hpp), which is the correct, conservative behaviour for a
-// GPU resource written by reference — the handle can repeat across frames (the swapchain
-// recycles a small set of images) even though the contents were just overwritten, so we
-// must never let a repeated handle be mistaken for "unchanged" and cached away.
+// Equality is *value-based* and includes a `version` the producing node bumps on every
+// `produce`, so two structurally identical refs published by consecutive producer runs still
+// compare unequal. This retires the old "deliberately non-comparable so re-produce always
+// counts as changed" hack — the property we needed (a producer's re-run dirties consumers
+// even when the underlying handle was reused, e.g. the swapchain recycling images) is now
+// explicit in the type, not implicit in `ValueData<T>`'s non-comparable fallback.
 //
 
 #ifndef VENG_IMAGEREF_HPP
@@ -48,7 +49,12 @@ struct ImageRef
 	static constexpr std::uint32_t INVALID_POOL_ID = ~0U;
 	std::uint32_t				   pool_id		   = INVALID_POOL_ID;
 
-	// No operator== on purpose — see the file header.
+	// Producer-bumped version: incremented on every `produce` so two structurally identical
+	// refs published by consecutive producer runs compare unequal (and `ValueData<ImageRef>`'s
+	// change-cutoff fires). Constant images never bump (one produce, one version).
+	std::uint64_t version = 0;
+
+	friend bool operator==(const ImageRef&, const ImageRef&) noexcept = default;
 };
 } // namespace veng::gpu
 

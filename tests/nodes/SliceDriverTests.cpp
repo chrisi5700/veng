@@ -100,7 +100,13 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	const auto render_frame = [&]() -> FramePlan
 	{
 		res_pool.begin_frame(frame_index++);
-		graph.set(dst, target_ref);
+		// Stand in for the swapchain handing out a fresh ref each frame (which is what makes
+		// the blit re-run): bump a per-frame version on the dst so consecutive sets compare
+		// unequal — gpu::ImageRef is value-comparable now, equality-on-same-target wouldn't
+		// dirty the source otherwise.
+		veng::gpu::ImageRef per_frame_ref = target_ref;
+		per_frame_ref.version			  = frame_index;
+		graph.set(dst, per_frame_ref);
 		auto cmd = commands.begin(veng::QueueKind::Graphics, 0);
 		REQUIRE(cmd.has_value());
 

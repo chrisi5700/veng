@@ -52,6 +52,7 @@ class BlitNode final : public gpu::GpuNode
 	graph::DataHandle				 m_output;
 	vk::ImageLayout					 m_final_layout;
 	std::size_t						 m_record_count = 0;
+	std::uint64_t					 m_version		= 0; // bumped on every produce for comparable ImageRef
 };
 } // namespace veng::nodes
 

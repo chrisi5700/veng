@@ -297,11 +297,13 @@ class GraphicsNode final : public gpu::GpuNode
 
 	// Targets live in the engine's ResourcePool (N-buffered), not in the node: declared once,
 	// a physical copy acquired each record. m_last_color is the copy written this record, kept
-	// for the scene() readback lens.
-	bool		 m_declared	  = false;
-	ImageId		 m_color_id	  = 0;
-	ImageId		 m_depth_id	  = 0;
-	const Image* m_last_color = nullptr;
+	// for the scene() readback lens. m_version is bumped on every produce so the published
+	// ImageRef compares unequal across re-renders (the change-cutoff signal for consumers).
+	bool		  m_declared   = false;
+	ImageId		  m_color_id   = 0;
+	ImageId		  m_depth_id   = 0;
+	const Image*  m_last_color = nullptr;
+	std::uint64_t m_version	   = 0;
 };
 } // namespace veng::nodes
 

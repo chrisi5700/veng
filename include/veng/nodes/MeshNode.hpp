@@ -68,6 +68,7 @@ class MeshNode final : public gpu::GpuNode
 	std::vector<std::byte> m_index_bytes;
 	std::optional<Buffer>  m_vertex_buffer; // allocated + uploaded lazily on first record
 	std::optional<Buffer>  m_index_buffer;	// only if indices were given
+	std::uint64_t		   m_version = 0;	// bumped on every produce for comparable MeshRef
 };
 } // namespace veng::nodes
 

@@ -36,7 +36,9 @@ std::expected<bool, graph::ExecError> UniformNode::record(gpu::GpuExecContext& c
 
 	if (auto* out = dynamic_cast<graph::ValueData<gpu::UniformRef>*>(ctx.data(m_output)); out != nullptr)
 	{
-		(void)out->produce(gpu::UniformRef{.buffer = buffer.value()->buffer(), .size = m_size, .name = m_name});
+		++m_version;
+		(void)out->produce(
+			gpu::UniformRef{.buffer = buffer.value()->buffer(), .size = m_size, .name = m_name, .version = m_version});
 	}
 	return true;
 }

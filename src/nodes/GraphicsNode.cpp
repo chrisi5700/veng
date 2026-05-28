@@ -397,11 +397,13 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// re-evaluates whenever we re-render, and caches when we do not.
 	if (auto* out = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_output)); out != nullptr)
 	{
+		++m_version; // bumped on every produce → comparable ImageRef sees the change
 		(void)out->produce(gpu::ImageRef{.image	  = color_image->image(),
 										 .view	  = color_image->view(),
 										 .extent  = extent,
 										 .format  = m_color_format,
-										 .pool_id = m_color_id});
+										 .pool_id = m_color_id,
+										 .version = m_version});
 	}
 	return true;
 }
