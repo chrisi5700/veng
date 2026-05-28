@@ -190,15 +190,6 @@ class GraphicsNode final : public gpu::GpuNode
 		}
 	}
 
-	/// The layout the output target is left in for its consumer: `eTransferSrcOptimal` (default,
-	/// for a BlitNode/readback) or `eShaderReadOnlyOptimal` (when a later pass will sample it).
-	/// Returns *this for chaining; call before adding the node to the graph.
-	GraphicsNode& final_layout(vk::ImageLayout layout) noexcept
-	{
-		m_final_layout = layout;
-		return *this;
-	}
-
 	/// Set the color the target is cleared to each frame (RGBA, default opaque black).
 	/// Returns *this for chaining; call before adding the node to the graph.
 	GraphicsNode& clear_color(std::array<float, 4> rgba) noexcept
@@ -283,7 +274,6 @@ class GraphicsNode final : public gpu::GpuNode
 	std::vector<graph::DataHandle>	m_uniforms; // descriptor-bound uniform-buffer edges
 	std::vector<SampledBinding>		m_sampled_images; // descriptor-bound sampled-image edges
 	std::array<float, 4>			m_clear_color{0.0F, 0.0F, 0.0F, 1.0F};
-	vk::ImageLayout					m_final_layout = vk::ImageLayout::eTransferSrcOptimal;
 	std::optional<GraphicsPipeline> m_pipeline; // built lazily on first record
 
 	// Descriptor state, populated on first record (alongside the pipeline). The set is allocated

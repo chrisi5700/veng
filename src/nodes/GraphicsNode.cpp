@@ -387,20 +387,14 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	}
 	cmd.endRendering();
 
-	// Leave the target in its consumer's layout: TRANSFER_SRC for a blit/readback (waited on by
-	// a transfer read), or SHADER_READ_ONLY for an output a later pass will sample (waited on by
-	// a fragment-shader sampled read — this barrier is also the cross-pass sync for that read).
-	// End-of-pass transition to the layout the consumer needs (TRANSFER_SRC for a blit/readback,
-	// SHADER_READ_ONLY for a sampler), still pool-tracked so prepare_for sees the right state.
-	const bool to_sampled = m_final_layout == vk::ImageLayout::eShaderReadOnlyOptimal;
-	ctx.pool().transition_image(
-		m_color_id, cmd, m_final_layout,
-		to_sampled ? vk::PipelineStageFlagBits2::eFragmentShader : vk::PipelineStageFlagBits2::eTransfer,
-		to_sampled ? vk::AccessFlagBits2::eShaderSampledRead : vk::AccessFlagBits2::eTransferRead);
+	// No end-of-pass transition: the image stays in eColorAttachmentOptimal. The CONSUMER's
+	// declared `image_usages` drives the layout it actually needs (sampled / transfer-src), and
+	// the executor inserts the transition via `prepare_for` — the engine owns layouts, not the
+	// producer. Tests that read back directly transition the image themselves via the pool.
 
-	// Publish a ref to the rendered target (now in m_final_layout), tagged with its pool id so a
-	// consumer can retain this physical copy while in flight. Non-comparable, so each produce is
-	// a change — a consumer re-evaluates whenever we re-render, and caches when we do not.
+	// Publish a ref to the rendered target tagged with its pool id so a consumer can retain this
+	// physical copy while in flight. Non-comparable, so each produce is a change — a consumer
+	// re-evaluates whenever we re-render, and caches when we do not.
 	if (auto* out = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_output)); out != nullptr)
 	{
 		(void)out->produce(gpu::ImageRef{.image	  = color_image->image(),

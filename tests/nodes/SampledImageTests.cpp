@@ -71,8 +71,7 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 	{
 		auto node = std::make_unique<veng::nodes::GraphicsNode>("demo/fullscreen.vert", "tests/slice/solid.frag", COLOR,
 																vk::Format::eUndefined, 3, screen, out);
-		node->push_constant<glm::vec4>(color, vk::ShaderStageFlagBits::eFragment)
-			.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal);
+		node->push_constant<glm::vec4>(color, vk::ShaderStageFlagBits::eFragment);
 		return node;
 	};
 	const NodeHandle green_node = graph.add(make_solid(green, green_image));
@@ -132,6 +131,9 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 				.setImageSubresource(
 					vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1))
 				.setImageExtent(vk::Extent3D{SIDE, SIDE, 1});
+		const auto* readback_ref = dynamic_cast<ValueData<veng::gpu::ImageRef>*>(graph.get_data(out_image));
+		res_pool.transition_image(readback_ref->value().pool_id, cmd, vk::ImageLayout::eTransferSrcOptimal,
+								  vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
 		cmd.copyImageToBuffer(sampler_ptr->scene()->image(), vk::ImageLayout::eTransferSrcOptimal, staging->buffer(),
 							  region);
 		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost, {},

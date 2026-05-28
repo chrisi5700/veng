@@ -253,7 +253,6 @@ int main()
 	cube->set_mesh(cube_mesh)
 		.add_uniform(cube_tint)
 		.clear_color({0.02F, 0.02F, 0.05F, 1.0F})
-		.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal)
 		.push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex);
 	const NodeHandle cube_node = graph.add(std::move(cube));
 	graph.set_producer(scene_image, cube_node);
@@ -267,9 +266,7 @@ int main()
 	// Silhouette: the cube mesh as a solid white mask (same MVP as the cube), left readable.
 	auto silhouette = std::make_unique<nodes::GraphicsNode>("demo/mesh.vert", "demo/silhouette.frag", scene_color,
 															vk::Format::eUndefined, 0, screen, silhouette_image);
-	silhouette->set_mesh(cube_mesh)
-		.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal)
-		.push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex);
+	silhouette->set_mesh(cube_mesh).push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex);
 	const NodeHandle silhouette_node = graph.add(std::move(silhouette));
 	graph.set_producer(silhouette_image, silhouette_node);
 
@@ -277,7 +274,6 @@ int main()
 	auto blur_h = std::make_unique<nodes::GraphicsNode>("demo/fullscreen.vert", "demo/blur_h.frag", scene_color,
 														vk::Format::eUndefined, 3, screen, blurred_h_image);
 	blur_h->add_sampled_image(silhouette_image, "silhouette")
-		.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal)
 		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment);
 	const NodeHandle blur_h_node = graph.add(std::move(blur_h));
 	graph.set_producer(blurred_h_image, blur_h_node);
@@ -287,7 +283,6 @@ int main()
 													  vk::Format::eUndefined, 3, screen, ring_image);
 	ring->add_sampled_image(blurred_h_image, "blurredH")
 		.add_sampled_image(silhouette_image, "silhouette")
-		.final_layout(vk::ImageLayout::eShaderReadOnlyOptimal)
 		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment);
 	const NodeHandle ring_node = graph.add(std::move(ring));
 	graph.set_producer(ring_image, ring_node);
