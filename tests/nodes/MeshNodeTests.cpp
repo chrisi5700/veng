@@ -121,7 +121,7 @@ TEST_CASE("a MeshNode uploads real vertices an indexed GraphicsNode draws", "[no
 	REQUIRE(plan.has_value());
 	REQUIRE(plan_contains(*plan, mesh_handle)); // cold: the mesh uploads
 	REQUIRE(plan_contains(*plan, node_handle)); // ...and the draw runs
-	graph.execute(*plan, scheduler, gpu_ctx);
+	REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
 	REQUIRE(node_ptr->scene() != nullptr);
 
 	const auto region =

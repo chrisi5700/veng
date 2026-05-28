@@ -80,7 +80,7 @@ TEST_CASE("a color-only GraphicsNode renders a triangle into a scene target", "[
 	const auto				  plan = graph.resolve(sinks);
 	REQUIRE(plan.has_value());
 	REQUIRE(plan->size() == 1);
-	graph.execute(*plan, scheduler, gpu_ctx); // records the triangle into the scene target
+	REQUIRE(graph.execute(*plan, scheduler, gpu_ctx)); // records the triangle into the scene target
 
 	REQUIRE(node_ptr->scene() != nullptr); // target was created
 

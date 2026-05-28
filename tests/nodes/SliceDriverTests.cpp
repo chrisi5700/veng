@@ -108,7 +108,7 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 		const std::array		  sinks{presented_image};
 		auto					  plan = graph.resolve(sinks);
 		REQUIRE(plan.has_value());
-		graph.execute(*plan, scheduler, gpu_ctx);
+		REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
 
 		REQUIRE(cmd->end() == vk::Result::eSuccess);
 		REQUIRE(ctx.graphics_queue().submit(vk::SubmitInfo().setCommandBuffers(*cmd), fence.value) ==
@@ -196,7 +196,7 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 	const std::array		  sinks{presented_image};
 	const auto				  plan = graph.resolve(sinks);
 	REQUIRE(plan.has_value());
-	graph.execute(*plan, scheduler, gpu_ctx); // raster -> blit into target, left TRANSFER_SRC
+	REQUIRE(graph.execute(*plan, scheduler, gpu_ctx)); // raster -> blit into target, left TRANSFER_SRC
 
 	const auto layers = vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);
 	cmd.copyImageToBuffer(

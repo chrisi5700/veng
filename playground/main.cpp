@@ -488,7 +488,14 @@ int main()
 		// from the acquired swapchain image): acquire_wait gates the blit, present_signal
 		// gates presentation, and in_flight is the slot's fence the next acquire will wait on.
 		gpu::GpuExecContext gpu(graph, ctx, pool, cmd.value(), slot);
-		graph.execute(plan, scheduler, gpu);
+		const bool			frame_ok = graph.execute(plan, scheduler, gpu);
+		if (!frame_ok)
+		{
+			// A node failed mid-frame: skip submit + present (and the on_submitted/on_retired
+			// dispatch). The failed node stays dirty and will be replanned next frame.
+			std::println(">> frame {} dropped (a node returned NODE_FAILED)", frame_index);
+			continue;
+		}
 
 		(void)cmd.value().end();
 		const auto*			presented_data = dynamic_cast<ValueData<gpu::ImageRef>*>(graph.get_data(presented_image));

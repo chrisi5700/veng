@@ -123,7 +123,7 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 		auto					  plan = graph.resolve(std::array{out_image});
 		REQUIRE(plan.has_value());
-		graph.execute(*plan, scheduler, gpu_ctx);
+		REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
 		REQUIRE(sampler_ptr->scene() != nullptr);
 
 		const auto region =

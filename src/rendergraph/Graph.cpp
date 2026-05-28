@@ -296,15 +296,15 @@ void Graph::run_node(Node& node, ExecContext& ctx, Revision revision, bool first
 	node.m_state.notify_all();
 }
 
-void Graph::execute(const FramePlan& plan, Scheduler& scheduler)
+bool Graph::execute(const FramePlan& plan, Scheduler& scheduler)
 {
 	// Default CPU context. Lives on the stack: execute is frame-synchronous (the band
 	// barriers below block until every task completes), so it outlives all tasks.
 	ExecContextImpl ctx{*this, plan.revision()};
-	execute(plan, scheduler, ctx);
+	return execute(plan, scheduler, ctx);
 }
 
-void Graph::execute(const FramePlan& plan, Scheduler& scheduler, ExecContext& ctx)
+bool Graph::execute(const FramePlan& plan, Scheduler& scheduler, ExecContext& ctx)
 {
 	const Revision revision = plan.revision();
 	const auto	   nodes	= plan.nodes();
@@ -359,6 +359,19 @@ void Graph::execute(const FramePlan& plan, Scheduler& scheduler, ExecContext& ct
 
 		begin = end;
 	}
+
+	// Post-execute status check: any node that ended in FAILED means the frame is unsafe to
+	// submit (with auto-barrier insertion, downstream nodes may have produced state assuming a
+	// dependency that never actually ran). The driver reads this and skips submit on failure;
+	// the failed node stays detectably stale (verified_at not advanced) so it re-plans next frame.
+	for (const NodeHandle handle : nodes)
+	{
+		if (get_node(handle)->state() == ExecutionState::FAILED)
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 std::expected<FramePlan, GraphError> Graph::frame(std::span<const DataHandle> sinks, Scheduler& scheduler)
@@ -366,7 +379,9 @@ std::expected<FramePlan, GraphError> Graph::frame(std::span<const DataHandle> si
 	auto plan = resolve(sinks);
 	if (plan.has_value())
 	{
-		execute(*plan, scheduler);
+		// frame() is the convenience CPU-side wrapper used by unit tests; the failure status is
+		// observable on the returned plan via individual node states, so we don't bubble it.
+		(void)execute(*plan, scheduler);
 	}
 	return plan;
 }

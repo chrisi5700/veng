@@ -101,7 +101,7 @@ TEST_CASE("frames in flight render into distinct N-buffered target copies", "[no
 		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, cmd, i % FRAMES_IN_FLIGHT);
 		auto					  plan = graph.resolve(std::array{token});
 		REQUIRE(plan.has_value());
-		graph.execute(*plan, scheduler, gpu_ctx);
+		REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
 		REQUIRE(node_ptr->scene() != nullptr);
 		target_copies[i] = node_ptr->scene(); // the physical copy written this frame
 

@@ -143,8 +143,14 @@ class Graph
 	/// The first overload uses the built-in CPU context; the second injects one — the
 	/// L4/L5 GPU path passes a `GpuExecContext` so `GpuNode`s see command buffers /
 	/// resources (design.md §L4). `ctx` must outlive the call (execute is synchronous).
-	void execute(const FramePlan& plan, Scheduler& scheduler);
-	void execute(const FramePlan& plan, Scheduler& scheduler, ExecContext& ctx);
+	///
+	/// Returns true if every node in the plan ended in `VALID`; false if any ended in
+	/// `FAILED`. A GPU-path caller MUST check this before submitting the recorded command
+	/// buffer — with auto-barrier insertion, a failed node may have produced state the
+	/// rest of the recording assumed; submitting a half-baked frame is the wrong recovery.
+	/// Marked `[[nodiscard]]` so a void-discard becomes a compile error.
+	[[nodiscard]] bool execute(const FramePlan& plan, Scheduler& scheduler);
+	[[nodiscard]] bool execute(const FramePlan& plan, Scheduler& scheduler, ExecContext& ctx);
 
 	/// Convenience: one full frame — resolve then execute.
 	[[nodiscard]] std::expected<FramePlan, GraphError> frame(std::span<const DataHandle> sinks, Scheduler& scheduler);

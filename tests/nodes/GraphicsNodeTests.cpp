@@ -113,7 +113,7 @@ TEST_CASE("a generic GraphicsNode draws a centered cube from an MVP edge and cac
 	const auto				  plan = graph.resolve(std::array{token});
 	REQUIRE(plan.has_value());
 	REQUIRE(plan_contains(*plan, node_handle)); // cold: the cube draw runs (alongside the mvp transform)
-	graph.execute(*plan, scheduler, gpu_ctx);
+	REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
 	REQUIRE(node_ptr->scene() != nullptr);
 
 	const auto region =

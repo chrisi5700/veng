@@ -81,7 +81,7 @@ TEST_CASE("ScreenshotNode captures a rendered image via on_retired (peer sink, n
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, *cmd, 0);
 	auto					  plan = graph.resolve(std::array{shot_done});
 	REQUIRE(plan.has_value());
-	graph.execute(*plan, scheduler, gpu_ctx);
+	REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
 	REQUIRE(cmd->end() == vk::Result::eSuccess);
 
 	// Submit (no swapchain semaphores — purely a fence-gated submission).

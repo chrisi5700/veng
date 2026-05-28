@@ -134,7 +134,7 @@ TEST_CASE("one GraphicsNode draws two meshes with per-draw push constants", "[no
 	const auto				  plan = graph.resolve(std::array{token});
 	REQUIRE(plan.has_value());
 	REQUIRE(plan_contains(*plan, node_handle));
-	graph.execute(*plan, scheduler, gpu_ctx);
+	REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
 	REQUIRE(node_ptr->scene() != nullptr);
 
 	const auto region =

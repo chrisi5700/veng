@@ -120,7 +120,7 @@ TEST_CASE("a GpuNode records through the injected GpuExecContext and the command
 	const auto		 plan = graph.resolve(sinks);
 	REQUIRE(plan.has_value());
 	REQUIRE(plan->size() == 1);
-	graph.execute(*plan, scheduler, gpu_ctx);
+	REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
 
 	// The seam delivered the right command buffer + frame slot.
 	REQUIRE(node_ptr->seen_command_buffer == cmd);
