@@ -44,6 +44,7 @@
 #include <veng/gpu/UniformRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/managers/CommandManager.hpp>
+#include <veng/managers/FrameExecutor.hpp>
 #include <veng/managers/QueueKind.hpp>
 #include <veng/managers/SwapchainManager.hpp>
 #include <veng/nodes/BlitNode.hpp>
@@ -203,13 +204,13 @@ int main()
 	auto  swapchain_image = graph.add_source<gpu::ImageRef>(gpu::ImageRef{});
 	auto  black_source	  = graph.add_source<gpu::ImageRef>(black_ref);
 
-	const DataHandle scene_image = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle ring_image	 = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle outlined_image	  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle presented_image  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle frame_done		  = graph.add(std::make_unique<ValueData<int>>(0));
-	const DataHandle cube_mesh		  = graph.add(std::make_unique<ValueData<gpu::MeshRef>>(gpu::MeshRef{}));
-	const DataHandle cube_tint		  = graph.add(std::make_unique<ValueData<gpu::UniformRef>>(gpu::UniformRef{}));
+	const DataHandle scene_image	 = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle ring_image		 = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle outlined_image	 = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle presented_image = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle frame_done		 = graph.add(std::make_unique<ValueData<int>>(0));
+	const DataHandle cube_mesh		 = graph.add(std::make_unique<ValueData<gpu::MeshRef>>(gpu::MeshRef{}));
+	const DataHandle cube_tint		 = graph.add(std::make_unique<ValueData<gpu::UniformRef>>(gpu::UniformRef{}));
 
 	// The cube's geometry is now real vertex data: a MeshNode uploads 24 vertices + 36 indices
 	// into GPU buffers once (then caches forever), publishing a MeshRef the cube node draws.
@@ -261,7 +262,7 @@ int main()
 	// `OutlinePass` we feed the silhouette meshes into. Internal nodes/edges (silhouette mask,
 	// blurred_h) are encapsulated; only the ring output (`ring_image`) crosses the boundary, so
 	// the composite below wires up the same way as if we had built the chain inline.
-	auto			 outline   = demo::create_outline_pass(graph, pool, scene_color, screen, ring_image);
+	auto outline = demo::create_outline_pass(graph, pool, scene_color, screen, ring_image);
 	outline.add_mesh(cube_mesh, mvp);
 	const NodeHandle ring_node = outline.ring_node();
 
@@ -284,6 +285,7 @@ int main()
 
 	CommandManager	commands(ctx);
 	InlineScheduler scheduler;
+	FrameExecutor	executor(ctx, swap, pool, commands, scheduler, swapchain_image, FRAMES_IN_FLIGHT);
 
 	std::mutex				graph_mutex;
 	std::condition_variable wake; // OnDemand: the writer pokes this when it mutates a source
@@ -332,16 +334,9 @@ int main()
 		return true;
 	};
 
-	std::uint64_t frame_index = 0;
-	// Per-slot list of GpuNodes that ran in the frame that previously occupied that slot — fired
-	// in on_retired once that slot's in-flight fence signals (at the next acquire). This is how a
-	// CPU readback sink (ScreenshotNode, future video encode) gets to use the staging buffer the
-	// frame's submit populated, without stalling the driver: the wait is the swapchain's normal
-	// per-slot fence wait, and the dispatch piggybacks on it.
-	std::array<std::vector<gpu::GpuNode*>, FRAMES_IN_FLIGHT> pending_retire;
-	bool													 space_was_down = false;
-	bool													 o_was_down		= false;
-	bool													 outline_on		= false;
+	bool space_was_down = false;
+	bool o_was_down		= false;
+	bool outline_on		= false;
 	while (!window.should_close())
 	{
 		window.poll();
@@ -392,40 +387,24 @@ int main()
 			}
 		}
 
-		// OnDemand: decide before spending anything. Resolve the demanded plan WITHOUT
-		// touching the swapchain image — if nothing upstream changed it is empty, so we idle
-		// (no acquire / submit / present) until the writer pokes us. This is the whole point:
-		// a static scene costs a sleeping thread and nothing else.
-		FramePlan plan;
-		if (pacing == Pacing::OnDemand)
-		{
-			std::unique_lock lock(graph_mutex);
-			auto			 resolved = graph.resolve(std::array{frame_done});
-			if (!resolved.has_value())
-			{
-				std::println("resolve failed");
-				break;
-			}
-			if (resolved->empty())
-			{
-				wake.wait_for(lock, std::chrono::milliseconds(16)); // sleep; timeout keeps events responsive
-				continue;
-			}
-			plan = std::move(resolved.value());
-		}
+		// One frame's worth of GPU work. The executor handles slot cycling, the pool's retirement
+		// window, swap acquire (and out-of-date), the per-slot on_retired dispatch, the CB
+		// lifecycle, graph.execute, queue.submit (sync from the acquired Frame), and the
+		// on_submitted dispatch with the PresentFrame info — under graph_mutex around its
+		// mutations + resolves.
+		const auto exec_pacing =
+			(pacing == Pacing::Continuous) ? FrameExecutor::Pacing::Continuous : FrameExecutor::Pacing::OnDemand;
+		auto outcome = executor.run_frame(graph, std::array{frame_done}, exec_pacing, &graph_mutex);
 
-		// Acquire the next image; this also waits out (and resets) the slot's in-flight
-		// fence, so the previous frame has retired and the command pool + this slot's pooled
-		// resources are safe to recycle. begin_frame advances the pool's retirement window.
-		const std::size_t slot = frame_index % FRAMES_IN_FLIGHT;
-		pool.begin_frame(frame_index);
-		auto acquired = swap.acquire(slot);
-		if (!acquired.has_value())
+		if (outcome.status == FrameExecutor::Status::Idled)
 		{
-			std::println("acquire failed: {}", vk::to_string(acquired.error()));
-			break;
+			// OnDemand had nothing to do — sleep on the writer's CV until something changes
+			// (timeout keeps window events responsive). Driver-side concern; not the executor's.
+			std::unique_lock lock(graph_mutex);
+			wake.wait_for(lock, std::chrono::milliseconds(16));
+			continue;
 		}
-		if (!acquired.value().has_value())
+		if (outcome.status == FrameExecutor::Status::OutOfDate)
 		{
 			if (!rebuild_for_resize(window.framebuffer_extent()))
 			{
@@ -433,105 +412,29 @@ int main()
 			}
 			continue;
 		}
-		// The slot's in-flight fence has just signaled (acquire waited it), so the frame that
-		// previously occupied this slot has fully retired. Fire its on_retired hooks before we
-		// recycle the slot's command pool / staging buffers.
-		gpu::SubmitContext retire_ctx(graph, ctx, slot);
-		for (gpu::GpuNode* sink : pending_retire[slot])
+		if (outcome.status == FrameExecutor::Status::NodeFailed)
 		{
-			sink->on_retired(retire_ctx);
+			std::println(">> frame {} dropped (a node returned NODE_FAILED)", executor.frame_index());
+			continue;
 		}
-		pending_retire[slot].clear();
-
-		commands.reset_frame(slot);
-		const SwapchainManager::Frame frame = acquired.value().value();
-		const gpu::ImageRef			  ref{.image		  = swap.image(frame.image_index),
-										  .extent		  = swap.extent(),
-										  .format		  = swap.format(),
-										  .index		  = frame.image_index,
-										  .acquire_wait	  = frame.image_available,
-										  .present_signal = frame.render_finished,
-										  .in_flight	  = frame.in_flight};
-
-		if (pacing == Pacing::OnDemand)
+		if (outcome.status == FrameExecutor::Status::AcquireFailed)
 		{
-			// Value only: the plan above already committed to render off a real data change;
-			// just hand the blit the freshly-acquired image. set_now never marks it dirty.
-			graph.set_now(swapchain_image, ref);
-		}
-		else
-		{
-			// Continuous: feed the image as a per-frame dirty pulse so blit + present always
-			// run, then resolve.
-			const std::scoped_lock lock(graph_mutex);
-			graph.set(swapchain_image, ref);
-			auto resolved = graph.resolve(std::array{frame_done});
-			if (!resolved.has_value())
-			{
-				std::println("resolve failed");
-				break;
-			}
-			plan = std::move(resolved.value());
-		}
-
-		auto cmd = commands.begin(QueueKind::Graphics, slot);
-		if (!cmd.has_value())
-		{
-			std::println("command buffer begin failed");
+			std::println("acquire/begin failed");
 			break;
 		}
 
-		// Execute records every GpuNode's commands into the shared CB. The driver — not any
-		// node — owns the CB lifecycle + submit, and dispatches the post-submit hook to every
-		// node in the plan; sinks (PresentNode, future screenshot/video) do their queue ops
-		// there. Submit sync rides on the presented_image edge (BlitNode's output, forwarded
-		// from the acquired swapchain image): acquire_wait gates the blit, present_signal
-		// gates presentation, and in_flight is the slot's fence the next acquire will wait on.
-		gpu::GpuExecContext gpu(graph, ctx, pool, cmd.value(), slot);
-		const bool			frame_ok = graph.execute(plan, scheduler, gpu);
-		if (!frame_ok)
-		{
-			// A node failed mid-frame: skip submit + present (and the on_submitted/on_retired
-			// dispatch). The failed node stays dirty and will be replanned next frame.
-			std::println(">> frame {} dropped (a node returned NODE_FAILED)", frame_index);
-			continue;
-		}
-
-		(void)cmd.value().end();
-		const auto*			presented_data = dynamic_cast<ValueData<gpu::ImageRef>*>(graph.get_data(presented_image));
-		const gpu::ImageRef present_ref	   = presented_data->value();
-		const vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eTransfer;
-		(void)ctx.graphics_queue().submit(vk::SubmitInfo()
-											  .setWaitSemaphores(present_ref.acquire_wait)
-											  .setWaitDstStageMask(wait_stage)
-											  .setCommandBuffers(cmd.value())
-											  .setSignalSemaphores(present_ref.present_signal),
-										  present_ref.in_flight);
-
-		gpu::SubmitContext sub_ctx(graph, ctx, slot);
-		for (const NodeHandle node : plan.nodes())
-		{
-			if (auto* sink = dynamic_cast<gpu::GpuNode*>(graph.get_node(node)))
-			{
-				sink->on_submitted(sub_ctx);
-				// Stage for on_retired at the next reuse of this slot (when this frame's fence
-				// will have signaled).
-				pending_retire[slot].push_back(sink);
-			}
-		}
-
+		// Status::Rendered — present may still report out-of-date (resize during the frame).
 		if (present_ptr->out_of_date() && !rebuild_for_resize(window.framebuffer_extent()))
 		{
 			break;
 		}
 
 		++presents;
-		++frame_index;
-		if (plan_contains(plan, cube_node))
+		if (plan_contains(outcome.plan, cube_node))
 		{
 			++cube_renders;
 		}
-		if (plan_contains(plan, ring_node)) // the outline branch ran this frame
+		if (plan_contains(outcome.plan, ring_node)) // the outline branch ran this frame
 		{
 			++outline_renders;
 		}

@@ -31,21 +31,15 @@ struct ImageRef
 	vk::Extent2D  extent{};
 	vk::Format	  format = vk::Format::eUndefined;
 
-	// Swapchain images only (0 / null for an offscreen target). `index` is the acquired
-	// image index `present` needs; the rest is this frame's present handoff, carried as
-	// data so the PresentNode is fully driven by the graph (no per-frame setter): the
-	// submit waits on `acquire_wait`, signals `present_signal` (which the presentation
-	// engine waits on), and signals `in_flight` (which the swapchain's next acquire of this
-	// slot waits on). All three are owned/managed by the SwapchainManager.
-	std::uint32_t index = 0;
-	vk::Semaphore acquire_wait{};	// image_available
-	vk::Semaphore present_signal{}; // render_finished
-	vk::Fence	  in_flight{};		// the slot's frame-in-flight fence
-
 	// The ResourcePool resource this ref's physical image is a copy of, or INVALID for an
 	// image the pool does not own (the swapchain, a test-owned target). A consumer that reads a
 	// pooled ref must `pool.touch(pool_id)` so the copy it is sampling is retained while in
 	// flight (N-buffering); see [[pass-draw-redesign]] and ResourcePool.
+	//
+	// Sync handles (the acquire / render-finished semaphores + the slot's in-flight fence + the
+	// acquired image index) used to ride here too; they are now driver/`FrameExecutor`-owned
+	// and flow to sinks through `gpu::SubmitContext` instead, so the edge value stays purely a
+	// reference to *the image* — no per-frame queue plumbing leaks through graph edges.
 	static constexpr std::uint32_t INVALID_POOL_ID = ~0U;
 	std::uint32_t				   pool_id		   = INVALID_POOL_ID;
 

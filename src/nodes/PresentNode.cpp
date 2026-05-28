@@ -30,20 +30,15 @@ std::expected<bool, graph::ExecError> PresentNode::record(gpu::GpuExecContext& c
 
 void PresentNode::on_submitted(gpu::SubmitContext& ctx) noexcept
 {
-	const auto* presented = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));
-	if (presented == nullptr)
+	// Per-frame present info comes from the driver/FrameExecutor through SubmitContext — it no
+	// longer rides on the input ImageRef edge (image refs don't leak queue plumbing anymore).
+	// The input edge stays purely for ordering: it makes the planner schedule us after the blit.
+	const auto& present = ctx.present_frame();
+	if (!present.has_value() || !present->present_signal)
 	{
 		return;
 	}
-	const gpu::ImageRef image = presented->value();
-	if (!image.image || !image.present_signal)
-	{
-		return;
-	}
-	// vkQueuePresentKHR is a queue op (not recordable), so it must run after submit — here, on
-	// the post-submit hook. The render-finished semaphore the submit signalled gates the
-	// presentation engine; the acquire_wait + in_flight fence were used by the submit itself.
-	auto presented_ok = m_swap->present(ctx.context().graphics_queue(), image.index, image.present_signal);
+	auto presented_ok = m_swap->present(ctx.context().graphics_queue(), present->image_index, present->present_signal);
 	m_out_of_date	  = presented_ok.has_value() ? presented_ok.value() : true;
 	++m_present_count;
 }

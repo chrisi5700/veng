@@ -68,10 +68,10 @@ target_link_libraries(veng_gpu INTERFACE veng_render_graph veng_context veng_res
 target_include_directories(veng_gpu INTERFACE ${CMAKE_SOURCE_DIR}/include)
 
 # L2.4 device-side managers — command pools (per queue/slot/thread) + the windowed
-# swapchain (over vk-bootstrap).
+# swapchain (over vk-bootstrap) + the per-frame FrameExecutor driving the GPU loop.
 target_add_library(veng_managers)
-target_sources(veng_managers PRIVATE managers/CommandManager.cpp managers/SwapchainManager.cpp)
-target_link_libraries(veng_managers PUBLIC veng_context PRIVATE vk-bootstrap::vk-bootstrap)
+target_sources(veng_managers PRIVATE managers/CommandManager.cpp managers/SwapchainManager.cpp managers/FrameExecutor.cpp)
+target_link_libraries(veng_managers PUBLIC veng_context veng_gpu PRIVATE vk-bootstrap::vk-bootstrap)
 
 # L4 nodes — concrete GPU graph nodes for the rendering slice.
 target_add_library(veng_nodes)
