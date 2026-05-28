@@ -40,6 +40,7 @@
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/gpu/MeshRef.hpp>
+#include <veng/gpu/SubmitContext.hpp>
 #include <veng/gpu/UniformRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/managers/CommandManager.hpp>
@@ -358,10 +359,16 @@ int main()
 		return true;
 	};
 
-	std::uint64_t frame_index	 = 0;
-	bool		  space_was_down = false;
-	bool		  o_was_down	 = false;
-	bool		  outline_on	 = false;
+	std::uint64_t frame_index = 0;
+	// Per-slot list of GpuNodes that ran in the frame that previously occupied that slot — fired
+	// in on_retired once that slot's in-flight fence signals (at the next acquire). This is how a
+	// CPU readback sink (ScreenshotNode, future video encode) gets to use the staging buffer the
+	// frame's submit populated, without stalling the driver: the wait is the swapchain's normal
+	// per-slot fence wait, and the dispatch piggybacks on it.
+	std::array<std::vector<gpu::GpuNode*>, FRAMES_IN_FLIGHT> pending_retire;
+	bool													 space_was_down = false;
+	bool													 o_was_down		= false;
+	bool													 outline_on		= false;
 	while (!window.should_close())
 	{
 		window.poll();
@@ -453,6 +460,16 @@ int main()
 			}
 			continue;
 		}
+		// The slot's in-flight fence has just signaled (acquire waited it), so the frame that
+		// previously occupied this slot has fully retired. Fire its on_retired hooks before we
+		// recycle the slot's command pool / staging buffers.
+		gpu::SubmitContext retire_ctx(graph, ctx, slot);
+		for (gpu::GpuNode* sink : pending_retire[slot])
+		{
+			sink->on_retired(retire_ctx);
+		}
+		pending_retire[slot].clear();
+
 		commands.reset_frame(slot);
 		const SwapchainManager::Frame frame = acquired.value().value();
 		const gpu::ImageRef			  ref{.image		  = swap.image(frame.image_index),
@@ -491,10 +508,37 @@ int main()
 			break;
 		}
 
-		// Execute records the cube + blit and, as the sink, the PresentNode ends the
-		// command buffer, submits it, and presents — all GPU/queue work lives in the graph.
+		// Execute records every GpuNode's commands into the shared CB. The driver — not any
+		// node — owns the CB lifecycle + submit, and dispatches the post-submit hook to every
+		// node in the plan; sinks (PresentNode, future screenshot/video) do their queue ops
+		// there. Submit sync rides on the presented_image edge (BlitNode's output, forwarded
+		// from the acquired swapchain image): acquire_wait gates the blit, present_signal
+		// gates presentation, and in_flight is the slot's fence the next acquire will wait on.
 		gpu::GpuExecContext gpu(graph, ctx, pool, cmd.value(), slot);
 		graph.execute(plan, scheduler, gpu);
+
+		(void)cmd.value().end();
+		const auto*			presented_data = dynamic_cast<ValueData<gpu::ImageRef>*>(graph.get_data(presented_image));
+		const gpu::ImageRef present_ref	   = presented_data->value();
+		const vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eTransfer;
+		(void)ctx.graphics_queue().submit(vk::SubmitInfo()
+											  .setWaitSemaphores(present_ref.acquire_wait)
+											  .setWaitDstStageMask(wait_stage)
+											  .setCommandBuffers(cmd.value())
+											  .setSignalSemaphores(present_ref.present_signal),
+										  present_ref.in_flight);
+
+		gpu::SubmitContext sub_ctx(graph, ctx, slot);
+		for (const NodeHandle node : plan.nodes())
+		{
+			if (auto* sink = dynamic_cast<gpu::GpuNode*>(graph.get_node(node)))
+			{
+				sink->on_submitted(sub_ctx);
+				// Stage for on_retired at the next reuse of this slot (when this frame's fence
+				// will have signaled).
+				pending_retire[slot].push_back(sink);
+			}
+		}
 
 		if (present_ptr->out_of_date() && !rebuild_for_resize(window.framebuffer_extent()))
 		{

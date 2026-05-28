@@ -98,6 +98,10 @@ target_link_libraries(MultiDrawTests PRIVATE veng_nodes veng_resources Catch2::C
 add_executable(NBufferingTests nodes/NBufferingTests.cpp)
 target_link_libraries(NBufferingTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# ScreenshotNode + on_retired — proves peer-sink + post-fence readback work without PresentNode.
+add_executable(ScreenshotNodeTests nodes/ScreenshotNodeTests.cpp)
+target_link_libraries(ScreenshotNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
 catch_discover_tests(ShaderValidationTests)
@@ -119,4 +123,5 @@ catch_discover_tests(UniformNodeTests)
 catch_discover_tests(SampledImageTests)
 catch_discover_tests(MultiDrawTests)
 catch_discover_tests(NBufferingTests)
+catch_discover_tests(ScreenshotNodeTests)
 

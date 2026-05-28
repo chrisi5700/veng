@@ -20,45 +20,31 @@ PresentNode::PresentNode(SwapchainManager& swap, graph::DataHandle presented_ima
 
 std::expected<bool, graph::ExecError> PresentNode::record(gpu::GpuExecContext& ctx)
 {
+	// No GPU work to record — the blit upstream already wrote the swapchain image and left it
+	// in PRESENT_SRC. The driver/executor ends + submits the shared command buffer (submission
+	// is no longer a node's job), and on_submitted issues the present queue op. Returning true
+	// stamps the frame-done output each frame, like a normal producer.
+	(void)ctx;
+	return true;
+}
+
+void PresentNode::on_submitted(gpu::SubmitContext& ctx) noexcept
+{
 	const auto* presented = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));
 	if (presented == nullptr)
 	{
-		return std::unexpected(graph::ExecError::MISSING_INPUT);
+		return;
 	}
 	const gpu::ImageRef image = presented->value();
-	if (!image.image || !image.acquire_wait || !image.present_signal || !image.in_flight)
+	if (!image.image || !image.present_signal)
 	{
-		return std::unexpected(graph::ExecError::NODE_FAILED);
+		return;
 	}
-
-	// Close the frame: the blit left the image in PRESENT_SRC, so all GPU work is now
-	// recorded. End the buffer and submit it — the acquire semaphore gates the blit (the
-	// swapchain image's first and only use here, a transfer), render-finished signals the
-	// presentation engine.
-	const vk::CommandBuffer cmd = ctx.command_buffer();
-	if (cmd.end() != vk::Result::eSuccess)
-	{
-		return std::unexpected(graph::ExecError::NODE_FAILED);
-	}
-
-	const vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eTransfer;
-	const auto					 submit		= vk::SubmitInfo()
-												  .setWaitSemaphores(image.acquire_wait)
-												  .setWaitDstStageMask(wait_stage)
-												  .setCommandBuffers(cmd)
-												  .setSignalSemaphores(image.present_signal);
-	if (ctx.context().graphics_queue().submit(submit, image.in_flight) != vk::Result::eSuccess)
-	{
-		return std::unexpected(graph::ExecError::NODE_FAILED);
-	}
-
+	// vkQueuePresentKHR is a queue op (not recordable), so it must run after submit — here, on
+	// the post-submit hook. The render-finished semaphore the submit signalled gates the
+	// presentation engine; the acquire_wait + in_flight fence were used by the submit itself.
 	auto presented_ok = m_swap->present(ctx.context().graphics_queue(), image.index, image.present_signal);
-	if (!presented_ok.has_value())
-	{
-		return std::unexpected(graph::ExecError::NODE_FAILED);
-	}
-	m_out_of_date = presented_ok.value();
+	m_out_of_date	  = presented_ok.has_value() ? presented_ok.value() : true;
 	++m_present_count;
-	return true;
 }
 } // namespace veng::nodes

@@ -1,19 +1,17 @@
 //
 // Created by chris on 5/25/26.
 //
-// L4 node — the frame terminator (design.md §L4 swapchain & present). It is the one
-// place a queue operation lives, because `vkQueuePresentKHR` is not a command that can
-// be recorded into the frame's command buffer — it must run *after* that buffer is
-// submitted. So when this node executes (last, as the graph sink) it: ends the recorded
-// command buffer, submits it (waiting on the acquire semaphore, signalling
-// render-finished), and presents. Everything upstream stays pure command-recording.
+// L4 sink node — present is a peer sink ([[pass-draw-redesign]]). `vkQueuePresentKHR` is a
+// queue op, not a recordable command, so it has to run *after* the frame's command buffer is
+// submitted. The driver/executor owns the CB lifecycle + submit; this node's `record` is a
+// no-op and the present call lives in `on_submitted`, the post-submit hook every `GpuNode`
+// inherits. That removes the old "unique terminal that ends the shared buffer" invariant — a
+// screenshot or video-encode sink can now coexist with present in the same frame, and a
+// headless renderer just has no present node at all.
 //
 // Its single input is the written swapchain `ImageData` (BlitNode's output), which both
-// orders it after the blit and carries the acquired image index + the two present
-// semaphores. The driver only acquires and feeds that ref in; this node closes the frame.
-//
-// PRECONDITION: this must be the unique terminal node — it ends the shared command
-// buffer, so any recording node not upstream of it would be truncated.
+// orders it after the blit and carries the acquired image index + the render-finished
+// semaphore the present call must wait on. The driver acquires and feeds that ref in.
 //
 
 #ifndef VENG_PRESENTNODE_HPP
@@ -52,6 +50,7 @@ class PresentNode final : public gpu::GpuNode
 
 	 protected:
 	[[nodiscard]] std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override;
+	void												on_submitted(gpu::SubmitContext& ctx) noexcept override;
 
 	 private:
 	SwapchainManager* m_swap;
