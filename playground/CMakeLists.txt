@@ -1,5 +1,5 @@
 
-target_add_executable(playground main.cpp Window.cpp)
+target_add_executable(playground main.cpp Window.cpp OutlinePass.cpp)
 target_compile_features(playground PRIVATE cxx_std_26)
 target_link_libraries(playground PRIVATE
         veng_render_graph veng_nodes veng_managers veng_gpu veng_pipelines veng_shader veng_context)

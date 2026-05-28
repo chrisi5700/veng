@@ -56,6 +56,7 @@
 #include <veng/resources/Image.hpp>
 #include <veng/resources/ResourcePool.hpp>
 
+#include "OutlinePass.hpp"
 #include "Window.hpp"
 
 using namespace veng;
@@ -202,10 +203,8 @@ int main()
 	auto  swapchain_image = graph.add_source<gpu::ImageRef>(gpu::ImageRef{});
 	auto  black_source	  = graph.add_source<gpu::ImageRef>(black_ref);
 
-	const DataHandle scene_image	  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle silhouette_image = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle blurred_h_image  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
-	const DataHandle ring_image		  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle scene_image = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
+	const DataHandle ring_image	 = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
 	const DataHandle outlined_image	  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
 	const DataHandle presented_image  = graph.add(std::make_unique<ValueData<gpu::ImageRef>>(gpu::ImageRef{}));
 	const DataHandle frame_done		  = graph.add(std::make_unique<ValueData<int>>(0));
@@ -257,35 +256,14 @@ int main()
 	const NodeHandle cube_node = graph.add(std::move(cube));
 	graph.set_producer(scene_image, cube_node);
 
-	// --- The outline branch: silhouette -> separable gaussian -> ring ----------------------
-	// 1/extent for the blur taps (in UV space), so the glow width is resolution-independent.
-	auto texel = graph.add_transform(
-		[](const vk::Extent2D& size) -> glm::vec2
-		{ return glm::vec2(1.0F / static_cast<float>(size.width), 1.0F / static_cast<float>(size.height)); }, screen);
-
-	// Silhouette: the cube mesh as a solid white mask (same MVP as the cube), left readable.
-	auto silhouette = std::make_unique<nodes::GraphicsNode>("demo/mesh.vert", "demo/silhouette.frag", scene_color,
-															vk::Format::eUndefined, 0, screen, silhouette_image);
-	silhouette->set_mesh(cube_mesh).push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex);
-	const NodeHandle silhouette_node = graph.add(std::move(silhouette));
-	graph.set_producer(silhouette_image, silhouette_node);
-
-	// Horizontal gaussian of the silhouette (fullscreen pass sampling it).
-	auto blur_h = std::make_unique<nodes::GraphicsNode>("demo/fullscreen.vert", "demo/blur_h.frag", scene_color,
-														vk::Format::eUndefined, 3, screen, blurred_h_image);
-	blur_h->add_sampled_image(silhouette_image, "silhouette")
-		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment);
-	const NodeHandle blur_h_node = graph.add(std::move(blur_h));
-	graph.set_producer(blurred_h_image, blur_h_node);
-
-	// Vertical gaussian + ring extraction (blurred minus sharp silhouette, tinted).
-	auto ring = std::make_unique<nodes::GraphicsNode>("demo/fullscreen.vert", "demo/ring.frag", scene_color,
-													  vk::Format::eUndefined, 3, screen, ring_image);
-	ring->add_sampled_image(blurred_h_image, "blurredH")
-		.add_sampled_image(silhouette_image, "silhouette")
-		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment);
-	const NodeHandle ring_node = graph.add(std::move(ring));
-	graph.set_producer(ring_image, ring_node);
+	// The outline branch (silhouette -> horizontal blur -> vertical blur + ring extract) is a
+	// composability test of the graph: a function builds the sub-graph and hands us back a small
+	// `OutlinePass` we feed the silhouette meshes into. Internal nodes/edges (silhouette mask,
+	// blurred_h) are encapsulated; only the ring output (`ring_image`) crosses the boundary, so
+	// the composite below wires up the same way as if we had built the chain inline.
+	auto			 outline   = demo::create_outline_pass(graph, pool, scene_color, screen, ring_image);
+	outline.add_mesh(cube_mesh, mvp);
+	const NodeHandle ring_node = outline.ring_node();
 
 	// Composite (fullscreen): scene + ring. The ring input starts on `black` (outline off) and
 	// O rebinds it to `ring_image`. Output is TRANSFER_SRC for the present blit.
