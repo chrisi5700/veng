@@ -76,8 +76,16 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 
 	m_commands->reset_frame(slot);
 
-	const gpu::ImageRef ref{
-		.image = m_swap->image(frame.image_index), .extent = m_swap->extent(), .format = m_swap->format()};
+	// Stamp the monotonic frame index into the ref's version so consecutive sets compare
+	// unequal even when the swapchain hands us the same vk::Image handle. Without this,
+	// Continuous mode's `graph.set(swapchain_handle, ref)` is a no-op whenever the swap
+	// recycles an image, BlitNode + PresentNode drop out of the plan, no present is issued,
+	// and we leak acquired images (vkAcquireNextImageKHR eventually deadlocks at UINT64_MAX
+	// because every swap image is already acquired).
+	const gpu::ImageRef ref{.image	 = m_swap->image(frame.image_index),
+							.extent	 = m_swap->extent(),
+							.format	 = m_swap->format(),
+							.version = m_frame_index};
 
 	if (pacing == Pacing::OnDemand)
 	{
