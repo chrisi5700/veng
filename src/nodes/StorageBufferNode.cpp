@@ -46,16 +46,17 @@ std::expected<bool, graph::ExecError> StorageBufferNode::record(gpu::GpuExecCont
 		std::memcpy(buffer.value()->mapped(), reading.bytes, element_bytes);
 	}
 
-	if (auto* out = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(m_output)); out != nullptr)
-	{
-		++m_version;
-		(void)out->produce(gpu::BufferRef{.buffer  = buffer.value()->buffer(),
-										  .size	   = element_bytes,
-										  .stride  = m_stride,
-										  .count   = reading.count,
-										  .name	   = m_name,
-										  .version = m_version});
-	}
+	// Publish the *allocated* size (>= one stride), not element_bytes: a consumer binds this as the
+	// descriptor range, and a range of 0 is invalid (VUID-VkDescriptorBufferInfo-range-00341). An
+	// empty array therefore binds a one-stride range the shader never reads — `count` (0) is what tells
+	// the consuming draw to emit zero instances, so nothing accesses it.
+	m_versioned.publish(ctx, m_output,
+						gpu::BufferRef{.buffer  = buffer.value()->buffer(),
+									   .size	= alloc_bytes,
+									   .stride  = m_stride,
+									   .count	= reading.count,
+									   .name	= m_name,
+									   .pool_id = m_buffer_id}); // let SSBO consumers retain this copy
 	return true;
 }
 } // namespace veng::nodes

@@ -29,10 +29,16 @@ namespace veng::gpu
 struct BufferRef
 {
 	vk::Buffer	   buffer{};
-	vk::DeviceSize size	  = 0; // total byte size = stride * count
+	vk::DeviceSize size	  = 0; // allocated byte range to bind (>= one stride; never 0, see StorageBufferNode)
 	std::uint32_t  stride = 0; // bytes per element
 	std::uint32_t  count  = 0; // number of elements (drives instanceCount of consuming draws)
 	std::string	   name;	   // the reflected descriptor binding this fills
+
+	// Pool id of the backing buffer (like gpu::ImageRef::pool_id). A consumer reading this ref while
+	// its producer is cached must `pool.consume(ref)` so the N-buffered copy it points at is retained
+	// for the in-flight window — otherwise the pool can recycle/destroy it out from under the read.
+	static constexpr std::uint32_t INVALID_POOL_ID = ~0U;
+	std::uint32_t				   pool_id		   = INVALID_POOL_ID;
 
 	// Producer-bumped version (see the file header).
 	std::uint64_t version = 0;

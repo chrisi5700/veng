@@ -25,6 +25,7 @@
 #include <expected>
 #include <memory>
 #include <vector>
+#include <veng/gpu/BufferRef.hpp>
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/Image.hpp>
@@ -91,6 +92,37 @@ class ResourcePool
 	/// producer's output is still being sampled from being recycled out from under the reader.
 	void touch(ImageId id) noexcept;
 
+	/// Consumer convenience: retain the pooled copy backing `ref` while this frame is in flight,
+	/// a no-op when `ref` is not pool-owned (the swapchain / a test target carries no pool id).
+	/// This folds the `if (ref.pool_id != INVALID) touch(ref.pool_id)` guard every sampling
+	/// consumer used to repeat into the pool itself, so a consumer reading an `ImageRef` cannot
+	/// forget the touch that keeps its copy from being recycled out from under an in-flight read
+	/// (the contract that used to live only in a comment on `ImageRef::pool_id`).
+	void consume(const gpu::ImageRef& ref) noexcept
+	{
+		if (ref.pool_id != gpu::ImageRef::INVALID_POOL_ID)
+		{
+			touch(ref.pool_id);
+		}
+	}
+
+	/// Buffer analogue of `touch(ImageId)`: stamp the current copy of `id` as used this frame so a
+	/// cached producer's buffer is retained while an in-flight consumer still references it. No-op for
+	/// an id never produced / out of range.
+	void touch_buffer(BufferId id) noexcept;
+
+	/// Buffer analogue of `consume(ImageRef)`: retain the pooled copy backing `ref` while this frame
+	/// is in flight (a no-op when `ref` is not pool-owned). A consumer binding an SSBO from a
+	/// StorageBufferNode whose producer may be cached this frame must call this — otherwise the pool
+	/// can recycle/destroy the copy out from under the descriptor set still referencing it.
+	void consume(const gpu::BufferRef& ref) noexcept
+	{
+		if (ref.pool_id != gpu::BufferRef::INVALID_POOL_ID)
+		{
+			touch_buffer(ref.pool_id);
+		}
+	}
+
 	/// Transition the current copy of `id` to `new_layout` on `cmd` if it is not already there,
 	/// using the prior usage's stage+access as the source of the barrier. This is the engine's
 	/// auto-barrier primitive: nodes declare what layout/stage/access they need via
@@ -109,6 +141,9 @@ class ResourcePool
 	/// reuse/retention behaviour).
 	[[nodiscard]] std::size_t image_copy_count(ImageId id) const noexcept;
 	[[nodiscard]] std::size_t buffer_copy_count(BufferId id) const noexcept;
+
+	/// Test lens: buffer copies set aside by a resize and not yet freed (awaiting retirement).
+	[[nodiscard]] std::size_t retiring_buffer_count() const noexcept { return m_retiring_buffers.size(); }
 
 	 private:
 	template <class T>
@@ -157,6 +192,7 @@ class ResourcePool
 	static constexpr std::size_t NONE = ~static_cast<std::size_t>(0);
 
 	void					   destroy() noexcept;
+	void					   purge_retired_buffers() noexcept;
 	[[nodiscard]] std::int64_t retired_through() const noexcept { return m_frame - m_frames_in_flight; }
 
 	vk::Device					m_device;
@@ -165,6 +201,10 @@ class ResourcePool
 	std::int64_t				m_frame = 0;
 	std::vector<ImageResource>	m_images;
 	std::vector<BufferResource> m_buffers;
+	// Buffer copies a resize moved aside: an in-flight frame may still reference them, so they are
+	// freed only once their last_use has retired (purged each begin_frame). A buffer resize is not
+	// gated by a device-idle the way an image resize is, so we cannot drop them outright.
+	std::vector<std::unique_ptr<Copy<Buffer>>> m_retiring_buffers;
 };
 } // namespace veng
 

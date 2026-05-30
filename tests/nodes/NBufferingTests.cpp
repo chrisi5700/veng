@@ -149,3 +149,35 @@ TEST_CASE("frames in flight render into distinct N-buffered target copies", "[no
 	}
 	device.destroyCommandPool(cmd_pool.value);
 }
+
+TEST_CASE("ResourcePool defers buffer-resize frees past the in-flight window", "[nodes][nbuffering][resize]")
+{
+	// A buffer resize (a cull's light-index list growing as the camera moves) must NOT free the old
+	// copies while an in-flight frame's descriptor set may still reference them — unlike an image
+	// resize, it isn't gated by a device-idle. The old copies are set aside and freed only once their
+	// last_use has aged past the in-flight window. Pure bookkeeping — no GPU work needed.
+	veng::Logger::instance().set_level(spdlog::level::warn);
+	auto			   ctx = make_context();
+	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 2); // two frames in flight
+	const veng::BufferId id = pool.declare_buffer(vk::BufferUsageFlagBits::eStorageBuffer);
+
+	// Frame 0: acquire size A and mark it read by an in-flight consumer this frame.
+	pool.begin_frame(0);
+	REQUIRE(pool.acquire_buffer(id, 64).has_value());
+	pool.touch_buffer(id);
+	REQUIRE(pool.retiring_buffer_count() == 0);
+
+	// Frame 1: resize. Frame 0 has not retired (2 in flight), so the size-A copy is set aside, not freed.
+	pool.begin_frame(1);
+	REQUIRE(pool.acquire_buffer(id, 128).has_value());
+	REQUIRE(pool.retiring_buffer_count() == 1);
+
+	// Frame 2: frame 0 has now retired. The purge runs in acquire_buffer (during node record, AFTER
+	// the slot's in-flight fence is waited), NOT in begin_frame (which runs before that wait) — so it
+	// takes a record-time acquire to free the copy. Purging in begin_frame would destroy a buffer a
+	// frame still executing on the GPU references (VUID-vkDestroyBuffer-00922).
+	pool.begin_frame(2);
+	REQUIRE(pool.retiring_buffer_count() == 1); // begin_frame alone must NOT free it (pre-fence-wait)
+	REQUIRE(pool.acquire_buffer(id, 128).has_value());
+	REQUIRE(pool.retiring_buffer_count() == 0); // the record-time acquire purges the now-retired copy
+}

@@ -194,7 +194,10 @@ TEST_CASE("StorageBufferNode handles an empty vector without faulting", "[nodes]
 	const veng::gpu::BufferRef& published = slot->value();
 	REQUIRE(published.buffer);
 	REQUIRE(published.count == 0);
-	REQUIRE(published.size == 0);
+	// size is the allocated range to bind, never 0 — a 0 descriptor range is invalid
+	// (VUID-VkDescriptorBufferInfo-range-00341). count=0 is what drives 0-instance draws, so the
+	// one-stride range is bound but never read.
+	REQUIRE(published.size == sizeof(Body));
 	REQUIRE(published.stride == sizeof(Body));
 
 	device.destroyFence(fence.value);

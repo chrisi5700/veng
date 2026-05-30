@@ -167,6 +167,27 @@ void ResourcePool::touch(ImageId id) noexcept
 	res.copies[res.current]->last_use = m_frame;
 }
 
+void ResourcePool::touch_buffer(BufferId id) noexcept
+{
+	if (id >= m_buffers.size())
+	{
+		return;
+	}
+	BufferResource& res = m_buffers[id];
+	if (res.current == NONE)
+	{
+		return;
+	}
+	res.copies[res.current]->last_use = m_frame;
+}
+
+void ResourcePool::purge_retired_buffers() noexcept
+{
+	std::erase_if(m_retiring_buffers,
+				  [retired = retired_through()](const std::unique_ptr<Copy<Buffer>>& copy)
+				  { return copy->last_use <= retired; });
+}
+
 void ResourcePool::transition_image(ImageId id, vk::CommandBuffer cmd, vk::ImageLayout new_layout,
 									vk::PipelineStageFlags2 new_stage, vk::AccessFlags2 new_access) noexcept
 {
@@ -239,9 +260,24 @@ std::expected<gpu::ImageRef, vk::Result> ResourcePool::constant_image(const Cont
 
 std::expected<Buffer*, vk::Result> ResourcePool::acquire_buffer(BufferId id, vk::DeviceSize size)
 {
+	// Free any resize graveyard entries that have now retired. This MUST run here, during node record,
+	// not in begin_frame — begin_frame is called before the swapchain acquire waits the slot's
+	// in-flight fence, so retired_through() is only accurate once we are past that wait (which we are
+	// by the time any node records). Purging in begin_frame would destroy buffers a frame still
+	// executing on the GPU references (VUID-vkDestroyBuffer-00922).
+	purge_retired_buffers();
+
 	BufferResource& res = m_buffers[id];
 	if (res.size != size)
 	{
+		// A buffer resize (e.g. a cull's light-index list growing as the camera moves) is NOT gated by
+		// a device-idle the way an image resize is, so an in-flight frame's descriptor set may still
+		// reference these copies. Move them to the retirement graveyard instead of freeing them now;
+		// purge_retired_buffers() (above) releases them once their last_use has aged past the window.
+		for (auto& copy : res.copies)
+		{
+			m_retiring_buffers.push_back(std::move(copy));
+		}
 		res.copies.clear();
 		res.size	= size;
 		res.current = NONE;
