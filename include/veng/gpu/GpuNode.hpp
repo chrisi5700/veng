@@ -51,20 +51,9 @@ class GpuNode : public graph::Node
 		return record(*gpu);
 	}
 
-	/// Post-submit hook for sinks. After the frame's command buffer is ended + submitted on the
-	/// graphics queue, the driver/executor invokes this once per `GpuNode` in the executed plan.
-	/// Default is a no-op; `PresentNode` overrides it to issue `vkQueuePresentKHR` (a queue op
-	/// that must follow submit), and future screenshot/video sinks would override to enqueue
-	/// their encode or schedule a fence-gated readback. Multiple sinks in one frame are peers
-	/// here — no node owns submission anymore (see [[pass-draw-redesign]]).
-	virtual void on_submitted(SubmitContext& ctx) noexcept { (void)ctx; }
-
-	/// Post-retirement hook for sinks needing the GPU work *complete* (not just submitted) —
-	/// e.g. a CPU readback that must wait the slot's in-flight fence before mapping the staging
-	/// buffer. The driver invokes it once per `GpuNode` of the frame that just retired in that
-	/// slot, at the next `acquire(slot)` (which waited the fence). Default no-op; `ScreenshotNode`
-	/// overrides it to write the captured pixels to disk.
-	virtual void on_retired(SubmitContext& ctx) noexcept { (void)ctx; }
+	// Post-submit / post-retire hooks moved to the dedicated gpu::Sink mixin (Sink.hpp): a node
+	// opts into them by inheriting Sink, instead of every GpuNode carrying no-op versions reached
+	// by a downcast. The driver dispatches over Sinks in the executed plan.
 
 	/// Declare the pool-backed images this node touches and the layout/stage/access it needs
 	/// each in *before* `record` runs. The executor (`GpuExecContext::prepare_for`) reads this

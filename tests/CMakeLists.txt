@@ -2,6 +2,9 @@ include(CTest)
 find_package(Catch2 3 REQUIRED)
 include(Catch)
 
+# Fetch the Khronos glTF sample models the integration tests render (gitignored, SHA256-pinned).
+include(${CMAKE_CURRENT_SOURCE_DIR}/assets/models.cmake)
+
 function(add_test_executable TARGET_NAME SRC_FILES)
     target_add_executable(${TARGET_NAME} ${SRC_FILES})
     target_link_libraries(${TARGET_NAME} PRIVATE Catch2::Catch2WithMain)
@@ -32,6 +35,11 @@ target_link_libraries(SchedulerTests PRIVATE veng_render_graph Catch2::Catch2Wit
 # L3 temporal / accumulation tests — demand-refresh + temporal self-edge (design §L4).
 add_executable(TemporalTests rendergraph/TemporalTests.cpp)
 target_link_libraries(TemporalTests PRIVATE veng_render_graph Catch2::Catch2WithMain)
+
+# Clustered-shading culling math — Vulkan-free (pure glm): froxel build + light assignment, and the
+# load-bearing build/analytic-mapping consistency round-trip.
+add_executable(ClusterTests culling/ClusterTests.cpp)
+target_link_libraries(ClusterTests PRIVATE veng_culling Catch2::Catch2WithMain)
 
 # L2 ComputePipeline tests — reflection-driven builder on a headless device.
 add_executable(ComputePipelineTests pipelines/ComputePipelineTests.cpp)
@@ -79,6 +87,23 @@ target_link_libraries(GraphicsNodeTests PRIVATE veng_nodes veng_resources Catch2
 add_executable(MeshNodeTests nodes/MeshNodeTests.cpp)
 target_link_libraries(MeshNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# MeshRef vertex-stride validation — a layout mismatch fails the frame, a match still renders.
+add_executable(MeshStrideTests nodes/MeshStrideTests.cpp)
+target_link_libraries(MeshStrideTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
+
+# Texture loader, mip generation, configurable sampler, sRGB decode — analytic readback.
+add_executable(TextureTests assets/TextureTests.cpp)
+target_link_libraries(TextureTests PRIVATE veng_assets veng_nodes veng_resources Catch2::Catch2WithMain)
+
+# Metallic-roughness PBR pass — analytic shading invariants (base colour, emissive, N.L).
+add_executable(PbrPassTests passes/PbrPassTests.cpp)
+target_link_libraries(PbrPassTests PRIVATE veng_passes veng_assets veng_nodes veng_resources Catch2::Catch2WithMain)
+
+# glTF loader integration — loads + renders the fetched Khronos sample models (SKIP if absent).
+add_executable(GltfLoaderTests assets/GltfLoaderTests.cpp)
+target_link_libraries(GltfLoaderTests PRIVATE veng_assets veng_passes veng_nodes veng_resources Catch2::Catch2WithMain)
+target_compile_definitions(GltfLoaderTests PRIVATE VENG_MODELS_DIR="${VENG_MODELS_DIR}")
+
 # Descriptor-set uniforms: a UniformNode feeds a GraphicsNode descriptor by reflected name,
 # and a new value re-invalidates the upload + draw (a reactive uniform).
 add_executable(UniformNodeTests nodes/UniformNodeTests.cpp)
@@ -118,6 +143,11 @@ target_link_libraries(NBufferingTests PRIVATE veng_nodes veng_resources Catch2::
 add_executable(ScreenshotNodeTests nodes/ScreenshotNodeTests.cpp)
 target_link_libraries(ScreenshotNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# PhongPass (L5) — locks the face-winding fix (eClockwise under the camera's Y-flip) and the
+# back-then-front transparency ordering: front renders, back is culled, translucent blends over opaque.
+add_executable(PhongPassTests nodes/PhongPassTests.cpp)
+target_link_libraries(PhongPassTests PRIVATE veng_passes veng_nodes veng_resources Catch2::Catch2WithMain)
+
 catch_discover_tests(ContextTests)
 catch_discover_tests(ShaderLoadingTests)
 catch_discover_tests(ShaderValidationTests)
@@ -135,6 +165,10 @@ catch_discover_tests(RasterTriangleTests)
 catch_discover_tests(SliceDriverTests)
 catch_discover_tests(GraphicsNodeTests)
 catch_discover_tests(MeshNodeTests)
+catch_discover_tests(MeshStrideTests)
+catch_discover_tests(TextureTests)
+catch_discover_tests(PbrPassTests)
+catch_discover_tests(GltfLoaderTests)
 catch_discover_tests(UniformNodeTests)
 catch_discover_tests(StorageBufferNodeTests)
 catch_discover_tests(InstancedDrawTests)
@@ -143,4 +177,5 @@ catch_discover_tests(SampledImageTests)
 catch_discover_tests(MultiDrawTests)
 catch_discover_tests(NBufferingTests)
 catch_discover_tests(ScreenshotNodeTests)
+catch_discover_tests(PhongPassTests)
 

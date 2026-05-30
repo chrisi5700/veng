@@ -29,6 +29,7 @@
 #include <vector>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
+#include <veng/gpu/VersionedOutput.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Buffer.hpp>
@@ -97,7 +98,7 @@ class StorageBufferNode final : public gpu::GpuNode
 	std::function<Reading(graph::ExecContext&)> m_read;
 	bool										m_declared	= false; // m_buffer_id declared in the pool?
 	BufferId									m_buffer_id = 0;	 // pool-owned, N-buffered storage buffer
-	std::uint64_t								m_version	= 0;	 // bumped on every upload for comparable BufferRef
+	gpu::VersionedOutput						m_versioned; // owns the per-upload version bump for the BufferRef
 };
 } // namespace veng::nodes
 

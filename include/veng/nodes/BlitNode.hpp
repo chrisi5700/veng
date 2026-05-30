@@ -22,6 +22,7 @@
 #include <span>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
+#include <veng/gpu/VersionedOutput.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -52,7 +53,7 @@ class BlitNode final : public gpu::GpuNode
 	graph::DataHandle				 m_output;
 	vk::ImageLayout					 m_final_layout;
 	std::size_t						 m_record_count = 0;
-	std::uint64_t					 m_version		= 0; // bumped on every produce for comparable ImageRef
+	gpu::VersionedOutput			 m_versioned; // owns the per-produce version bump for the forwarded ImageRef
 };
 } // namespace veng::nodes
 

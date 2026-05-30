@@ -31,10 +31,8 @@ OutlinePass create_outline_pass(veng::graph::Graph& graph, veng::ResourcePool& /
 	// 1/extent for the blur taps in UV space, so the glow width is resolution-independent. A
 	// pure CPU transform: changes only when the screen-size source changes.
 	const TypedHandle<glm::vec2> texel = graph.add_transform(
-		[](const vk::Extent2D& size) -> glm::vec2 {
-			return {1.0F / static_cast<float>(size.width), 1.0F / static_cast<float>(size.height)};
-		},
-		screen);
+		[](const vk::Extent2D& size) -> glm::vec2
+		{ return {1.0F / static_cast<float>(size.width), 1.0F / static_cast<float>(size.height)}; }, screen);
 
 	// Intermediate handles for the silhouette mask + the horizontal-blur output. Internal to
 	// this sub-graph; the caller never sees them.
@@ -44,10 +42,10 @@ OutlinePass create_outline_pass(veng::graph::Graph& graph, veng::ResourcePool& /
 	// Silhouette: a per-mesh white mask. Caller adds the meshes via `pass.add_mesh` after this
 	// function returns; we keep a raw pointer to the live node for the extension. (The graph
 	// owns the unique_ptr; the pointer is non-owning and stays valid while the graph lives.)
-	auto			  silhouette	 = std::make_unique<GraphicsNode>("demo/mesh.vert", "demo/silhouette.frag", format,
-																	  vk::Format::eUndefined, 0, screen, silhouette_image);
-	GraphicsNode*	  silhouette_ptr = silhouette.get();
-	const NodeHandle  silhouette_node = graph.add(std::move(silhouette));
+	auto			 silhouette = std::make_unique<GraphicsNode>("demo/mesh.vert", "demo/silhouette.frag", format,
+																 vk::Format::eUndefined, 0, screen, silhouette_image);
+	GraphicsNode*	 silhouette_ptr	 = silhouette.get();
+	const NodeHandle silhouette_node = graph.add(std::move(silhouette));
 	graph.set_producer(silhouette_image, silhouette_node);
 
 	// Horizontal Gaussian of the silhouette mask (fullscreen sampling).
@@ -59,8 +57,8 @@ OutlinePass create_outline_pass(veng::graph::Graph& graph, veng::ResourcePool& /
 	graph.set_producer(blurred_h_image, blur_h_node);
 
 	// Vertical Gaussian + ring extraction (blurred − sharp silhouette, tinted): the glow itself.
-	auto ring = std::make_unique<GraphicsNode>("demo/fullscreen.vert", "demo/ring.frag", format,
-											   vk::Format::eUndefined, 3, screen, output);
+	auto ring = std::make_unique<GraphicsNode>("demo/fullscreen.vert", "demo/ring.frag", format, vk::Format::eUndefined,
+											   3, screen, output);
 	ring->add_sampled_image(blurred_h_image, "blurredH")
 		.add_sampled_image(silhouette_image, "silhouette")
 		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment);

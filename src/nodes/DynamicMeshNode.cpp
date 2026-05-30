@@ -66,16 +66,13 @@ std::expected<bool, graph::ExecError> DynamicMeshNode::record(gpu::GpuExecContex
 		index_count	 = indices.count;
 	}
 
-	if (auto* out = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(m_output)); out != nullptr)
-	{
-		++m_version;
-		(void)out->produce(gpu::MeshRef{.vertex_buffer = vbuf.value()->buffer(),
-										.index_buffer  = index_handle,
-										.vertex_count  = vertices.count,
-										.index_count   = index_count,
-										.index_type	   = vk::IndexType::eUint32,
-										.version	   = m_version});
-	}
+	m_versioned.publish(ctx, m_output,
+						gpu::MeshRef{.vertex_buffer = vbuf.value()->buffer(),
+									 .index_buffer	= index_handle,
+									 .vertex_count	= vertices.count,
+									 .index_count	= index_count,
+									 .index_type	= vk::IndexType::eUint32,
+									 .vertex_stride = m_vertex_stride});
 	return true;
 }
 } // namespace veng::nodes

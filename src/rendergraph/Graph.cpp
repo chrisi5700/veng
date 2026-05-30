@@ -46,6 +46,11 @@ void Data::notify_mutation()
 	}
 }
 
+Data* Data::peer(DataHandle handle) const
+{
+	return m_graph != nullptr ? m_graph->get_data(handle) : nullptr;
+}
+
 NodeHandle Graph::add(std::unique_ptr<Node> node)
 {
 	const auto index = static_cast<std::uint32_t>(m_nodes.size());
@@ -174,6 +179,17 @@ std::expected<FramePlan, GraphError> Graph::resolve(std::span<const DataHandle> 
 		}
 	}
 	m_pending_sources.clear();
+	// History (feedback) slots re-snapshot their live slot's previous-frame value every frame,
+	// not just when externally mutated — so a producing node's change last frame propagates back
+	// to its temporal consumer this frame. Equality-gated, so a converged accumulator stops
+	// dirtying its consumer and the graph goes quiet (see graph::HistoryData).
+	for (const DataHandle handle : m_history)
+	{
+		if (Data* slot = get_data(handle); slot != nullptr && slot->commit_pending())
+		{
+			changed_sources.push_back(handle);
+		}
+	}
 	++m_revision;
 	for (const DataHandle handle : changed_sources)
 	{

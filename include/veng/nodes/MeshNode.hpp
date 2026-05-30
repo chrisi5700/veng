@@ -26,6 +26,7 @@
 #include <vector>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
+#include <veng/gpu/VersionedOutput.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Buffer.hpp>
@@ -47,6 +48,7 @@ class MeshNode final : public gpu::GpuNode
 		: m_output(output)
 		, m_vertex_count(static_cast<std::uint32_t>(vertices.size()))
 		, m_index_count(static_cast<std::uint32_t>(indices.size()))
+		, m_vertex_stride(static_cast<std::uint32_t>(sizeof(Vertex)))
 	{
 		const auto* vbytes = static_cast<const std::byte*>(static_cast<const void*>(vertices.data()));
 		m_vertex_bytes.assign(vbytes, vbytes + vertices.size_bytes());
@@ -64,11 +66,12 @@ class MeshNode final : public gpu::GpuNode
 	graph::DataHandle	   m_output;
 	std::uint32_t		   m_vertex_count;
 	std::uint32_t		   m_index_count;
+	std::uint32_t		   m_vertex_stride; // sizeof(Vertex) captured at construction (see gpu::MeshRef)
 	std::vector<std::byte> m_vertex_bytes;
 	std::vector<std::byte> m_index_bytes;
 	std::optional<Buffer>  m_vertex_buffer; // allocated + uploaded lazily on first record
 	std::optional<Buffer>  m_index_buffer;	// only if indices were given
-	std::uint64_t		   m_version = 0;	// bumped on every produce for comparable MeshRef
+	gpu::VersionedOutput   m_versioned;		// owns the per-produce version bump for the MeshRef
 };
 } // namespace veng::nodes
 

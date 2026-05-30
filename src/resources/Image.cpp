@@ -11,19 +11,20 @@ namespace veng
 {
 std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Device device, vk::Extent2D extent,
 											   vk::Format format, vk::ImageUsageFlags usage,
-											   vk::ImageAspectFlags aspect)
+											   vk::ImageAspectFlags aspect, std::uint32_t mip_levels)
 {
-	const auto image_info = vk::ImageCreateInfo()
-								.setImageType(vk::ImageType::e2D)
-								.setFormat(format)
-								.setExtent(vk::Extent3D{extent.width, extent.height, 1})
-								.setMipLevels(1)
-								.setArrayLayers(1)
-								.setSamples(vk::SampleCountFlagBits::e1)
-								.setTiling(vk::ImageTiling::eOptimal)
-								.setUsage(usage)
-								.setSharingMode(vk::SharingMode::eExclusive)
-								.setInitialLayout(vk::ImageLayout::eUndefined);
+	const std::uint32_t levels	   = mip_levels == 0 ? 1 : mip_levels;
+	const auto			image_info = vk::ImageCreateInfo()
+										 .setImageType(vk::ImageType::e2D)
+										 .setFormat(format)
+										 .setExtent(vk::Extent3D{extent.width, extent.height, 1})
+										 .setMipLevels(levels)
+										 .setArrayLayers(1)
+										 .setSamples(vk::SampleCountFlagBits::e1)
+										 .setTiling(vk::ImageTiling::eOptimal)
+										 .setUsage(usage)
+										 .setSharingMode(vk::SharingMode::eExclusive)
+										 .setInitialLayout(vk::ImageLayout::eUndefined);
 
 	vma::AllocationCreateInfo alloc_info{};
 	alloc_info.usage = vma::MemoryUsage::eAutoPreferDevice;
@@ -54,7 +55,7 @@ std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Dev
 									 .setSubresourceRange(vk::ImageSubresourceRange()
 															  .setAspectMask(aspect)
 															  .setBaseMipLevel(0)
-															  .setLevelCount(1)
+															  .setLevelCount(levels)
 															  .setBaseArrayLayer(0)
 															  .setLayerCount(1));
 		const auto view_result = device.createImageView(view_info);
@@ -66,11 +67,11 @@ std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Dev
 		view = view_result.value;
 	}
 
-	return Image(allocator, device, image, allocation, view, format, extent);
+	return Image(allocator, device, image, allocation, view, format, extent, levels);
 }
 
 Image::Image(vma::Allocator allocator, vk::Device device, vk::Image image, vma::Allocation allocation,
-			 vk::ImageView view, vk::Format format, vk::Extent2D extent) noexcept
+			 vk::ImageView view, vk::Format format, vk::Extent2D extent, std::uint32_t mip_levels) noexcept
 	: m_allocator(allocator)
 	, m_device(device)
 	, m_image(image)
@@ -78,6 +79,7 @@ Image::Image(vma::Allocator allocator, vk::Device device, vk::Image image, vma::
 	, m_view(view)
 	, m_format(format)
 	, m_extent(extent)
+	, m_mip_levels(mip_levels)
 {
 }
 
@@ -106,6 +108,7 @@ Image::Image(Image&& other) noexcept
 	, m_view(other.m_view)
 	, m_format(other.m_format)
 	, m_extent(other.m_extent)
+	, m_mip_levels(other.m_mip_levels)
 {
 	other.m_image	   = nullptr;
 	other.m_view	   = nullptr;
@@ -126,6 +129,7 @@ Image& Image::operator=(Image&& other) noexcept
 		m_view			   = other.m_view;
 		m_format		   = other.m_format;
 		m_extent		   = other.m_extent;
+		m_mip_levels	   = other.m_mip_levels;
 		other.m_image	   = nullptr;
 		other.m_view	   = nullptr;
 		other.m_allocation = nullptr;

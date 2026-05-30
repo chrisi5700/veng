@@ -174,6 +174,88 @@ TEST_CASE("an accumulator resets even when its input changed while it was undema
 	REQUIRE(value_of<int>(graph, acc_out) == 1); // (was 3 before the M7 fix — missed reset)
 }
 
+TEST_CASE("a history edge feeds a node its own previous output without a cycle", "[graph][temporal][history]")
+{
+	// The same temporal self-edge the AccumulationNode hand-rolls, now expressed with the
+	// first-class primitive: graph.add_history shadows a slot's previous-frame value and presents
+	// to the planner as a source, so a plain TransformNode can read the history of *its own*
+	// output. No custom node, no needs_refresh, no manual stamp compare — and crucially no cycle
+	// (resolve would return CYCLE_DETECTED if the feedback were a real edge).
+	Graph			graph;
+	InlineScheduler scheduler;
+
+	// out is produced by `node`; history(out) is fed back into `node` as its only input. The
+	// transform climbs by one per frame and clamps at 3 — a stand-in for "accumulate until
+	// converged" whose fixed point lets the equality-gated history fall quiet.
+	const DataHandle	   out	   = graph.add(std::make_unique<ValueData<int>>(0));
+	const TypedHandle<int> history = graph.add_history(TypedHandle<int>{out}, 0); // reads out as of the previous frame
+	const NodeHandle	   node	   = graph.add(std::make_unique<TransformNode<int(int)>>(
+		[](const int& prev) { return prev + 1 < 3 ? prev + 1 : 3; }, std::array<DataHandle, 1>{history.handle}, out));
+	graph.set_producer(out, node);
+
+	// Frames 1..3 climb 1,2,3 — each frame reads last frame's output through the history edge.
+	for (int expected = 1; expected <= 3; ++expected)
+	{
+		const auto plan = graph.frame(out, scheduler);
+		REQUIRE(plan.has_value()); // no cycle despite the self-feedback
+		REQUIRE(plan->size() == 1);
+		REQUIRE(value_of<int>(graph, out) == expected);
+	}
+
+	// Frame 4 still runs (history changed 2 -> 3 last frame) but the clamp makes the output
+	// stable, so produce reports no change.
+	REQUIRE(graph.frame(out, scheduler)->size() == 1);
+	REQUIRE(value_of<int>(graph, out) == 3);
+
+	// Frame 5: the history snapshot is now equal (3 == 3), so it stops dirtying the node and the
+	// plan is empty — the feedback loop converges and then costs nothing, purely via change
+	// propagation (design.md §1). This is what the manual needs_refresh path had to fake.
+	const auto converged = graph.frame(out, scheduler);
+	REQUIRE(converged.has_value());
+	REQUIRE(converged->empty());
+	REQUIRE(value_of<int>(graph, out) == 3);
+}
+
+TEST_CASE("a history edge re-runs its consumer when an upstream input perturbs the loop", "[graph][temporal][history]")
+{
+	// A history loop that has gone quiet must wake when something else in the graph changes the
+	// value it feeds back. Here `node` outputs base + min(prev+1, base+2): the feedback climbs to
+	// a fixed point relative to `base`, and bumping `base` re-energizes the loop.
+	Graph			graph;
+	InlineScheduler scheduler;
+
+	auto				   base	   = graph.add_source<int>(10);
+	const DataHandle	   out	   = graph.add(std::make_unique<ValueData<int>>(0));
+	const TypedHandle<int> history = graph.add_history(TypedHandle<int>{out}, 0);
+	const NodeHandle	   node	   = graph.add(std::make_unique<TransformNode<int(int, int)>>(
+		[](const int& prev, const int& b) { return prev < b ? prev + 1 : b; },
+		std::array<DataHandle, 2>{history.handle, static_cast<DataHandle>(base)}, out));
+	graph.set_producer(out, node);
+
+	// Climb to the fixed point (== base == 10) and converge.
+	for (int i = 0; i < 32; ++i)
+	{
+		if (graph.frame(out, scheduler)->empty())
+		{
+			break;
+		}
+	}
+	REQUIRE(value_of<int>(graph, out) == 10);
+	REQUIRE(graph.frame(out, scheduler)->empty()); // quiet at the fixed point
+
+	// Perturb the loop from outside: lowering base re-demands the node (base is a real input edge),
+	// and the feedback settles to the new fixed point.
+	graph.set(base, 7);
+	for (int i = 0; i < 32; ++i)
+	{
+		if (graph.frame(out, scheduler)->empty())
+		{
+			break;
+		}
+	}
+	REQUIRE(value_of<int>(graph, out) == 7);
+}
+
 TEST_CASE("an undemanded accumulator never refreshes", "[graph][temporal][lazy]")
 {
 	// Demand-driven evaluation still governs refreshing nodes: an accumulator that is

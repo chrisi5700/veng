@@ -34,6 +34,7 @@
 #include <memory>
 #include <mutex>
 #include <utility>
+#include <vector>
 #include <veng/context/Context.hpp>
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/managers/CommandManager.hpp>
@@ -52,15 +53,21 @@ namespace example
 {
 struct AppConfig
 {
-	const char*	 title				   = "veng example";
-	int			 width				   = 1280;
-	int			 height				   = 720;
-	glm::vec3	 camera_target		   = {0.0F, 0.0F, 0.0F};
-	float		 camera_distance	   = 6.0F;
-	float		 camera_yaw			   = 0.6F;
-	float		 camera_pitch		   = 0.45F;
-	vk::Format	 depth_format		   = vk::Format::eD32Sfloat;
-	std::size_t	 frames_in_flight	   = 2;
+	const char* title			 = "veng example";
+	int			width			 = 1280;
+	int			height			 = 720;
+	glm::vec3	camera_target	 = {0.0F, 0.0F, 0.0F};
+	float		camera_distance	 = 6.0F;
+	float		camera_yaw		 = 0.6F;
+	float		camera_pitch	 = 0.45F;
+	vk::Format	depth_format	 = vk::Format::eD32Sfloat;
+	std::size_t frames_in_flight = 2;
+	/// Render the scene into a linear-light HDR target (R16G16B16A16_SFLOAT) and resolve it to
+	/// the swapchain through an ACES tonemap pass, instead of rendering straight into the
+	/// swapchain's _SRGB format. Required for physically-correct PBR lighting (HDR headroom +
+	/// a single linear->sRGB encode at the end). The flat-colour demos leave it off.
+	bool  hdr	   = false;
+	float exposure = 1.0F; // linear exposure applied before the tonemap curve (hdr only)
 	/// Starting pacing for the loop; SPACE flips it at runtime.
 	veng::FrameExecutor::Pacing pacing = veng::FrameExecutor::Pacing::OnDemand;
 };
@@ -78,16 +85,16 @@ class AppLoop
 
 	// --- The handles the example uses to build its scene producer --------------------
 
-	[[nodiscard]] veng::graph::Graph&				 graph() noexcept { return m_graph; }
-	[[nodiscard]] Window&							 window() noexcept { return m_window; }
-	[[nodiscard]] OrbitCamera&						 camera() noexcept { return *m_camera; }
-	[[nodiscard]] veng::Context&					 context() noexcept { return *m_ctx; }
+	[[nodiscard]] veng::graph::Graph& graph() noexcept { return m_graph; }
+	[[nodiscard]] Window&			  window() noexcept { return m_window; }
+	[[nodiscard]] OrbitCamera&		  camera() noexcept { return *m_camera; }
+	[[nodiscard]] veng::Context&	  context() noexcept { return *m_ctx; }
 
 	[[nodiscard]] veng::graph::TypedHandle<vk::Extent2D> screen() const noexcept { return m_screen; }
 	[[nodiscard]] veng::graph::TypedHandle<glm::mat4>	 view_proj() const noexcept { return m_camera->view_proj(); }
 	[[nodiscard]] veng::graph::DataHandle				 scene_image() const noexcept { return m_scene_image; }
-	[[nodiscard]] vk::Format							 scene_color_format() const noexcept { return m_swap->format(); }
-	[[nodiscard]] vk::Format							 depth_format() const noexcept { return m_depth_format; }
+	[[nodiscard]] vk::Format scene_color_format() const noexcept { return m_scene_color_format; }
+	[[nodiscard]] vk::Format depth_format() const noexcept { return m_depth_format; }
 
 	// --- Driving graph mutations from a sim / writer thread --------------------------
 
@@ -109,7 +116,23 @@ class AppLoop
 	/// Run until the window closes. The optional `on_frame` hook fires after each
 	/// successful render (status == Rendered) with the executed plan — examples use it for
 	/// per-render telemetry (counting which optional subgraphs ran).
-	void run(std::function<void(const veng::graph::FramePlan&)> on_frame = {});
+	/// Demand an extra sink edge each frame (alongside the frame-closer tail). A pass whose work
+	/// lands outside the present chain — e.g. PickingPass's readback — registers its done-token
+	/// here so the driver pulls that branch into the plan when it has work. Call at setup.
+	void add_sink(veng::graph::DataHandle sink) { m_sinks.push_back(sink); }
+
+	/// Register a predicate that forces full, presenting frames while it returns true, even in
+	/// OnDemand pacing (which would otherwise idle on an unchanged graph). Use it for async work
+	/// that completes only across several rendered frames and must not stall — e.g. a GPU readback
+	/// whose result is delivered on frame retirement (`PickingPass::pending`). While any keep-alive
+	/// is active the loop renders as if Continuous, so the pipeline keeps draining; when they all
+	/// go false it returns to the configured pacing. Call at setup.
+	void add_keep_alive(std::function<bool()> predicate) { m_keep_alive.push_back(std::move(predicate)); }
+
+	/// `on_poll`, if set, runs once per loop iteration right after window polling (before the
+	/// frame) — the seam for per-iteration input that must be caught regardless of pacing, e.g.
+	/// click-to-pick. `on_frame` (above) runs only on rendered frames.
+	void run(std::function<void(const veng::graph::FramePlan&)> on_frame = {}, std::function<void()> on_poll = {});
 
 	 private:
 	void rebuild_swapchain(vk::Extent2D extent);
@@ -119,6 +142,7 @@ class AppLoop
 	std::unique_ptr<veng::Context>				  m_ctx;
 	std::unique_ptr<veng::SwapchainManager>		  m_swap;
 	vk::Format									  m_depth_format;
+	vk::Format									  m_scene_color_format; // HDR when config.hdr, else the swapchain format
 	std::unique_ptr<veng::ResourcePool>			  m_pool;
 	std::unique_ptr<veng::CommandManager>		  m_commands;
 	veng::graph::InlineScheduler				  m_scheduler;
@@ -126,6 +150,7 @@ class AppLoop
 	veng::graph::TypedHandle<vk::Extent2D>		  m_screen;
 	veng::graph::TypedHandle<veng::gpu::ImageRef> m_swapchain_image;
 	veng::graph::DataHandle						  m_scene_image;
+	veng::graph::DataHandle						  m_tonemapped_image; // hdr only: ACES resolve of m_scene_image
 	veng::graph::DataHandle						  m_presented_image;
 	veng::graph::DataHandle						  m_frame_done;
 	veng::nodes::PresentNode*					  m_present_ptr = nullptr;
@@ -133,6 +158,8 @@ class AppLoop
 	std::unique_ptr<OrbitCamera>				  m_camera;
 	std::mutex									  m_graph_mutex;
 	std::condition_variable						  m_wake;
+	std::vector<veng::graph::DataHandle>		  m_sinks; // frame-closer + pass-registered sinks
+	std::vector<std::function<bool()>>			  m_keep_alive; // force presenting frames while any is true
 };
 } // namespace example
 

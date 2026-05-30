@@ -221,6 +221,7 @@ std::expected<Context, ContextCreationError> Context::create(
 	vk::PhysicalDeviceFeatures features{};
 	features.tessellationShader = vk::True;
 	features.geometryShader		= vk::True;
+	features.samplerAnisotropy	= vk::True; // anisotropic filtering for sampled textures (review.md item 4)
 
 	vk::PhysicalDeviceVulkan11Features features11{};
 	features11.shaderDrawParameters = vk::True;

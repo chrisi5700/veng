@@ -1,0 +1,325 @@
+//
+// See veng/passes/PhongPass.hpp.
+//
+
+#include <array>
+#include <cstddef>
+#include <expected>
+#include <glm/glm.hpp>
+#include <memory>
+#include <optional>
+#include <span>
+#include <utility>
+#include <vector>
+#include <veng/gpu/GpuExecContext.hpp>
+#include <veng/gpu/GpuNode.hpp>
+#include <veng/gpu/ImageRef.hpp>
+#include <veng/gpu/MeshRef.hpp>
+#include <veng/gpu/VersionedOutput.hpp>
+#include <veng/passes/PhongPass.hpp>
+#include <veng/pipelines/GraphicsPipeline.hpp>
+#include <veng/rendergraph/data/Data.hpp>
+#include <veng/resources/Image.hpp>
+#include <veng/resources/ResourcePool.hpp>
+#include <veng/shader/Shader.hpp>
+
+namespace veng::passes
+{
+namespace
+{
+// The single 160-byte vertex push block — must match phong.vert's PushData exactly.
+struct PhongPush
+{
+	glm::mat4 model;	 // 0
+	glm::mat4 view_proj; // 64
+	glm::vec4 color;	 // 128 (rgb tint, a opacity)
+	glm::vec4 eye;		 // 144 (xyz eye, w shininess)
+};
+static_assert(sizeof(PhongPush) == 160, "PhongPush must match the shader's 160-byte push block");
+} // namespace
+
+// The rendering half of the pass: a custom GpuNode owning one color + depth target, drawing every
+// object opaque-first then transparent-back-then-front with three pipelines built from the one
+// shader pair. See PhongPass.hpp for the rationale (a GraphicsNode can't share a depth buffer).
+class PhongRenderNode final : public gpu::GpuNode
+{
+	 public:
+	PhongRenderNode(vk::Format color_format, vk::Format depth_format, graph::DataHandle screen,
+					graph::DataHandle output, graph::DataHandle view_proj, graph::DataHandle eye,
+					PhongConfig config) noexcept
+		: m_color_format(color_format)
+		, m_depth_format(depth_format)
+		, m_output(output)
+		, m_view_proj(view_proj)
+		, m_eye(eye)
+		, m_config(config)
+		, m_inputs{screen, view_proj, eye}
+	{
+	}
+
+	void add_object(graph::DataHandle mesh, graph::DataHandle model, glm::vec4 color, float shininess)
+	{
+		m_objects.push_back(Object{
+			.mesh = mesh, .model = model, .color = color, .shininess = shininess, .transparent = color.a < 1.0F});
+		m_inputs.push_back(mesh);
+		m_inputs.push_back(model);
+		mark_dirty();
+	}
+
+	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return m_inputs; }
+	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
+
+	 protected:
+	std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override
+	{
+		if (auto built = ensure_pipelines(ctx); !built.has_value())
+		{
+			return std::unexpected(built.error());
+		}
+
+		const auto* size = dynamic_cast<graph::ValueData<vk::Extent2D>*>(ctx.data(m_inputs[0]));
+		if (size == nullptr)
+		{
+			return std::unexpected(graph::ExecError::MISSING_INPUT);
+		}
+		const vk::Extent2D extent = size->value();
+		if (extent.width == 0 || extent.height == 0)
+		{
+			return std::unexpected(graph::ExecError::NODE_FAILED);
+		}
+
+		const auto* view_proj_d = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(m_view_proj));
+		const auto* eye_d		= dynamic_cast<graph::ValueData<glm::vec4>*>(ctx.data(m_eye));
+		if (view_proj_d == nullptr || eye_d == nullptr)
+		{
+			return std::unexpected(graph::ExecError::MISSING_INPUT);
+		}
+		const glm::mat4 view_proj = view_proj_d->value();
+		const glm::vec3 eye_pos	  = glm::vec3(eye_d->value());
+
+		// Declare the pool-backed color + depth targets once; acquire this frame's copies.
+		if (!m_declared)
+		{
+			m_color_id = ctx.pool().declare_image(m_color_format, vk::ImageUsageFlagBits::eColorAttachment |
+																	  vk::ImageUsageFlagBits::eTransferSrc |
+																	  vk::ImageUsageFlagBits::eSampled);
+			m_depth_id = ctx.pool().declare_image(m_depth_format, vk::ImageUsageFlagBits::eDepthStencilAttachment,
+												  vk::ImageAspectFlagBits::eDepth);
+			m_declared = true;
+		}
+		auto color = ctx.pool().acquire_image(m_color_id, extent);
+		auto depth = ctx.pool().acquire_image(m_depth_id, extent);
+		if (!color.has_value() || !depth.has_value())
+		{
+			return std::unexpected(graph::ExecError::NODE_FAILED);
+		}
+		Image* const color_image = color.value();
+		Image* const depth_image = depth.value();
+
+		const vk::CommandBuffer cmd = ctx.command_buffer();
+		ctx.pool().transition_image(m_color_id, cmd, vk::ImageLayout::eColorAttachmentOptimal,
+									vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+									vk::AccessFlagBits2::eColorAttachmentWrite);
+		ctx.pool().transition_image(m_depth_id, cmd, vk::ImageLayout::eDepthStencilAttachmentOptimal,
+									vk::PipelineStageFlagBits2::eEarlyFragmentTests,
+									vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
+
+		const auto color_clear		= vk::ClearValue().setColor(vk::ClearColorValue(m_config.clear_color));
+		const auto color_attachment = vk::RenderingAttachmentInfo()
+										  .setImageView(color_image->view())
+										  .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+										  .setLoadOp(vk::AttachmentLoadOp::eClear)
+										  .setStoreOp(vk::AttachmentStoreOp::eStore)
+										  .setClearValue(color_clear);
+		const auto depth_clear		= vk::ClearValue().setDepthStencil(vk::ClearDepthStencilValue(1.0F, 0));
+		const auto depth_attachment = vk::RenderingAttachmentInfo()
+										  .setImageView(depth_image->view())
+										  .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
+										  .setLoadOp(vk::AttachmentLoadOp::eClear)
+										  .setStoreOp(vk::AttachmentStoreOp::eDontCare)
+										  .setClearValue(depth_clear);
+		const auto rendering		= vk::RenderingInfo()
+										  .setRenderArea(vk::Rect2D({0, 0}, extent))
+										  .setLayerCount(1)
+										  .setColorAttachments(color_attachment)
+										  .setPDepthAttachment(&depth_attachment);
+		cmd.beginRendering(rendering);
+		cmd.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(extent.width), static_cast<float>(extent.height),
+										0.0F, 1.0F));
+		cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+
+		// Opaque first (writes depth), then each translucent object's far faces, then its near
+		// faces — both depth-tested against the opaque pass but not writing depth, alpha-blended.
+		struct Batch
+		{
+			const GraphicsPipeline* pipe;
+			bool					transparent;
+		};
+		const auto draw_batch = [&](const Batch& batch) -> std::expected<void, graph::ExecError>
+		{
+			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, batch.pipe->pipeline());
+			for (const Object& obj : m_objects)
+			{
+				if (obj.transparent != batch.transparent)
+				{
+					continue;
+				}
+				const auto* model_d = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(obj.model));
+				const auto* mesh_d	= dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(obj.mesh));
+				if (model_d == nullptr || mesh_d == nullptr)
+				{
+					return std::unexpected(graph::ExecError::MISSING_INPUT);
+				}
+				const gpu::MeshRef mesh = mesh_d->value();
+				if (!mesh.vertex_buffer)
+				{
+					continue; // mesh not uploaded yet — skip until its MeshNode has produced
+				}
+				// eye.w carries the specular exponent: per-object when set (>= 0), else the config default.
+				const float		shininess = obj.shininess >= 0.0F ? obj.shininess : m_config.shininess;
+				const PhongPush push{.model		= model_d->value(),
+									 .view_proj = view_proj,
+									 .color		= obj.color,
+									 .eye		= glm::vec4(eye_pos, shininess)};
+				cmd.pushConstants<std::byte>(
+					batch.pipe->layout(), vk::ShaderStageFlagBits::eVertex, 0,
+					vk::ArrayProxy<const std::byte>(static_cast<std::uint32_t>(sizeof(PhongPush)),
+													static_cast<const std::byte*>(static_cast<const void*>(&push))));
+				const vk::DeviceSize offset = 0;
+				cmd.bindVertexBuffers(0, mesh.vertex_buffer, offset);
+				if (mesh.index_buffer)
+				{
+					cmd.bindIndexBuffer(mesh.index_buffer, 0, mesh.index_type);
+					cmd.drawIndexed(mesh.index_count, 1, 0, 0, 0);
+				}
+				else
+				{
+					cmd.draw(mesh.vertex_count, 1, 0, 0);
+				}
+			}
+			return {};
+		};
+
+		std::expected<void, graph::ExecError> drawn = draw_batch(Batch{.pipe = &*m_opaque, .transparent = false});
+		if (drawn.has_value())
+		{
+			drawn = draw_batch(Batch{.pipe = &*m_transparent_back, .transparent = true});
+		}
+		if (drawn.has_value())
+		{
+			drawn = draw_batch(Batch{.pipe = &*m_transparent_front, .transparent = true});
+		}
+		cmd.endRendering();
+		if (!drawn.has_value())
+		{
+			return std::unexpected(drawn.error());
+		}
+
+		// Publish the lit-scene ref (version-bumped so consumers see the change). Left in
+		// eColorAttachmentOptimal; the consumer's image_usages drives the transition it needs.
+		m_versioned.publish(ctx, m_output,
+							gpu::ImageRef{.image   = color_image->image(),
+										  .view	   = color_image->view(),
+										  .extent  = extent,
+										  .format  = m_color_format,
+										  .pool_id = m_color_id});
+		return true;
+	}
+
+	 private:
+	struct Object
+	{
+		graph::DataHandle mesh;
+		graph::DataHandle model;
+		glm::vec4		  color;
+		float			  shininess; // per-object specular exponent; < 0 => use PhongConfig::shininess
+		bool			  transparent;
+	};
+
+	std::expected<void, graph::ExecError> ensure_pipelines(gpu::GpuExecContext& ctx)
+	{
+		if (m_opaque.has_value())
+		{
+			return {};
+		}
+		auto vert = Shader::create_shader(ctx.device(), "passes/phong.vert");
+		auto frag = Shader::create_shader(ctx.device(), "passes/phong.frag");
+		if (!vert.has_value() || !frag.has_value())
+		{
+			return std::unexpected(graph::ExecError::NODE_FAILED);
+		}
+		const std::array color_formats{m_color_format};
+		// All three pipelines share the shader pair; only cull / depth-write / blend differ.
+		struct PipeState
+		{
+			vk::CullModeFlags cull;
+			bool			  depth_write;
+			bool			  blend;
+		};
+		const auto make = [&](const PipeState& state) -> std::expected<GraphicsPipeline, PipelineError>
+		{
+			GraphicsPipelineBuilder builder(vert.value(), frag.value());
+			// FrontFace is eClockwise, NOT eCounterClockwise: the engine geometry is CCW-front in
+			// world space, but the camera's projection negates Y for Vulkan clip space
+			// (proj[1][1] *= -1), which flips triangle winding in *framebuffer* space — where Vulkan
+			// decides facing. So world-front triangles read as clockwise here, and eBack then culls
+			// the true far faces (eFront the near). Get this wrong and back-then-front inverts:
+			// the "front" batch draws far faces last and you see only backfaces.
+			builder.color_formats(color_formats)
+				.depth_format(m_depth_format)
+				.depth_write(state.depth_write)
+				.rasterization(vk::PolygonMode::eFill, state.cull, vk::FrontFace::eClockwise)
+				.blend(state.blend);
+			return builder.build(ctx.context());
+		};
+		// front faces, write depth | far faces of glass | near faces of glass
+		auto opaque = make(PipeState{.cull = vk::CullModeFlagBits::eBack, .depth_write = true, .blend = false});
+		auto back	= make(PipeState{.cull = vk::CullModeFlagBits::eFront, .depth_write = false, .blend = true});
+		auto front	= make(PipeState{.cull = vk::CullModeFlagBits::eBack, .depth_write = false, .blend = true});
+		if (!opaque.has_value() || !back.has_value() || !front.has_value())
+		{
+			return std::unexpected(graph::ExecError::NODE_FAILED);
+		}
+		m_opaque			= std::move(opaque.value());
+		m_transparent_back	= std::move(back.value());
+		m_transparent_front = std::move(front.value());
+		return {};
+	}
+
+	vk::Format					   m_color_format;
+	vk::Format					   m_depth_format;
+	graph::DataHandle			   m_output;
+	graph::DataHandle			   m_view_proj;
+	graph::DataHandle			   m_eye;
+	PhongConfig					   m_config;
+	std::vector<graph::DataHandle> m_inputs; // [screen, view_proj, eye, then mesh+model per object]
+	std::vector<Object>			   m_objects;
+
+	std::optional<GraphicsPipeline> m_opaque;
+	std::optional<GraphicsPipeline> m_transparent_back;
+	std::optional<GraphicsPipeline> m_transparent_front;
+
+	bool				 m_declared = false;
+	ImageId				 m_color_id = 0;
+	ImageId				 m_depth_id = 0;
+	gpu::VersionedOutput m_versioned;
+};
+
+PhongPass::PhongPass(graph::Graph& graph, vk::Format color_format, vk::Format depth_format,
+					 graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
+					 graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye,
+					 const PhongConfig& config)
+	: m_graph(&graph)
+	, m_output(output)
+{
+	auto render = std::make_unique<PhongRenderNode>(color_format, depth_format, screen, output, view_proj, eye, config);
+	m_render	= render.get();
+	m_node		= graph.add(std::move(render));
+	graph.set_producer(output, m_node);
+}
+
+void PhongPass::add_object(graph::DataHandle mesh, graph::DataHandle model, glm::vec4 color, float shininess)
+{
+	m_render->add_object(mesh, model, color, shininess);
+}
+} // namespace veng::passes

@@ -27,6 +27,7 @@
 #include <veng/context/Context.hpp>
 #include <veng/gpu/GpuNode.hpp>
 #include <veng/gpu/ImageRef.hpp>
+#include <veng/gpu/Sink.hpp>
 #include <veng/managers/CommandManager.hpp>
 #include <veng/managers/SwapchainManager.hpp>
 #include <veng/rendergraph/Graph.hpp>
@@ -86,9 +87,9 @@ class FrameExecutor
 	std::size_t						  m_frames_in_flight;
 	std::uint64_t					  m_frame_index = 0;
 
-	// Per-slot list of GpuNodes that ran in the frame that previously held that slot; fired in
+	// Per-slot list of Sinks that ran in the frame that previously held that slot; fired in
 	// on_retired at the next `acquire(slot)` (which waited the fence, so they have retired).
-	std::vector<std::vector<gpu::GpuNode*>> m_pending_retire;
+	std::vector<std::vector<gpu::Sink*>> m_pending_retire;
 };
 } // namespace veng
 

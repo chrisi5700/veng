@@ -52,12 +52,22 @@ class CommandManager
 	/// when that slot's frame has retired on the GPU (see the contract above).
 	void reset_frame(std::size_t frame_slot);
 
-	/// synchronization2 image layout transition helper.
+	/// synchronization2 image layout transition helper (one mip level, base 0).
 	static void image_barrier(vk::CommandBuffer cmd, vk::Image image, vk::ImageLayout old_layout,
 							  vk::ImageLayout new_layout, vk::PipelineStageFlags2 src_stage,
 							  vk::AccessFlags2 src_access, vk::PipelineStageFlags2 dst_stage,
 							  vk::AccessFlags2	   dst_access,
 							  vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor);
+
+	/// synchronization2 transition for a specific mip range. The blit-down mip-chain generator
+	/// transitions individual levels (e.g. level i to TRANSFER_SRC after writing it, before
+	/// sampling it as the source for level i+1), so it needs to target a single, non-zero level.
+	static void image_barrier_range(vk::CommandBuffer cmd, vk::Image image, vk::ImageLayout old_layout,
+									vk::ImageLayout new_layout, vk::PipelineStageFlags2 src_stage,
+									vk::AccessFlags2 src_access, vk::PipelineStageFlags2 dst_stage,
+									vk::AccessFlags2 dst_access, std::uint32_t base_mip_level,
+									std::uint32_t		 level_count,
+									vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor);
 
 	 private:
 	using PoolKey = std::tuple<std::size_t, std::thread::id, std::uint8_t>; // (slot, thread, queue)

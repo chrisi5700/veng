@@ -54,11 +54,8 @@ std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 	}
 
 	// Retain the pooled source copy we read while this frame is in flight (the dst is the
-	// swapchain / a test target — not pool-owned, so it carries no pool id).
-	if (source.pool_id != gpu::ImageRef::INVALID_POOL_ID)
-	{
-		ctx.pool().touch(source.pool_id);
-	}
+	// swapchain / a test target — not pool-owned, so consume is a no-op for it).
+	ctx.pool().consume(source);
 
 	const vk::CommandBuffer cmd = ctx.command_buffer();
 
@@ -93,12 +90,10 @@ std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 								  to_present ? vk::AccessFlagBits2::eNone : vk::AccessFlagBits2::eTransferRead);
 
 	// Forward the written target so the next node is ordered after us and sees the image
-	// (carries the swapchain index + present semaphores the PresentNode needs). Bump the
-	// version so the published ImageRef compares unequal across consecutive blits even when
-	// the swapchain hands us the same underlying image.
-	gpu::ImageRef forwarded = target;
-	forwarded.version		= ++m_version;
-	(void)out->produce(forwarded);
+	// (carries the swapchain index + present semaphores the PresentNode needs). The version bump
+	// (owned by m_versioned) makes the published ImageRef compare unequal across consecutive
+	// blits even when the swapchain hands us the same underlying image.
+	m_versioned.publish(ctx, m_output, target);
 	++m_record_count;
 	return true;
 }

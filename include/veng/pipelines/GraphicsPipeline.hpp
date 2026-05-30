@@ -66,6 +66,9 @@ class GraphicsPipelineBuilder
 	GraphicsPipelineBuilder& depth_write(bool enabled);
 	GraphicsPipelineBuilder& topology(vk::PrimitiveTopology topology);
 	GraphicsPipelineBuilder& rasterization(vk::PolygonMode polygon, vk::CullModeFlags cull, vk::FrontFace front);
+	/// Enable straight-alpha blending on every color attachment (src*srcA + dst*(1-srcA)). Off by
+	/// default (opaque, write-all). Needed for transparent passes.
+	GraphicsPipelineBuilder& blend(bool enabled);
 
 	[[nodiscard]] std::expected<GraphicsPipeline, PipelineError> build(const Context&	 context,
 																	   vk::PipelineCache cache = {}) const;
@@ -80,6 +83,7 @@ class GraphicsPipelineBuilder
 	vk::PolygonMode			m_polygon	   = vk::PolygonMode::eFill;
 	vk::CullModeFlags		m_cull		   = vk::CullModeFlagBits::eBack;
 	vk::FrontFace			m_front_face   = vk::FrontFace::eCounterClockwise;
+	bool					m_blend		   = false;
 };
 } // namespace veng
 

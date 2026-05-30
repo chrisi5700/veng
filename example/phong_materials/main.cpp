@@ -215,7 +215,7 @@ int main()
 	const example::Mesh sphere_mesh = example::make_sphere(0.7F, 28, 56, glm::vec3{1.0F});
 	const example::Mesh cube_mesh	= example::make_cube({1.0F, 1.0F, 1.0F});
 	const example::Mesh torus_mesh	= example::make_torus(0.6F, 0.22F, 48, 24, glm::vec3{1.0F});
-	const DataHandle	mesh_refs[MESH_KINDS]{
+	const DataHandle	mesh_refs[MESH_KINDS] {
 		upload_mesh(graph, sphere_mesh),
 		upload_mesh(graph, cube_mesh),
 		upload_mesh(graph, torus_mesh),

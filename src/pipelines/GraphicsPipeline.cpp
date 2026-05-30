@@ -26,18 +26,11 @@ void GraphicsPipeline::destroy() noexcept
 	{
 		return;
 	}
-	if (m_pipeline)
-	{
-		m_device.destroyPipeline(m_pipeline);
-	}
-	if (m_pipeline_layout)
-	{
-		m_device.destroyPipelineLayout(m_pipeline_layout);
-	}
-	if (m_descriptor_set_layout)
-	{
-		m_device.destroyDescriptorSetLayout(m_descriptor_set_layout);
-	}
+	// vkDestroy* on a VK_NULL_HANDLE is a defined no-op, so the per-handle null checks the
+	// outer m_device guard already covers are redundant — let any unset handle fall through.
+	m_device.destroyPipeline(m_pipeline);
+	m_device.destroyPipelineLayout(m_pipeline_layout);
+	m_device.destroyDescriptorSetLayout(m_descriptor_set_layout);
 	m_device				= nullptr;
 	m_descriptor_set_layout = nullptr;
 	m_pipeline_layout		= nullptr;
@@ -108,6 +101,12 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::rasterization(vk::PolygonMode 
 	m_polygon	 = polygon;
 	m_cull		 = cull;
 	m_front_face = front;
+	return *this;
+}
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::blend(bool enabled)
+{
+	m_blend = enabled;
 	return *this;
 }
 
@@ -230,11 +229,23 @@ std::expected<GraphicsPipeline, PipelineError> GraphicsPipelineBuilder::build(co
 								   .setDepthWriteEnable(static_cast<vk::Bool32>(has_depth && m_depth_write))
 								   .setDepthCompareOp(vk::CompareOp::eLess);
 
-	// One non-blended, write-all attachment per color format.
-	const std::vector<vk::PipelineColorBlendAttachmentState> blend_attachments(
-		m_color_formats.size(), vk::PipelineColorBlendAttachmentState().setColorWriteMask(
-									vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-									vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA));
+	// One attachment per color format: write-all, opaque by default; straight-alpha blending when
+	// requested (src*srcA + dst*(1-srcA)) — what a transparent pass needs.
+	auto attachment_template = vk::PipelineColorBlendAttachmentState().setColorWriteMask(
+		vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
+		vk::ColorComponentFlagBits::eA);
+	if (m_blend)
+	{
+		attachment_template.setBlendEnable(vk::True)
+			.setSrcColorBlendFactor(vk::BlendFactor::eSrcAlpha)
+			.setDstColorBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha)
+			.setColorBlendOp(vk::BlendOp::eAdd)
+			.setSrcAlphaBlendFactor(vk::BlendFactor::eOne)
+			.setDstAlphaBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha)
+			.setAlphaBlendOp(vk::BlendOp::eAdd);
+	}
+	const std::vector<vk::PipelineColorBlendAttachmentState> blend_attachments(m_color_formats.size(),
+																			   attachment_template);
 	const auto color_blend = vk::PipelineColorBlendStateCreateInfo().setAttachments(blend_attachments);
 
 	const std::array dynamic_states{vk::DynamicState::eViewport, vk::DynamicState::eScissor};

@@ -124,6 +124,15 @@ void CommandManager::image_barrier(vk::CommandBuffer cmd, vk::Image image, vk::I
 								   vk::AccessFlags2 src_access, vk::PipelineStageFlags2 dst_stage,
 								   vk::AccessFlags2 dst_access, vk::ImageAspectFlags aspect)
 {
+	image_barrier_range(cmd, image, old_layout, new_layout, src_stage, src_access, dst_stage, dst_access, 0, 1, aspect);
+}
+
+void CommandManager::image_barrier_range(vk::CommandBuffer cmd, vk::Image image, vk::ImageLayout old_layout,
+										 vk::ImageLayout new_layout, vk::PipelineStageFlags2 src_stage,
+										 vk::AccessFlags2 src_access, vk::PipelineStageFlags2 dst_stage,
+										 vk::AccessFlags2 dst_access, std::uint32_t base_mip_level,
+										 std::uint32_t level_count, vk::ImageAspectFlags aspect)
+{
 	const auto barrier = vk::ImageMemoryBarrier2()
 							 .setSrcStageMask(src_stage)
 							 .setSrcAccessMask(src_access)
@@ -134,8 +143,8 @@ void CommandManager::image_barrier(vk::CommandBuffer cmd, vk::Image image, vk::I
 							 .setImage(image)
 							 .setSubresourceRange(vk::ImageSubresourceRange()
 													  .setAspectMask(aspect)
-													  .setBaseMipLevel(0)
-													  .setLevelCount(1)
+													  .setBaseMipLevel(base_mip_level)
+													  .setLevelCount(level_count)
 													  .setBaseArrayLayer(0)
 													  .setLayerCount(1));
 	cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));

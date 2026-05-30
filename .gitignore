@@ -51,3 +51,5 @@ benchmark_output/
 result/
 flake.lock
 build
+# Fetched glTF sample models (see tests/assets/models.cmake)
+tests/assets/models/

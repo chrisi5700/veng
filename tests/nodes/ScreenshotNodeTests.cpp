@@ -93,7 +93,7 @@ TEST_CASE("ScreenshotNode captures a rendered image via on_retired (peer sink, n
 	veng::gpu::SubmitContext post_ctx(graph, ctx, 0);
 	for (const NodeHandle h : plan->nodes())
 	{
-		if (auto* sink = dynamic_cast<veng::gpu::GpuNode*>(graph.get_node(h)))
+		if (auto* sink = dynamic_cast<veng::gpu::Sink*>(graph.get_node(h)))
 		{
 			sink->on_submitted(post_ctx);
 		}
@@ -104,7 +104,7 @@ TEST_CASE("ScreenshotNode captures a rendered image via on_retired (peer sink, n
 	// the driver does at the next acquire(slot) when the slot's fence signals.
 	for (const NodeHandle h : plan->nodes())
 	{
-		if (auto* sink = dynamic_cast<veng::gpu::GpuNode*>(graph.get_node(h)))
+		if (auto* sink = dynamic_cast<veng::gpu::Sink*>(graph.get_node(h)))
 		{
 			sink->on_retired(post_ctx);
 		}

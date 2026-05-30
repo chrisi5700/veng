@@ -7,11 +7,13 @@
 #include <array>
 #include <cstddef>
 #include <utility>
+#include <variant>
 #include <vector>
 #include <veng/gpu/BufferRef.hpp>
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/gpu/MeshRef.hpp>
 #include <veng/gpu/UniformRef.hpp>
+#include <veng/logging/Logger.hpp>
 #include <veng/managers/CommandManager.hpp>
 #include <veng/nodes/GraphicsNode.hpp>
 #include <veng/shader/Shader.hpp>
@@ -110,6 +112,21 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		{
 			m_descriptors_by_name[info.name] = info;
 		}
+
+		// Capture the reflected stride of vertex binding 0 so each bound MeshRef can be validated
+		// against the layout the shader actually expects. A shader with no vertex inputs (the
+		// SV_VertexID fullscreen / cube path) leaves this empty and is never checked.
+		if (const auto* vertex_details = std::get_if<VertexDetails>(&vert.value().get_details()))
+		{
+			for (const VertexBinding& binding : vertex_details->bindings)
+			{
+				if (binding.binding == 0)
+				{
+					m_expected_vertex_stride = binding.stride;
+					break;
+				}
+			}
+		}
 	}
 
 	// A node that samples images needs a sampler; create one lazily (linear, clamp-to-edge —
@@ -118,13 +135,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	if (!m_sampled_images.empty() && !m_sampler)
 	{
 		m_device		   = ctx.device();
-		const auto info	   = vk::SamplerCreateInfo()
-								 .setMagFilter(vk::Filter::eLinear)
-								 .setMinFilter(vk::Filter::eLinear)
-								 .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
-								 .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
-								 .setAddressModeW(vk::SamplerAddressMode::eClampToEdge);
-		const auto sampler = ctx.device().createSampler(info);
+		const auto sampler = ctx.device().createSampler(m_sampler_config.to_create_info());
 		if (sampler.result != vk::Result::eSuccess)
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -141,6 +152,35 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	if (extent.width == 0 || extent.height == 0)
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
+	}
+
+	// Validate vertex strides up front, before any GPU recording opens a render pass: a mesh whose
+	// byte stride disagrees with the shader's reflected vertex layout would be strided wrong and
+	// draw garbage. Fail with a typed error here rather than silently corrupt. Only checked when
+	// both sides are known (the shader has vertex inputs and the mesh carries a stride).
+	if (m_expected_vertex_stride.has_value())
+	{
+		for (const Draw& draw : m_draws)
+		{
+			if (!draw.mesh.has_value())
+			{
+				continue;
+			}
+			const auto* mesh_data = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(*draw.mesh));
+			if (mesh_data == nullptr)
+			{
+				return std::unexpected(graph::ExecError::MISSING_INPUT);
+			}
+			if (const std::uint32_t stride = mesh_data->value().vertex_stride;
+				stride != 0 && stride != *m_expected_vertex_stride)
+			{
+				Logger::instance().error(
+					"GraphicsNode vertex stride mismatch: mesh has {} bytes/vertex but shader '{}' reflects {} "
+					"— the vertex struct does not match the shader's input layout",
+					stride, m_vertex_shader, *m_expected_vertex_stride);
+				return std::unexpected(graph::ExecError::NODE_FAILED);
+			}
+		}
 	}
 
 	// Declare the pool resources once, then acquire this frame's physical copies. The pool owns
@@ -322,10 +362,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			}
 			// Retain the pooled copy we sample so it is not recycled while this frame is in flight
 			// (the producer may be cached this frame, leaving us reading an older physical copy).
-			if (ref.pool_id != gpu::ImageRef::INVALID_POOL_ID)
-			{
-				ctx.pool().touch(ref.pool_id);
-			}
+			ctx.pool().consume(ref);
 			image_infos.push_back(vk::DescriptorImageInfo().setImageView(ref.view).setImageLayout(
 				vk::ImageLayout::eShaderReadOnlyOptimal));
 			writes.push_back(vk::WriteDescriptorSet()
@@ -446,16 +483,12 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// Publish a ref to the rendered target tagged with its pool id so a consumer can retain this
 	// physical copy while in flight. Non-comparable, so each produce is a change — a consumer
 	// re-evaluates whenever we re-render, and caches when we do not.
-	if (auto* out = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_output)); out != nullptr)
-	{
-		++m_version; // bumped on every produce → comparable ImageRef sees the change
-		(void)out->produce(gpu::ImageRef{.image	  = color_image->image(),
-										 .view	  = color_image->view(),
-										 .extent  = extent,
-										 .format  = m_color_format,
-										 .pool_id = m_color_id,
-										 .version = m_version});
-	}
+	m_versioned.publish(ctx, m_output,
+						gpu::ImageRef{.image   = color_image->image(),
+									  .view	   = color_image->view(),
+									  .extent  = extent,
+									  .format  = m_color_format,
+									  .pool_id = m_color_id});
 	return true;
 }
 } // namespace veng::nodes

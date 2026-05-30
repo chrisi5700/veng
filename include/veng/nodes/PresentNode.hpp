@@ -22,13 +22,14 @@
 #include <span>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
+#include <veng/gpu/Sink.hpp>
 #include <veng/managers/SwapchainManager.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::nodes
 {
-class PresentNode final : public gpu::GpuNode
+class PresentNode final : public gpu::GpuNode, public gpu::Sink
 {
 	 public:
 	/// `swap` owns the swapchain/surface and does the present. `presented_image` is the

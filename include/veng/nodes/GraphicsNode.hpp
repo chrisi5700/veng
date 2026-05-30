@@ -46,10 +46,12 @@
 #include <veng/descriptors/DescriptorAllocator.hpp>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
+#include <veng/gpu/VersionedOutput.hpp>
 #include <veng/pipelines/GraphicsPipeline.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Image.hpp>
+#include <veng/resources/SamplerConfig.hpp>
 #include <veng/shader/Shader.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -247,6 +249,18 @@ class GraphicsNode final : public gpu::GpuNode
 		return *this;
 	}
 
+	/// Configure the sampler this node binds to its shader's `SamplerState` (default
+	/// `SamplerConfig::render_target()` — linear, clamp-to-edge, no mips, the right default for
+	/// sampling a full-screen render target). Material textures want `SamplerConfig::texture()`
+	/// (repeat, trilinear, anisotropic). Call before the first record — the sampler is created
+	/// lazily then. Returns *this for chaining.
+	GraphicsNode& set_sampler(const gpu::SamplerConfig& config) noexcept
+	{
+		m_sampler_config = config;
+		mark_dirty();
+		return *this;
+	}
+
 	/// Set the primitive topology for this pass's pipeline (default triangle list). Use
 	/// `vk::PrimitiveTopology::eLineList` for debug-line rendering — the consuming mesh's
 	/// vertex pairs are then drawn as line segments. Call before the first record (the
@@ -370,6 +384,11 @@ class GraphicsNode final : public gpu::GpuNode
 	vk::PrimitiveTopology			m_topology	  = vk::PrimitiveTopology::eTriangleList;
 	bool							m_depth_write = true; // depth writes (when depth attached)
 	std::optional<GraphicsPipeline> m_pipeline;			  // built lazily on first record
+	// The byte stride of vertex binding 0, reflected from the vertex shader at pipeline build.
+	// Empty when the shader declares no vertex inputs (the SV_VertexID fullscreen/cube path).
+	// Each bound MeshRef's vertex_stride is asserted against this — a mismatch is a typed node
+	// failure, not garbage strided through the buffer (see gpu::MeshRef::vertex_stride).
+	std::optional<std::uint32_t> m_expected_vertex_stride;
 
 	// Descriptor state, populated on first record (alongside the pipeline). The set is allocated
 	// and rewritten PER frame slot (one set per in-flight frame): a slot's set was last used by
@@ -379,18 +398,20 @@ class GraphicsNode final : public gpu::GpuNode
 	std::map<std::string, DescriptorInfo> m_descriptors_by_name; // reflected name -> info (binding + type)
 	std::optional<DescriptorAllocator>	  m_descriptors;
 	std::vector<vk::DescriptorSet>		  m_descriptor_sets; // one per frame slot, allocated lazily
-	vk::Sampler							  m_sampler;		 // lazily created when there are sampled images
-	vk::Device							  m_device;			 // captured to free m_sampler in the destructor
+	gpu::SamplerConfig m_sampler_config; // how the lazy sampler is configured (default: render target)
+	vk::Sampler		   m_sampler;		 // lazily created when there are sampled images
+	vk::Device		   m_device;		 // captured to free m_sampler in the destructor
 
 	// Targets live in the engine's ResourcePool (N-buffered), not in the node: declared once,
 	// a physical copy acquired each record. m_last_color is the copy written this record, kept
-	// for the scene() readback lens. m_version is bumped on every produce so the published
-	// ImageRef compares unequal across re-renders (the change-cutoff signal for consumers).
-	bool		  m_declared   = false;
-	ImageId		  m_color_id   = 0;
-	ImageId		  m_depth_id   = 0;
-	const Image*  m_last_color = nullptr;
-	std::uint64_t m_version	   = 0;
+	// for the scene() readback lens. m_versioned owns the per-produce version bump so the
+	// published ImageRef compares unequal across re-renders (the change-cutoff signal for
+	// consumers).
+	bool				 m_declared	  = false;
+	ImageId				 m_color_id	  = 0;
+	ImageId				 m_depth_id	  = 0;
+	const Image*		 m_last_color = nullptr;
+	gpu::VersionedOutput m_versioned;
 };
 } // namespace veng::nodes
 

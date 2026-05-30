@@ -26,6 +26,7 @@
 #include <vector>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
+#include <veng/gpu/VersionedOutput.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <vulkan/vulkan.hpp>
@@ -118,7 +119,7 @@ class DynamicMeshNode final : public gpu::GpuNode
 	bool										m_declared		   = false;
 	BufferId									m_vertex_buffer_id = 0;
 	BufferId									m_index_buffer_id  = 0;
-	std::uint64_t								m_version		   = 0;
+	gpu::VersionedOutput						m_versioned; // owns the per-upload version bump for the MeshRef
 };
 } // namespace veng::nodes
 

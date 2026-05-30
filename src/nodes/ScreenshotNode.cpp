@@ -63,10 +63,7 @@ std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext
 	m_extent = image.extent;
 
 	// Retain the pool copy we read while this frame is in flight (the producer may be cached).
-	if (image.pool_id != gpu::ImageRef::INVALID_POOL_ID)
-	{
-		ctx.pool().touch(image.pool_id);
-	}
+	ctx.pool().consume(image);
 
 	const vk::CommandBuffer cmd = ctx.command_buffer();
 	const auto layers = vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);

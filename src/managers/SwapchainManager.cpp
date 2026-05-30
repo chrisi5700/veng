@@ -65,7 +65,11 @@ std::expected<void, vk::Result> SwapchainManager::build_swapchain(vk::Extent2D e
 	auto				  result =
 		builder.set_desired_extent(extent.width, extent.height)
 			.set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR) // uncapped; FIFO fallback
-			.set_desired_format(VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+			// sRGB surface so the final write into the swapchain image hardware-encodes linear ->
+			// sRGB for the display (review.md item 8). A blit into an _SRGB image encodes its
+			// (linear) source, so a scene rendered in linear light presents correctly. Was
+			// _UNORM, which presented linear values un-encoded — too dark once lighting is linear.
+			.set_desired_format(VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
 			.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT) // we blit into the swapchain image
 			.set_old_swapchain(static_cast<VkSwapchainKHR>(old))
 			.build();

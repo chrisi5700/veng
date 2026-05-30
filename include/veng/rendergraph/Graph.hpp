@@ -108,6 +108,22 @@ class Graph
 		}
 	}
 
+	/// Add a one-frame-delayed *history* (feedback) edge shadowing `live` (design.md §L4
+	/// temporal / accumulation). The returned handle reads, during frame F, whatever `live`
+	/// held as of frame F-1 — and presents to the planner as a source, so feeding it as an
+	/// input to the node that produces `live` forms no cycle. This is the engine's temporal
+	/// primitive: ping-pong / TAA history / progressive accumulation are wired as
+	/// `consumer(history(O), …) -> O` instead of a hand-managed `needs_refresh` + manual stamp
+	/// compare. `initial` is what reads see on frame 0 (before `live` has ever produced). See
+	/// graph::HistoryData for the convergence semantics.
+	template <class T>
+	TypedHandle<T> add_history(TypedHandle<T> live, T initial)
+	{
+		const DataHandle handle = add(std::make_unique<HistoryData<T>>(live.handle, std::move(initial)));
+		m_history.push_back(handle);
+		return TypedHandle<T>{handle};
+	}
+
 	/// Add a pure CPU transform: `func` is invoked with the (const-ref) values of
 	/// `inputs` and its result becomes a new graph-owned output value.
 	template <class F, class... Args>
@@ -190,7 +206,10 @@ class Graph
 	std::vector<std::uint32_t> m_node_generations;
 	std::vector<std::uint32_t> m_data_generations;
 	std::vector<DataHandle>	   m_pending_sources;
-	Revision				   m_revision = 0;
+	// History (feedback) slots, re-snapshotted from their live slot every frame in resolve so a
+	// node's previous-frame output can flow back as an input without a planning cycle.
+	std::vector<DataHandle> m_history;
+	Revision				m_revision = 0;
 };
 } // namespace veng::graph
 

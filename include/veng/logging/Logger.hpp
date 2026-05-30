@@ -5,12 +5,6 @@
 #ifndef VENG_LOGGER_HPP
 #define VENG_LOGGER_HPP
 
-//
-// Created by chris on 1/7/26.
-//
-
-#ifndef ITERATEDFUNCTIONS_LOGGER_HPP
-#define ITERATEDFUNCTIONS_LOGGER_HPP
 #include <filesystem>
 #include <source_location>
 #include <spdlog/logger.h>
@@ -53,7 +47,5 @@ class Logger : public spdlog::logger
 	}
 };
 } // namespace veng
-
-#endif // ITERATEDFUNCTIONS_LOGGER_HPP
 
 #endif // VENG_LOGGER_HPP

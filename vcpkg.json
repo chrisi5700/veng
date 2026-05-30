@@ -10,6 +10,8 @@
     "vulkan",
     "vk-bootstrap",
     "vulkan-memory-allocator-hpp",
+    "stb",
+    "fastgltf",
     {
       "name": "imgui",
       "features": ["vulkan-binding", "glfw-binding"]

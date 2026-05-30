@@ -50,6 +50,11 @@ class Data
 	/// it reaches back into the owning Graph.
 	void notify_mutation();
 
+	/// Resolve a sibling slot on the owning graph (or nullptr). The one place a `Data`
+	/// reaches another by handle — used by `HistoryData` to read the live slot it shadows.
+	/// Defined in Graph.cpp (this header only forward-declares `Graph`).
+	[[nodiscard]] Data* peer(DataHandle handle) const;
+
 	NodeHandle m_producer{}; // invalid => source
 	Revision   m_changed_at = 0;
 	Graph*	   m_graph		= nullptr; // owning graph (set in Graph::add)
@@ -60,7 +65,7 @@ class Data
 /// (the producing node calls `produce` during execute). Change-cutoff is
 /// equality-gated when `T` is comparable; otherwise every write counts as a change.
 template <class T>
-class ValueData final : public Data
+class ValueData : public Data
 {
 	 public:
 	explicit ValueData(T initial)
@@ -122,6 +127,48 @@ class ValueData final : public Data
 
 	T				 m_value;
 	std::optional<T> m_pending{};
+};
+
+/// A one-frame-delayed *history* (feedback) edge — the engine's temporal primitive
+/// (design.md §L4 temporal / accumulation). It shadows a live slot but presents to the
+/// planner as a *source* (no producer), so wiring it as an input to the very node that
+/// produces the live slot forms no cycle: the DAG invariant is preserved while the value
+/// flows backwards in time by one frame.
+///
+/// How the one-frame delay falls out for free: at each frame boundary `commit_pending`
+/// snapshots the live slot's *current* value. Because frame-boundary commits run before the
+/// frame executes, the live producer has not run yet this frame — its slot still holds what
+/// it produced *last* frame. So during frame F a consumer reads the live value as of frame
+/// F-1. For a self-edge (consumer reads `history(O)` and produces `O`) that is exactly
+/// `O_{F-1}`, the classic ping-pong / accumulator feedback.
+///
+/// Convergence is automatic and needs no `needs_refresh` hook: the snapshot is equality-gated
+/// (it reuses `produce`), so once the live value stops changing the history stops bumping its
+/// `changed_at`, the consumer is no longer dirtied, and the graph goes quiet — a progressive
+/// accumulator runs exactly until it converges, then costs nothing. For GPU ping-pong (TAA,
+/// history buffers) the value is a `gpu::ImageRef`; the ResourcePool's N-buffering keeps the
+/// previous frame's physical copy alive for the read (the consumer still `consume`s it).
+template <class T>
+class HistoryData final : public ValueData<T>
+{
+	 public:
+	HistoryData(DataHandle live, T initial)
+		: ValueData<T>(std::move(initial))
+		, m_live(live)
+	{
+	}
+
+	 protected:
+	/// Re-snapshot the live slot's current (= previous-frame) value. Returns whether it
+	/// changed, so the Graph bumps this slot's `changed_at` and re-demands consumers.
+	bool commit_pending() override
+	{
+		const auto* live = dynamic_cast<const ValueData<T>*>(this->peer(m_live));
+		return live != nullptr && this->produce(live->value());
+	}
+
+	 private:
+	DataHandle m_live; // the slot whose previous-frame value this one shadows
 };
 } // namespace veng::graph
 

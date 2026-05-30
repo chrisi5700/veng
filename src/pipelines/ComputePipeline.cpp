@@ -28,18 +28,11 @@ void ComputePipeline::destroy() noexcept
 	{
 		return;
 	}
-	if (m_pipeline)
-	{
-		m_device.destroyPipeline(m_pipeline);
-	}
-	if (m_pipeline_layout)
-	{
-		m_device.destroyPipelineLayout(m_pipeline_layout);
-	}
-	if (m_descriptor_set_layout)
-	{
-		m_device.destroyDescriptorSetLayout(m_descriptor_set_layout);
-	}
+	// vkDestroy* on a VK_NULL_HANDLE is a defined no-op, so the per-handle null checks the
+	// outer m_device guard already covers are redundant — let any unset handle fall through.
+	m_device.destroyPipeline(m_pipeline);
+	m_device.destroyPipelineLayout(m_pipeline_layout);
+	m_device.destroyDescriptorSetLayout(m_descriptor_set_layout);
 	m_device				= nullptr;
 	m_descriptor_set_layout = nullptr;
 	m_pipeline_layout		= nullptr;

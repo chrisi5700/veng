@@ -36,17 +36,46 @@ The PhongPass transparent batches blend into an sRGB attachment under the new sw
 Deferred per review.md "follow-ons"; revisit with a tonemap fullscreen pass + a linear scene
 target decoupled from the swapchain format (AppLoop::scene_color_format).
 
-**[pbr] PbrPass is opaque-only; no glTF alpha BLEND / MASK.**
-The pass builds a single opaque pipeline (depth write, no blend). glTF materials with
-`alphaMode = BLEND` (transparency) or `MASK` (alpha cutoff) are rendered fully opaque. PhongPass
-already has the opaque/transparent-back/transparent-front batching pattern to copy. Follow-on; the
-acceptance model (DamagedHelmet) is opaque.
+**[pbr] FIXED — PbrPass now handles glTF alpha BLEND + MASK.**
+MASK discards in `pbr.frag` (cutoff packed into the unused `emissive.w`); BLEND uses PhongPass's
+opaque / transparent-far (eFront) / transparent-near (eBack) three-pipeline batching, blending into
+the (now linear, HDR) scene target. `GltfMaterialDesc` carries `alpha_mode`/`alpha_cutoff` (a
+`assets::AlphaMode` mirror of `passes::AlphaMode`, bridged by a static_cast the caller static_asserts).
+Tested headless (PbrPassTests `[alpha]`). Remaining limitations, all out of scope for the happy case:
+(a) **no per-object back-to-front sort** — transparent objects blend in submission order, so
+overlapping transparent *objects* can mis-order (the far/near trick only fixes a single convex
+object); add a centroid-distance sort when a scene needs it. (b) **no `doubleSided`** — the BLEND
+trick assumes single-sided; a two-sided transparent material wants a no-cull blend pass. (c) all
+fetched acceptance models are opaque, so BLEND/MASK have no live example asset yet.
 
 **[pbr] Normal transform assumes uniform scale.**
 `pbr.vert` transforms normals/tangents by the model 3x3, which is only correct for uniform-scale
 (or rotation-only) transforms. A glTF node with non-uniform scale needs the inverse-transpose
 normal matrix passed alongside the model (an extra push-constant mat3 or a precomputed normal
 matrix). Most assets use uniform scale; flag for when one doesn't shade right.
+
+**[pbr] LANDED — clustered-forward point lighting (+ a found/fixed pool bug).**
+PbrPass now shades a directional key light + N clustered point lights. The decomposition is composable
+graph nodes: `veng::culling` holds the pure froxel-AABB build + sphere-vs-AABB assignment (CPU, unit
+tested — the build/analytic-mapping consistency round-trip is the linchpin); `passes::wire_clustered_lights`
+wires FroxelGridCpu + LightCullCpu as `add_transform`s feeding `StorageBufferNode` uploads, so only
+lights/grid/index reach the GPU (the shader reconstructs its froxel analytically). The nodes are named
+for where they run so a `LightCullGpu` is a drop-in swap behind the same three SSBO edges.
+Found+fixed along the way: a buffer **resize** (`ResourcePool::acquire_buffer`) destroyed copies an
+in-flight frame still referenced via its descriptor set (VUID-vkDestroyBuffer-00922), because — unlike
+an image resize — it isn't gated by a device-idle. The fix has two parts. (1) Resized-away copies go to
+a retirement graveyard freed only past the in-flight window, and the purge MUST run during node record
+(inside `acquire_buffer`), NOT in `begin_frame`: `FrameExecutor` calls `begin_frame` *before*
+`swap->acquire` waits the slot's in-flight fence, so `retired_through()` is only accurate once recording
+has begun — purging in `begin_frame` frees a buffer a frame still executing on the GPU uses (this was the
+actual repro: on-demand drag errored, continuous didn't, because continuous races the GPU far enough
+ahead that the old frame happens to be done). (2) `BufferRef` gained a `pool_id` so SSBO consumers
+`pool.consume()` to retain a cached producer's copy (the buffer analogue of the image path). Reproduced
+headlessly with `VENG_AUTO_ORBIT` (20 errors buggy → 0 fixed); covered by NBufferingTests `[resize]`.
+Remaining follow-ons: point + directional only (**no spot/cone** lights yet — GpuLight has position+
+radius, add a direction+cone-angle for spots); the cull is **O(lights × clusters)** on the CPU (fine for
+the demo's handful of lights, reactive-cached when static — wire `LightCullGpu` when light counts grow);
+and froxel z-slicing uses a fixed `ClusterGrid.z_near/z_far` the caller sets per scene.
 
 **[pbr] No IBL / environment lighting.** Single hard-coded directional light + flat ambient only.
 review.md defers IBL explicitly; a real PBR look wants a prefiltered environment map + irradiance.
@@ -91,6 +120,25 @@ geometric normal of `+z`, opposite its outward `-z`). glTF defines front faces a
 never caught the facing bug — a windowed-only regression. Worth a headless facing test (render a
 closed glTF mesh with `eBack` and assert the silhouette is filled, not the backface interior) if
 PbrPass culling regresses again.
+
+**[examples] Cosmetic "vertex attribute not consumed" pipeline warnings (phong/picking).**
+`vkCreateGraphicsPipelines` warns `Vertex attribute at location N not consumed by vertex shader` in
+phong_materials (loc 2) and picking_outline (loc 1, 2): the engine's `example::Vertex` carries
+position/normal/colour, but those passes' vertex shaders read a subset. Harmless (the attribute is
+just ignored), pre-existing, and orthogonal to the PBR work — silence by trimming the unused inputs
+from the shader's declared `VSIn` or by giving those examples a slimmer vertex type. Out of scope.
+
+**[examples] FIXED — empty-SSBO zero range + teardown image-view destroy.**
+Two validation errors surfaced while testing all examples after the lighting work, both fixed at the
+root. (1) `StorageBufferNode` published `BufferRef.size = 0` for an empty array (phong_materials' three
+Transform SSBOs start empty until the sim spawns objects), and a 0 descriptor range is invalid
+(VUID-VkDescriptorBufferInfo-range-00341); it now publishes the allocated size (>= one stride), with
+`count = 0` still driving zero-instance draws. (2) `AppLoop::run()` returned with the last frame still
+in flight, so an example's `assets::Texture`/`GltfModel` (declared after `app`, destroyed before
+`~AppLoop`'s waitIdle) freed image views the in-flight descriptor sets referenced
+(VUID-vkDestroyImageView-01026); `run()` now waits the device idle before returning. Added headless
+test affordances `VENG_AUTO_ORBIT` (spin the camera each frame) and `VENG_RUN_SECONDS` (auto-close) so
+the camera-motion and clean-shutdown paths are reproducible without a mouse/CI.
 
 **[examples] Windowed `pbr_materials` re-renders a static scene instead of idling.**
 The `pbr_materials` example presents continuously (~220 fps) while the camera and scene are

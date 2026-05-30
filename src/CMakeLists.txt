@@ -78,6 +78,35 @@ target_add_library(veng_nodes)
 target_sources(veng_nodes PRIVATE nodes/BlitNode.cpp nodes/PresentNode.cpp nodes/GraphicsNode.cpp nodes/MeshNode.cpp nodes/DynamicMeshNode.cpp nodes/UniformNode.cpp nodes/StorageBufferNode.cpp nodes/ScreenshotNode.cpp)
 target_link_libraries(veng_nodes PUBLIC veng_gpu veng_pipelines veng_managers veng_descriptors)
 
+# Clustered-shading culling math — pure glm, no Vulkan (unit-tests on the CPU without a device, the
+# same discipline as veng_render_graph). Froxel AABB build + light-to-cluster assignment; the graph
+# wires these behind FroxelGridCpu / LightCullCpu so a GPU implementation is a drop-in swap.
+target_add_library(veng_culling)
+target_sources(veng_culling PRIVATE culling/Clusters.cpp)
+target_link_libraries(veng_culling PUBLIC glm::glm)
+target_include_directories(veng_culling PUBLIC ${CMAKE_SOURCE_DIR}/include)
+
+# L5 passes — reusable, higher-level effects composed from L4 nodes (the engine's pass
+# library, shaders under shaders/passes/). The screen-space outline (silhouette -> separable
+# gaussian blur -> ring extract) is the first entry.
+target_add_library(veng_passes)
+target_sources(veng_passes PRIVATE passes/OutlinePass.cpp passes/PickingPass.cpp passes/PhongPass.cpp passes/PbrPass.cpp passes/ClusteredLights.cpp)
+target_link_libraries(veng_passes PUBLIC veng_nodes veng_culling glm::glm)
+
+# L2 assets — file/memory-backed GPU resources for displaying real content. The texture loader
+# (stb_image decode -> staging -> device-local -> generated mip chain) lands first; the glTF
+# scene loader (fastgltf -> MeshNodes + material SSBO + textures) is added to this target in the
+# glTF phase. Depends on the resource + manager layers and on veng_nodes (the glTF loader emits
+# L4 nodes).
+find_package(Stb REQUIRED)
+find_package(fastgltf CONFIG REQUIRED)
+target_add_library(veng_assets)
+target_sources(veng_assets PRIVATE assets/Texture.cpp assets/StbImpl.cpp assets/GltfLoader.cpp)
+target_link_libraries(veng_assets PUBLIC veng_resources veng_managers veng_nodes glm::glm PRIVATE fastgltf::fastgltf)
+target_include_directories(veng_assets PRIVATE ${Stb_INCLUDE_DIR})
+# stb_image is third-party and not -Wall/-Werror clean; silence warnings for its one impl TU.
+set_source_files_properties(assets/StbImpl.cpp PROPERTIES COMPILE_OPTIONS "-w")
+
 # L3 Reactive Core. Deliberately Vulkan-agnostic (design.md §3): no link to the
 # Vulkan construction layers, so it builds and unit-tests without a GPU.
 target_add_library(veng_render_graph)

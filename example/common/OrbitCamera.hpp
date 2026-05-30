@@ -35,6 +35,8 @@ class OrbitCamera
 		, m_yaw(yaw)
 		, m_pitch(pitch)
 		, m_view_proj_src(graph.add_source<glm::mat4>(glm::mat4(1.0F)))
+		, m_view_src(graph.add_source<glm::mat4>(glm::mat4(1.0F)))
+		, m_proj_src(graph.add_source<glm::mat4>(glm::mat4(1.0F)))
 		, m_eye_pos_src(graph.add_source<glm::vec4>(glm::vec4(0.0F)))
 	{
 		publish(initial_extent);
@@ -42,6 +44,13 @@ class OrbitCamera
 
 	/// The view-projection source handle (typical push-constant target).
 	[[nodiscard]] veng::graph::TypedHandle<glm::mat4> view_proj() const noexcept { return m_view_proj_src; }
+
+	/// The view matrix alone (world->view). Needed by anything that works in view space — e.g. the
+	/// clustered-light cull (`passes::wire_clustered_lights`) and the PBR depth-slice reconstruction.
+	[[nodiscard]] veng::graph::TypedHandle<glm::mat4> view() const noexcept { return m_view_src; }
+
+	/// The projection matrix alone (with the Vulkan y-flip). Drives the froxel build (its inverse).
+	[[nodiscard]] veng::graph::TypedHandle<glm::mat4> proj() const noexcept { return m_proj_src; }
 
 	/// The world-space eye position as a `vec4` source (w = 1). Use it when the fragment
 	/// shader needs the viewer position — Phong specular, world-space fog, parallax, ...
@@ -62,8 +71,31 @@ class OrbitCamera
 	/// Republish at a new framebuffer extent (called on resize), without consuming input.
 	void publish(vk::Extent2D extent) noexcept
 	{
-		m_graph->set(m_view_proj_src, compute_view_proj(extent));
+		const glm::mat4 view = compute_view();
+		const glm::mat4 proj = compute_proj(extent);
+		m_graph->set(m_view_proj_src, proj * view);
+		m_graph->set(m_view_src, view);
+		m_graph->set(m_proj_src, proj);
 		m_graph->set(m_eye_pos_src, glm::vec4(compute_eye(), 1.0F));
+	}
+
+	/// Spin the camera by `delta_yaw` radians and republish. Used by the headless auto-orbit
+	/// (VENG_AUTO_ORBIT) to exercise continuous camera motion without mouse input — the same path a
+	/// drag drives, so it stresses per-frame reactive recompute (e.g. clustered-light re-culls).
+	void orbit(float delta_yaw, vk::Extent2D extent) noexcept
+	{
+		m_yaw += delta_yaw;
+		publish(extent);
+	}
+
+	/// Re-target the camera to frame a bounding sphere (`center` + `radius`) and republish at
+	/// `extent`. The glTF viewer calls this once a model's bounds are known after loading, so an
+	/// arbitrarily-placed/scaled scene fills the view.
+	void frame(glm::vec3 center, float radius, vk::Extent2D extent) noexcept
+	{
+		m_target   = center;
+		m_distance = std::max(radius * 2.5F, 0.2F);
+		publish(extent);
 	}
 
 	 private:
@@ -104,13 +136,18 @@ class OrbitCamera
 							  m_distance;
 	}
 
-	[[nodiscard]] glm::mat4 compute_view_proj(vk::Extent2D extent) const noexcept
+	[[nodiscard]] glm::mat4 compute_view() const noexcept
+	{
+		return glm::lookAt(compute_eye(), m_target, glm::vec3{0.0F, 1.0F, 0.0F});
+	}
+
+	[[nodiscard]] glm::mat4 compute_proj(vk::Extent2D extent) const noexcept
 	{
 		const float aspect =
 			extent.height > 0 ? static_cast<float>(extent.width) / static_cast<float>(extent.height) : 1.0F;
 		glm::mat4 proj = glm::perspective(glm::radians(55.0F), aspect, 0.1F, 1000.0F);
 		proj[1][1] *= -1.0F; // Vulkan clip-space y-down
-		return proj * glm::lookAt(compute_eye(), m_target, glm::vec3{0.0F, 1.0F, 0.0F});
+		return proj;
 	}
 
 	veng::graph::Graph*					m_graph;
@@ -119,6 +156,8 @@ class OrbitCamera
 	float								m_yaw;
 	float								m_pitch;
 	veng::graph::TypedHandle<glm::mat4> m_view_proj_src;
+	veng::graph::TypedHandle<glm::mat4> m_view_src;
+	veng::graph::TypedHandle<glm::mat4> m_proj_src;
 	veng::graph::TypedHandle<glm::vec4> m_eye_pos_src;
 	Window::CursorPos					m_last_cursor{};
 	bool								m_have_last_cursor = false;

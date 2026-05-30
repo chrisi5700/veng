@@ -32,6 +32,12 @@ struct MeshRef
 	std::uint32_t index_count  = 0; // indices in the index buffer (indexed draw count)
 	vk::IndexType index_type   = vk::IndexType::eUint32;
 
+	// Bytes per vertex (the producing node's `sizeof(Vertex)`). The consuming GraphicsNode
+	// asserts this against the stride its bound vertex shader reflects, turning a layout
+	// mismatch (e.g. 36-byte verts fed to a 56-byte-input shader) into a typed node failure
+	// instead of garbage strided through the buffer. 0 = unknown/unchecked (skips the check).
+	std::uint32_t vertex_stride = 0;
+
 	// Producer-bumped version (see the file header).
 	std::uint64_t version = 0;
 

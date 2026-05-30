@@ -21,6 +21,7 @@
 #include <string>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
+#include <veng/gpu/Sink.hpp>
 #include <veng/gpu/SubmitContext.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Buffer.hpp>
@@ -28,7 +29,7 @@
 
 namespace veng::nodes
 {
-class ScreenshotNode final : public gpu::GpuNode
+class ScreenshotNode final : public gpu::GpuNode, public gpu::Sink
 {
 	 public:
 	/// Capture the image on `source` (a `ValueData<gpu::ImageRef>` left in TRANSFER_SRC by its

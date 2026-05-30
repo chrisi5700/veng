@@ -68,7 +68,7 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 	// The slot's in-flight fence has just signalled (acquire waited it), so the frame that
 	// previously occupied this slot has retired — fire its on_retired hooks before recycling.
 	gpu::SubmitContext retire_ctx(graph, *m_context, slot);
-	for (gpu::GpuNode* sink : m_pending_retire[slot])
+	for (gpu::Sink* sink : m_pending_retire[slot])
 	{
 		sink->on_retired(retire_ctx);
 	}
@@ -132,14 +132,15 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 												 .setSignalSemaphores(frame.render_finished),
 											 frame.in_flight);
 
-	// Dispatch on_submitted with the present info attached. Sinks that need post-submit work
-	// (PresentNode, screenshot, future video) hook here; non-sinks' default is a no-op.
+	// Dispatch on_submitted with the present info attached. Only nodes that opted into the
+	// gpu::Sink interface (PresentNode, screenshot, picking readback, future video) participate;
+	// the cross-cast resolves to nullptr for every non-sink node in the plan.
 	gpu::SubmitContext sub_ctx(
 		graph, *m_context, slot,
 		gpu::PresentFrame{.image_index = frame.image_index, .present_signal = frame.render_finished});
 	for (const graph::NodeHandle handle : plan.nodes())
 	{
-		if (auto* sink = dynamic_cast<gpu::GpuNode*>(graph.get_node(handle)); sink != nullptr)
+		if (auto* sink = dynamic_cast<gpu::Sink*>(graph.get_node(handle)); sink != nullptr)
 		{
 			sink->on_submitted(sub_ctx);
 			m_pending_retire[slot].push_back(sink);
