@@ -63,8 +63,10 @@ struct PickResult
 {
 	bool		  hit = false; ///< `false` when the pixel hit the background or was out-of-bounds.
 	std::uint32_t id  = 0;	   ///< Picked object id (valid only when `hit` is `true`).
-	std::uint32_t x	  = 0;	   ///< The queried pixel column, echoed back from the original @ref veng::passes::PickingPass::pick call.
-	std::uint32_t y	  = 0;	   ///< The queried pixel row, echoed back from the original @ref veng::passes::PickingPass::pick call.
+	std::uint32_t x =
+		0; ///< The queried pixel column, echoed back from the original @ref veng::passes::PickingPass::pick call.
+	std::uint32_t y =
+		0; ///< The queried pixel row, echoed back from the original @ref veng::passes::PickingPass::pick call.
 };
 
 /// @cond INTERNAL

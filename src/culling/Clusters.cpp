@@ -31,10 +31,24 @@ glm::vec3 ray_to_z(glm::vec3 p, float target_z) noexcept
 {
 	return p * (target_z / p.z);
 }
+
+// A grid whose depth range is non-positive, inverted/collapsed (far <= near), or has no slices makes
+// the exponential split ill-defined: `far/near` becomes inf/<=1 and `log(far/near)` becomes 0 or
+// non-finite. Left unguarded, `depth_to_slice` would form an inf/NaN slice index and cast it to
+// int32 — undefined behaviour the UBSan gate traps. Such a grid is a misconfigured camera (e.g. a
+// zero near-plane or near == far); we treat it deterministically as a single near slice instead.
+bool is_degenerate(const ClusterGrid& grid) noexcept
+{
+	return grid.z_near <= 0.0F || grid.z_far <= grid.z_near || grid.dims.z == 0;
+}
 } // namespace
 
 float slice_depth(std::uint32_t slice, const ClusterGrid& grid) noexcept
 {
+	if (is_degenerate(grid))
+	{
+		return grid.z_near; // all boundaries collapse to the near plane for a degenerate grid
+	}
 	// Exponential split: depth(k) = near * (far/near)^(k/numZ). Slices are thin near the camera.
 	const float ratio = grid.z_far / grid.z_near;
 	return grid.z_near * std::pow(ratio, static_cast<float>(slice) / static_cast<float>(grid.dims.z));
@@ -42,7 +56,7 @@ float slice_depth(std::uint32_t slice, const ClusterGrid& grid) noexcept
 
 std::uint32_t depth_to_slice(float view_depth, const ClusterGrid& grid) noexcept
 {
-	if (view_depth <= grid.z_near)
+	if (view_depth <= grid.z_near || is_degenerate(grid))
 	{
 		return 0;
 	}

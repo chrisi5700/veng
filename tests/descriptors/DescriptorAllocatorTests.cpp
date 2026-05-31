@@ -11,6 +11,8 @@
 #include <veng/descriptors/DescriptorAllocator.hpp>
 #include <veng/logging/Logger.hpp>
 
+#include "support/VkFault.hpp"
+
 namespace
 {
 veng::Context make_context()
@@ -96,6 +98,106 @@ TEST_CASE("DescriptorAllocator move transfers pool ownership without double free
 	const veng::DescriptorAllocator second = std::move(first);
 	REQUIRE(second.pool_count() == 1);
 	REQUIRE(first.pool_count() == 0); // moved-from owns nothing -> destroyed once
+
+	ctx.device().destroyDescriptorSetLayout(layout);
+}
+
+TEST_CASE("DescriptorAllocator move-assignment frees the overwritten target once", "[descriptors][raii]")
+{
+	veng::Logger::instance().set_level(spdlog::level::warn);
+	auto						  ctx	 = make_context();
+	const vk::DescriptorSetLayout layout = make_layout(ctx.device());
+
+	veng::DescriptorAllocator first(ctx.device(), 8);
+	veng::DescriptorAllocator second(ctx.device(), 8);
+	REQUIRE(first.allocate(layout).has_value());
+	REQUIRE(second.allocate(layout).has_value());
+	REQUIRE(first.pool_count() == 1);
+	REQUIRE(second.pool_count() == 1);
+
+	first = std::move(second); // destroys first's pool, adopts second's
+	REQUIRE(first.pool_count() == 1);
+	REQUIRE(second.pool_count() == 0);
+
+	// Self-assignment is guarded and must not drop the live pool.
+	veng::DescriptorAllocator* alias = &first;
+	first							 = std::move(*alias);
+	REQUIRE(first.pool_count() == 1);
+
+	ctx.device().destroyDescriptorSetLayout(layout);
+}
+
+// --- Error-path branches (the std::expected error returns) ------------------------------------
+// Driven by swapping a single entry point in the global dispatcher for the duration of one call.
+
+TEST_CASE("DescriptorAllocator reports pool-creation failure instead of crashing", "[descriptors][error]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	auto						  ctx	 = make_context();
+	const vk::DescriptorSetLayout layout = make_layout(ctx.device());
+
+	veng::DescriptorAllocator allocator(ctx.device(), 4);
+	{
+		// First allocate must create the initial pool; force that creation to fail.
+		const veng::test::ScopedDispatchFault fault{VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateDescriptorPool,
+													+[](VkDevice, const VkDescriptorPoolCreateInfo*,
+														const VkAllocationCallbacks*, VkDescriptorPool*) -> VkResult
+													{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+		const auto							  set = allocator.allocate(layout);
+		REQUIRE_FALSE(set.has_value());
+		REQUIRE(set.error() == vk::Result::eErrorOutOfPoolMemory); // create_pool() failed -> no pool
+		REQUIRE(allocator.pool_count() == 0);
+	}
+	// Once the fault is lifted the allocator recovers and serves sets normally.
+	REQUIRE(allocator.allocate(layout).has_value());
+	REQUIRE(allocator.pool_count() == 1);
+
+	ctx.device().destroyDescriptorSetLayout(layout);
+}
+
+TEST_CASE("DescriptorAllocator surfaces a non-recoverable allocate error verbatim", "[descriptors][error]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	auto						  ctx	 = make_context();
+	const vk::DescriptorSetLayout layout = make_layout(ctx.device());
+
+	veng::DescriptorAllocator allocator(ctx.device(), 4);
+	// The pool creates fine; vkAllocateDescriptorSets fails with a non-pool-exhaustion error, which
+	// is not recoverable by growing — it must propagate unchanged rather than loop or crash.
+	const veng::test::ScopedDispatchFault fault{
+		VULKAN_HPP_DEFAULT_DISPATCHER.vkAllocateDescriptorSets,
+		+[](VkDevice, const VkDescriptorSetAllocateInfo*, VkDescriptorSet*) -> VkResult
+		{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+	const auto set = allocator.allocate(layout);
+	REQUIRE_FALSE(set.has_value());
+	REQUIRE(set.error() == vk::Result::eErrorOutOfDeviceMemory);
+
+	ctx.device().destroyDescriptorSetLayout(layout);
+}
+
+TEST_CASE("DescriptorAllocator gives up when a grow pool cannot be created", "[descriptors][error]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	auto						  ctx	 = make_context();
+	const vk::DescriptorSetLayout layout = make_layout(ctx.device());
+
+	veng::DescriptorAllocator allocator(ctx.device(), 4);
+	REQUIRE(allocator.allocate(layout).has_value()); // seed one real pool so the next allocate enters the grow path
+	REQUIRE(allocator.pool_count() == 1);
+
+	// Allocation reports pool-exhaustion (recoverable -> the allocator tries to grow), but the grow's
+	// pool creation also fails. The original exhaustion result must be returned, not an infinite loop.
+	const veng::test::ScopedDispatchFault exhaust{
+		VULKAN_HPP_DEFAULT_DISPATCHER.vkAllocateDescriptorSets,
+		+[](VkDevice, const VkDescriptorSetAllocateInfo*, VkDescriptorSet*) -> VkResult
+		{ return VK_ERROR_OUT_OF_POOL_MEMORY; }};
+	const veng::test::ScopedDispatchFault no_grow{
+		VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateDescriptorPool,
+		+[](VkDevice, const VkDescriptorPoolCreateInfo*, const VkAllocationCallbacks*, VkDescriptorPool*) -> VkResult
+		{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+	const auto set = allocator.allocate(layout);
+	REQUIRE_FALSE(set.has_value());
+	REQUIRE(set.error() == vk::Result::eErrorOutOfPoolMemory);
 
 	ctx.device().destroyDescriptorSetLayout(layout);
 }

@@ -78,20 +78,20 @@ std::size_t render_and_count(veng::Context& ctx, Graph& graph, const veng::asset
 	// discard. add_object below uses the model's own material index directly.
 	for (const veng::assets::GltfMaterialDesc& m : model.materials)
 	{
-		static_cast<void>(pass.add_material(veng::passes::PbrMaterial{
-			.base_color			= m.base_color,
-			.normal				= m.normal,
-			.metal_rough		= m.metal_rough,
-			.emissive			= m.emissive,
-			.occlusion			= m.occlusion,
-			.base_color_factor	= m.base_color_factor,
-			.metallic_factor	= m.metallic_factor,
-			.roughness_factor	= m.roughness_factor,
-			.normal_scale		= m.normal_scale,
-			.occlusion_strength = m.occlusion_strength,
-			.emissive_factor	= m.emissive_factor,
-			.alpha_mode			= static_cast<veng::passes::AlphaMode>(m.alpha_mode),
-			.alpha_cutoff		= m.alpha_cutoff}));
+		static_cast<void>(pass.add_material(
+			veng::passes::PbrMaterial{.base_color		  = m.base_color,
+									  .normal			  = m.normal,
+									  .metal_rough		  = m.metal_rough,
+									  .emissive			  = m.emissive,
+									  .occlusion		  = m.occlusion,
+									  .base_color_factor  = m.base_color_factor,
+									  .metallic_factor	  = m.metallic_factor,
+									  .roughness_factor	  = m.roughness_factor,
+									  .normal_scale		  = m.normal_scale,
+									  .occlusion_strength = m.occlusion_strength,
+									  .emissive_factor	  = m.emissive_factor,
+									  .alpha_mode		  = static_cast<veng::passes::AlphaMode>(m.alpha_mode),
+									  .alpha_cutoff		  = m.alpha_cutoff}));
 	}
 	for (const veng::assets::GltfPrimitive& p : model.primitives)
 	{

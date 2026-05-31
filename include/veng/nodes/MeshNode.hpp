@@ -87,7 +87,8 @@ class MeshNode final : public gpu::GpuNode
 	graph::DataHandle m_output;
 	std::uint32_t	  m_vertex_count;
 	std::uint32_t	  m_index_count;
-	std::uint32_t	  m_vertex_stride; ///< `sizeof(Vertex)` captured at construction; validated by @ref veng::nodes::GraphicsNode.
+	std::uint32_t
+		m_vertex_stride; ///< `sizeof(Vertex)` captured at construction; validated by @ref veng::nodes::GraphicsNode.
 	std::vector<std::byte> m_vertex_bytes;
 	std::vector<std::byte> m_index_bytes;
 	std::optional<Buffer>  m_vertex_buffer; ///< Allocated and uploaded lazily on first record.

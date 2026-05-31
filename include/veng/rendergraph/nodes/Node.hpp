@@ -182,8 +182,8 @@ class Node
 	[[nodiscard]] ExecutionState state() const noexcept { return m_state.load(std::memory_order_acquire); }
 
 	/**
-	 * @brief Force this node back to @ref veng::graph::ExecutionState::INVALID so the next @ref veng::graph::Graph::resolve
-	 *        re-plans it regardless of input stamps.
+	 * @brief Force this node back to @ref veng::graph::ExecutionState::INVALID so the next @ref
+	 * veng::graph::Graph::resolve re-plans it regardless of input stamps.
 	 *
 	 * Use when a *runtime* mutation extends the node's input set or changes how it draws —
 	 * a new push-constant edge, a new mesh draw, a different sampled-image binding — because
@@ -215,8 +215,8 @@ class Node
  * @brief The workhorse CPU node: wraps a pure callable over typed inputs into the graph.
  *
  * Edges are stored as @ref veng::graph::DataHandle values; the concrete @ref veng::graph::ValueData types are
- * recovered at execute time via the @ref veng::graph::ExecContext. The equality-gated @ref veng::graph::ValueData::produce
- * call in @ref veng::graph::Node::execute drives change-cutoff automatically.
+ * recovered at execute time via the @ref veng::graph::ExecContext. The equality-gated @ref
+ * veng::graph::ValueData::produce call in @ref veng::graph::Node::execute drives change-cutoff automatically.
  *
  * @ingroup rendergraph
  * @tparam Signature A function-type of the form `R(Args...)` that describes the callable.

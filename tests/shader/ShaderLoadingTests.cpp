@@ -4,6 +4,8 @@
 #include <veng/logging/Logger.hpp>
 #include <veng/shader/Shader.hpp>
 
+#include "support/VkFault.hpp"
+
 TEST_CASE("Simple vertex shader loads correctly", "[shader][loading][vertex]")
 {
 	veng::Logger::instance().set_level(spdlog::level::trace);
@@ -622,6 +624,19 @@ TEST_CASE("Invalid shader fails gracefully", "[shader][loading][error]")
 	SECTION("invalid entry point returns error")
 	{
 		auto result = veng::Shader::create_shader(ctx.device(), "tests/loading/vertex/simple_vert", "invalid_entry");
+		REQUIRE(!result.has_value());
+		REQUIRE(!result.error().empty());
+	}
+
+	SECTION("a failed vkCreateShaderModule is reported, not asserted")
+	{
+		// The shader compiles and reflects fine; only module creation fails. Before the engine emptied
+		// VULKAN_HPP_ASSERT_ON_RESULT this branch was unreachable (the convenience wrapper aborted).
+		const veng::test::ScopedDispatchFault fault{
+			VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateShaderModule,
+			+[](VkDevice, const VkShaderModuleCreateInfo*, const VkAllocationCallbacks*, VkShaderModule*) -> VkResult
+			{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+		auto result = veng::Shader::create_shader(ctx.device(), "tests/loading/vertex/simple_vert");
 		REQUIRE(!result.has_value());
 		REQUIRE(!result.error().empty());
 	}

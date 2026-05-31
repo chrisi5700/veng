@@ -157,8 +157,8 @@ TEST_CASE("ResourcePool defers buffer-resize frees past the in-flight window", "
 	// resize, it isn't gated by a device-idle. The old copies are set aside and freed only once their
 	// last_use has aged past the in-flight window. Pure bookkeeping — no GPU work needed.
 	veng::Logger::instance().set_level(spdlog::level::warn);
-	auto			   ctx = make_context();
-	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 2); // two frames in flight
+	auto				 ctx = make_context();
+	veng::ResourcePool	 pool(ctx.device(), ctx.allocator(), 2); // two frames in flight
 	const veng::BufferId id = pool.declare_buffer(vk::BufferUsageFlagBits::eStorageBuffer);
 
 	// Frame 0: acquire size A and mark it read by an in-flight consumer this frame.

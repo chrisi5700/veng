@@ -1,6 +1,10 @@
+#include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <variant>
 #include <veng/context/Context.hpp>
 #include <veng/logging/Logger.hpp>
+
+#include "support/VkFault.hpp"
 
 TEST_CASE("VulkanContext creation", "[vulkan]")
 {
@@ -109,4 +113,88 @@ TEST_CASE("VulkanContext physical device properties", "[vulkan]")
 		REQUIRE(sufficient);
 		INFO("API Version: " << major << "." << minor);
 	}
+}
+
+// --- immediate_submit -------------------------------------------------------------------------
+// The engine's synchronous "do this on the GPU now" primitive. Its happy path and every early-out
+// error branch (pool / allocate / begin / end / fence creation, and a failed submit) were untested.
+
+TEST_CASE("immediate_submit records, submits, and waits", "[vulkan][immediate_submit]")
+{
+	veng::Logger::instance().set_level(spdlog::level::warn);
+	auto ctx_res = veng::Context::create("Immediate Submit Test");
+	REQUIRE(ctx_res);
+	const auto ctx = std::move(*ctx_res);
+
+	bool recorded = false;
+	// A no-op recording is enough: the value under test is the pool/allocate/begin/end/submit/wait
+	// sequence around the callback, not the recorded commands.
+	const vk::Result result = ctx.immediate_submit(
+		[&](vk::CommandBuffer cmd)
+		{
+			REQUIRE(cmd);
+			recorded = true;
+		});
+	REQUIRE(result == vk::Result::eSuccess);
+	REQUIRE(recorded);
+}
+
+TEST_CASE("immediate_submit surfaces each setup failure", "[vulkan][immediate_submit][error]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	auto ctx_res = veng::Context::create("Immediate Submit Test");
+	REQUIRE(ctx_res);
+	const auto ctx = std::move(*ctx_res);
+
+	const auto submit_noop = [&] { return ctx.immediate_submit([](vk::CommandBuffer) {}); };
+
+	SECTION("command-pool creation fails")
+	{
+		const veng::test::ScopedDispatchFault fault{
+			VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateCommandPool,
+			+[](VkDevice, const VkCommandPoolCreateInfo*, const VkAllocationCallbacks*, VkCommandPool*) -> VkResult
+			{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+		REQUIRE(submit_noop() == vk::Result::eErrorOutOfDeviceMemory);
+	}
+	SECTION("command-buffer allocation fails")
+	{
+		const veng::test::ScopedDispatchFault fault{
+			VULKAN_HPP_DEFAULT_DISPATCHER.vkAllocateCommandBuffers,
+			+[](VkDevice, const VkCommandBufferAllocateInfo*, VkCommandBuffer*) -> VkResult
+			{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+		REQUIRE(submit_noop() == vk::Result::eErrorOutOfDeviceMemory);
+	}
+	SECTION("a failed submit skips the wait and returns the error")
+	{
+		const veng::test::ScopedDispatchFault fault{VULKAN_HPP_DEFAULT_DISPATCHER.vkQueueSubmit,
+													+[](VkQueue, uint32_t, const VkSubmitInfo*, VkFence) -> VkResult
+													{ return VK_ERROR_DEVICE_LOST; }};
+		REQUIRE(submit_noop() == vk::Result::eErrorDeviceLost);
+	}
+}
+
+// --- Context::create failure modes ------------------------------------------------------------
+// A user on a misconfigured driver / unsupported device must get a typed error back, not a silent
+// crash. These drive the two input-reachable failure paths and assert the right variant alternative.
+// (The internal steps run through vk-bootstrap, which loads its own entry points, and create()
+// re-inits the vulkan-hpp dispatcher — so the dispatcher fault seam can't reach inside it; these
+// failures are induced through the public inputs instead.)
+
+TEST_CASE("Context::create reports a missing instance extension, not a crash", "[vulkan][error]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	static constexpr std::array<const char*, 1> bogus{"VK_EXT_this_extension_does_not_exist"};
+	const auto									ctx = veng::Context::create("Bad Extension", bogus);
+	REQUIRE_FALSE(ctx.has_value());
+	REQUIRE(std::holds_alternative<InstanceCreationError>(ctx.error()));
+}
+
+TEST_CASE("Context::create reports a null surface from the factory, not a crash", "[vulkan][error]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	static constexpr std::array<const char*, 1> surface_ext{VK_KHR_SURFACE_EXTENSION_NAME};
+	// A surface factory that fails (returns a null handle) must surface a typed SurfaceCreationError.
+	const auto ctx = veng::Context::create("Null Surface", surface_ext, [](VkInstance) { return VkSurfaceKHR{}; });
+	REQUIRE_FALSE(ctx.has_value());
+	REQUIRE(std::holds_alternative<SurfaceCreationError>(ctx.error()));
 }

@@ -37,7 +37,8 @@
 namespace veng::nodes
 {
 /**
- * @brief Concrete @ref veng::gpu::GpuNode and @ref veng::gpu::Sink that reads back a rendered image and writes a PPM file.
+ * @brief Concrete @ref veng::gpu::GpuNode and @ref veng::gpu::Sink that reads back a rendered image and writes a PPM
+ * file.
  *
  * @ingroup graph_nodes
  * @see PresentNode

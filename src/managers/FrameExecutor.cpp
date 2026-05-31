@@ -38,10 +38,12 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 	graph::FramePlan plan;
 	if (pacing == Pacing::OnDemand)
 	{
-		std::unique_lock<std::mutex> lock(*graph_mutex, std::defer_lock);
+		// Only bind the mutex when one was supplied: `*graph_mutex` would dereference null otherwise
+		// (UB even with defer_lock — the reference binds before the null-check could skip it).
+		std::unique_lock<std::mutex> lock;
 		if (graph_mutex != nullptr)
 		{
-			lock.lock();
+			lock = std::unique_lock<std::mutex>(*graph_mutex);
 		}
 		auto resolved = graph.resolve(sinks);
 		if (!resolved.has_value())
@@ -98,10 +100,10 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 	}
 	else
 	{
-		std::unique_lock<std::mutex> lock(*graph_mutex, std::defer_lock);
+		std::unique_lock<std::mutex> lock;
 		if (graph_mutex != nullptr)
 		{
-			lock.lock();
+			lock = std::unique_lock<std::mutex>(*graph_mutex);
 		}
 		graph.set(m_swapchain_handle, ref);
 		auto resolved = graph.resolve(sinks);

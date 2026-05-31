@@ -11,6 +11,8 @@
 #include <veng/pipelines/ComputePipeline.hpp>
 #include <veng/shader/Shader.hpp>
 
+#include "support/VkFault.hpp"
+
 namespace
 {
 veng::Context make_context()
@@ -65,4 +67,53 @@ TEST_CASE("ComputePipeline move transfers ownership without double free", "[pipe
 	const veng::ComputePipeline moved = std::move(*built);
 	REQUIRE(moved.pipeline());
 	REQUIRE_FALSE(built->pipeline()); // moved-from is emptied, so destruction frees once
+}
+
+// --- Vulkan-object creation-failure branches --------------------------------------------------
+// Each forces one creation step to fail and checks the mapped PipelineError. The earlier-created
+// objects are real, so their cleanup runs for real — ASan/UBSan under the gate proves no leak.
+
+TEST_CASE("ComputePipelineBuilder maps a descriptor-set-layout failure", "[pipeline][compute][error]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	auto	   ctx	   = make_context();
+	const auto compute = load(ctx, "tests/loading/compute/simple_comp");
+
+	const veng::test::ScopedDispatchFault fault{VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateDescriptorSetLayout,
+												+[](VkDevice, const VkDescriptorSetLayoutCreateInfo*,
+													const VkAllocationCallbacks*, VkDescriptorSetLayout*) -> VkResult
+												{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+	const auto							  pipeline = veng::ComputePipelineBuilder(compute).build(ctx);
+	REQUIRE_FALSE(pipeline.has_value());
+	REQUIRE(pipeline.error() == veng::PipelineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILED);
+}
+
+TEST_CASE("ComputePipelineBuilder maps a pipeline-layout failure and cleans up", "[pipeline][compute][error][raii]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	auto	   ctx	   = make_context();
+	const auto compute = load(ctx, "tests/loading/compute/simple_comp");
+
+	const veng::test::ScopedDispatchFault fault{
+		VULKAN_HPP_DEFAULT_DISPATCHER.vkCreatePipelineLayout,
+		+[](VkDevice, const VkPipelineLayoutCreateInfo*, const VkAllocationCallbacks*, VkPipelineLayout*) -> VkResult
+		{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+	const auto pipeline = veng::ComputePipelineBuilder(compute).build(ctx);
+	REQUIRE_FALSE(pipeline.has_value());
+	REQUIRE(pipeline.error() == veng::PipelineError::PIPELINE_LAYOUT_CREATION_FAILED);
+}
+
+TEST_CASE("ComputePipelineBuilder maps a pipeline-creation failure and cleans up", "[pipeline][compute][error][raii]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+	auto	   ctx	   = make_context();
+	const auto compute = load(ctx, "tests/loading/compute/simple_comp");
+
+	const veng::test::ScopedDispatchFault fault{VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateComputePipelines,
+												+[](VkDevice, VkPipelineCache, uint32_t,
+													const VkComputePipelineCreateInfo*, const VkAllocationCallbacks*,
+													VkPipeline*) -> VkResult { return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
+	const auto							  pipeline = veng::ComputePipelineBuilder(compute).build(ctx);
+	REQUIRE_FALSE(pipeline.has_value());
+	REQUIRE(pipeline.error() == veng::PipelineError::PIPELINE_CREATION_FAILED);
 }

@@ -27,6 +27,12 @@ target_compile_definitions(veng_context PUBLIC
         VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1 # Vulkan specific defines
         VULKAN_HPP_ENABLE_DYNAMIC_LOADER_TOOL=1
         VULKAN_HPP_NO_EXCEPTIONS
+        # With NO_EXCEPTIONS the engine hand-checks every `.result`; without this, vulkan-hpp's
+        # convenience wrappers (createImageView/createDescriptorPool/createPipeline/...) still
+        # assert-abort on failure in debug, so those std::expected error branches were dead code
+        # under the gate (asserts on). Emptying the assert lets resultCheck fall through and the
+        # engine's own error handling run — a recoverable Vulkan error returns instead of crashing.
+        VULKAN_HPP_ASSERT_ON_RESULT=
         VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS
         # VulkanMemoryAllocator-Hpp imports vk::operator</>/<= etc., which vulkan.hpp
         # only emits when the C++20 spaceship operator is disabled.

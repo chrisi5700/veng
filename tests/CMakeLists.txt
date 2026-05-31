@@ -12,13 +12,41 @@ function(add_test_executable TARGET_NAME SRC_FILES)
     catch_discover_tests(${TARGET_NAME})
 endfunction()
 
+# Test-only fault-injection seam (header-only). Swaps a single PFN in the global Vulkan dynamic
+# dispatcher, or builds a VMA allocator whose allocation entry point fails — driving the L1/L2
+# std::expected error branches with no production change and no mock device. See support/VkFault.hpp.
+# Also hosts support/Headless.hpp (VK_EXT_headless_surface helper for the swapchain/present tier).
+add_library(veng_test_support INTERFACE)
+target_include_directories(veng_test_support INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(veng_test_support INTERFACE veng_context)
+
+# The swapchain/present/FrameExecutor tests need a surface. Mesa lavapipe provides a window-less one
+# via VK_EXT_headless_surface; point the loader at it so CI (and local runs) exercise that tier. The
+# stock NVIDIA ICD lacks the extension, so those tests SKIP there unless this is set. Examples are
+# unaffected — they run with the default loader (the discrete GPU). On Arch: `pacman -S vulkan-swrast`.
+#   cmake --preset llm-vcpkg -DVENG_TEST_VULKAN_ICD=/usr/share/vulkan/icd.d/lvp_icd.json
+set(VENG_TEST_VULKAN_ICD "" CACHE FILEPATH
+    "Path to a Vulkan ICD manifest (e.g. lavapipe's lvp_icd.json) to run the tests under; empty = system default.")
+
+# VENG_TEST_PROPS is forwarded to every catch_discover_tests call below. When an ICD is selected it
+# pins VK_DRIVER_FILES per-test (CMake scopes it to the test process, so examples/shell are untouched).
+set(VENG_TEST_PROPS "")
+if(VENG_TEST_VULKAN_ICD)
+    if(EXISTS "${VENG_TEST_VULKAN_ICD}")
+        message(STATUS "Tests will run under Vulkan ICD: ${VENG_TEST_VULKAN_ICD}")
+        set(VENG_TEST_PROPS PROPERTIES ENVIRONMENT "VK_DRIVER_FILES=${VENG_TEST_VULKAN_ICD}")
+    else()
+        message(WARNING "VENG_TEST_VULKAN_ICD='${VENG_TEST_VULKAN_ICD}' does not exist; using the default loader.")
+    endif()
+endif()
+
 # VulkanContext tests
 add_executable(ContextTests context/VulkanContextTests.cpp)
-target_link_libraries(ContextTests PRIVATE veng_context Catch2::Catch2WithMain)
+target_link_libraries(ContextTests PRIVATE veng_context veng_test_support Catch2::Catch2WithMain)
 
 
 add_executable(ShaderLoadingTests shader/ShaderLoadingTests.cpp)
-target_link_libraries(ShaderLoadingTests PRIVATE veng_shader Catch2::Catch2WithMain)
+target_link_libraries(ShaderLoadingTests PRIVATE veng_shader veng_test_support Catch2::Catch2WithMain)
 target_compile_options(ShaderLoadingTests PRIVATE -O0)
 
 add_executable(ShaderValidationTests shader/ShaderValidationTests.cpp)
@@ -43,19 +71,19 @@ target_link_libraries(ClusterTests PRIVATE veng_culling Catch2::Catch2WithMain)
 
 # L2 ComputePipeline tests — reflection-driven builder on a headless device.
 add_executable(ComputePipelineTests pipelines/ComputePipelineTests.cpp)
-target_link_libraries(ComputePipelineTests PRIVATE veng_pipelines Catch2::Catch2WithMain)
+target_link_libraries(ComputePipelineTests PRIVATE veng_pipelines veng_test_support Catch2::Catch2WithMain)
 
 # L2.1 GraphicsPipeline tests — dynamic-rendering builder on a headless device.
 add_executable(GraphicsPipelineTests pipelines/GraphicsPipelineTests.cpp)
-target_link_libraries(GraphicsPipelineTests PRIVATE veng_pipelines Catch2::Catch2WithMain)
+target_link_libraries(GraphicsPipelineTests PRIVATE veng_pipelines veng_test_support Catch2::Catch2WithMain)
 
 # L2.2 DescriptorAllocator tests — pool growth + recycling on a headless device.
 add_executable(DescriptorAllocatorTests descriptors/DescriptorAllocatorTests.cpp)
-target_link_libraries(DescriptorAllocatorTests PRIVATE veng_descriptors Catch2::Catch2WithMain)
+target_link_libraries(DescriptorAllocatorTests PRIVATE veng_descriptors veng_test_support Catch2::Catch2WithMain)
 
 # L1 resource tests — Buffer/Image RAII over VMA on a headless device.
 add_executable(ResourceTests resources/ResourceTests.cpp)
-target_link_libraries(ResourceTests PRIVATE veng_resources Catch2::Catch2WithMain)
+target_link_libraries(ResourceTests PRIVATE veng_resources veng_test_support Catch2::Catch2WithMain)
 
 # L1.5 — the versioned, N-buffered ResourcePool's reuse + retention logic (N-buffering core).
 add_executable(ResourcePoolTests resources/ResourcePoolTests.cpp)
@@ -99,6 +127,9 @@ target_link_libraries(TextureTests PRIVATE veng_assets veng_nodes veng_resources
 add_executable(PbrPassTests passes/PbrPassTests.cpp)
 target_link_libraries(PbrPassTests PRIVATE veng_passes veng_assets veng_nodes veng_resources Catch2::Catch2WithMain)
 
+add_executable(PickingOutlineTests passes/PickingOutlineTests.cpp)
+target_link_libraries(PickingOutlineTests PRIVATE veng_passes veng_managers veng_nodes veng_resources Catch2::Catch2WithMain)
+
 # glTF loader integration — loads + renders the fetched Khronos sample models (SKIP if absent).
 add_executable(GltfLoaderTests assets/GltfLoaderTests.cpp)
 target_link_libraries(GltfLoaderTests PRIVATE veng_assets veng_passes veng_nodes veng_resources Catch2::Catch2WithMain)
@@ -125,6 +156,9 @@ target_link_libraries(InstancedDrawTests PRIVATE veng_nodes veng_resources Catch
 add_executable(DebugLineTests nodes/DebugLineTests.cpp)
 target_link_libraries(DebugLineTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+add_executable(DynamicMeshTests nodes/DynamicMeshTests.cpp)
+target_link_libraries(DynamicMeshTests PRIVATE veng_managers veng_nodes veng_resources Catch2::Catch2WithMain)
+
 # One pass sampling another's output: the sampled-image descriptor path + the demand cascade
 # when a sampled source is rebound (the basis of the multi-pass outline effect).
 add_executable(SampledImageTests nodes/SampledImageTests.cpp)
@@ -148,34 +182,28 @@ target_link_libraries(ScreenshotNodeTests PRIVATE veng_nodes veng_resources Catc
 add_executable(PhongPassTests nodes/PhongPassTests.cpp)
 target_link_libraries(PhongPassTests PRIVATE veng_passes veng_nodes veng_resources Catch2::Catch2WithMain)
 
-catch_discover_tests(ContextTests)
-catch_discover_tests(ShaderLoadingTests)
-catch_discover_tests(ShaderValidationTests)
-catch_discover_tests(GraphTests)
-catch_discover_tests(SchedulerTests)
-catch_discover_tests(TemporalTests)
-catch_discover_tests(ComputePipelineTests)
-catch_discover_tests(GraphicsPipelineTests)
-catch_discover_tests(DescriptorAllocatorTests)
-catch_discover_tests(ResourceTests)
-catch_discover_tests(ResourcePoolTests)
-catch_discover_tests(GpuBridgeTests)
-catch_discover_tests(ManagerTests)
-catch_discover_tests(RasterTriangleTests)
-catch_discover_tests(SliceDriverTests)
-catch_discover_tests(GraphicsNodeTests)
-catch_discover_tests(MeshNodeTests)
-catch_discover_tests(MeshStrideTests)
-catch_discover_tests(TextureTests)
-catch_discover_tests(PbrPassTests)
-catch_discover_tests(GltfLoaderTests)
-catch_discover_tests(UniformNodeTests)
-catch_discover_tests(StorageBufferNodeTests)
-catch_discover_tests(InstancedDrawTests)
-catch_discover_tests(DebugLineTests)
-catch_discover_tests(SampledImageTests)
-catch_discover_tests(MultiDrawTests)
-catch_discover_tests(NBufferingTests)
-catch_discover_tests(ScreenshotNodeTests)
-catch_discover_tests(PhongPassTests)
+# Swapchain / present / FrameExecutor over a headless surface (lavapipe in CI; SKIP on stock NVIDIA).
+add_executable(SwapchainTests managers/SwapchainTests.cpp)
+target_link_libraries(SwapchainTests PRIVATE veng_managers veng_test_support Catch2::Catch2WithMain)
+
+add_executable(FrameExecutorTests managers/FrameExecutorTests.cpp)
+target_link_libraries(FrameExecutorTests PRIVATE veng_managers veng_nodes veng_resources veng_test_support Catch2::Catch2WithMain)
+
+# Most tests are device-agnostic and run on the default driver. Discover them plainly.
+foreach(test_target
+        ContextTests ShaderLoadingTests ShaderValidationTests GraphTests SchedulerTests TemporalTests
+        ComputePipelineTests GraphicsPipelineTests DescriptorAllocatorTests ResourceTests ResourcePoolTests
+        GpuBridgeTests ManagerTests RasterTriangleTests SliceDriverTests GraphicsNodeTests MeshNodeTests
+        MeshStrideTests TextureTests PbrPassTests PickingOutlineTests GltfLoaderTests UniformNodeTests StorageBufferNodeTests
+        InstancedDrawTests DebugLineTests DynamicMeshTests SampledImageTests MultiDrawTests NBufferingTests
+        ScreenshotNodeTests PhongPassTests)
+    catch_discover_tests(${test_target})
+endforeach()
+
+# Only the swapchain/present/FrameExecutor tests need a surface. Pin the lavapipe ICD on just these
+# (per-test, via VENG_TEST_PROPS) so they execute under it; they SKIP if it isn't set. The rest of
+# the suite — and every example — keeps using the default driver.
+foreach(test_target SwapchainTests FrameExecutorTests)
+    catch_discover_tests(${test_target} ${VENG_TEST_PROPS})
+endforeach()
 

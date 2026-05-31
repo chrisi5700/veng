@@ -63,15 +63,15 @@ Texture solid(veng::Context& ctx, int r, int g, int bl, ColorSpace cs)
 // Everything a single-material PBR render needs, with the per-test knobs exposed.
 struct PbrCase
 {
-	glm::vec4				base_color_factor = glm::vec4(1.0F);
-	float					metallic		  = 0.0F;
-	float					roughness		  = 1.0F;
-	glm::vec3				emissive_factor	  = glm::vec3(0.0F);
-	glm::vec3				light_direction	  = glm::vec3(0.0F, 0.0F, 1.0F); // toward the camera-facing quad
-	veng::passes::AlphaMode alpha_mode		  = veng::passes::AlphaMode::Opaque;
-	float					alpha_cutoff	  = 0.5F; // base_color_factor.a is the alpha the cutoff/blend uses
-	bool					light_off		  = false; // kill the directional light (isolate point lights)
-	std::vector<veng::culling::GpuLight> point_lights{}; // clustered point lights (wired when non-empty)
+	glm::vec4							 base_color_factor = glm::vec4(1.0F);
+	float								 metallic		   = 0.0F;
+	float								 roughness		   = 1.0F;
+	glm::vec3							 emissive_factor   = glm::vec3(0.0F);
+	glm::vec3							 light_direction = glm::vec3(0.0F, 0.0F, 1.0F); // toward the camera-facing quad
+	veng::passes::AlphaMode				 alpha_mode		 = veng::passes::AlphaMode::Opaque;
+	float								 alpha_cutoff = 0.5F;  // base_color_factor.a is the alpha the cutoff/blend uses
+	bool								 light_off	  = false; // kill the directional light (isolate point lights)
+	std::vector<veng::culling::GpuLight> point_lights{};	   // clustered point lights (wired when non-empty)
 };
 
 // Render the quad for `c` and return the centre pixel RGBA8.
@@ -305,8 +305,8 @@ TEST_CASE("PbrPass clustered point light illuminates an otherwise-dark fragment"
 	base.point_lights = {veng::culling::GpuLight{.position = glm::vec4(0.0F, 0.0F, 1.0F, 5.0F),
 												 .color	   = glm::vec4(1.0F, 1.0F, 1.0F, 20.0F)}};
 	const auto lit	  = render_center(ctx, base);
-	REQUIRE(lit[0] > 90);			 // the clustered point light clearly illuminates the centre
-	REQUIRE(lit[0] > dark[0] + 60);	 // and it is the light doing it, not ambient
+	REQUIRE(lit[0] > 90);			// the clustered point light clearly illuminates the centre
+	REQUIRE(lit[0] > dark[0] + 60); // and it is the light doing it, not ambient
 
 	// A point light pushed far outside its radius from the quad contributes ~nothing: the cull still
 	// assigns it near its own position, but the shader's distance falloff kills it at the surface.

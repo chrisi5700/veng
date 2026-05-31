@@ -3,7 +3,8 @@
  * @author chris
  * @brief Helper that centralises the "stamp a fresh version, then produce" step for producer nodes.
  *
- * The reference types that flow on graph edges — @ref veng::gpu::MeshRef, @ref veng::gpu::UniformRef, @ref veng::gpu::BufferRef,
+ * The reference types that flow on graph edges — @ref veng::gpu::MeshRef, @ref veng::gpu::UniformRef, @ref
+ * veng::gpu::BufferRef,
  * @ref veng::gpu::ImageRef — each carry a `version` the producer bumps on every publish so two structurally
  * identical refs from consecutive runs still compare unequal. This is what makes
  * `ValueData<Ref>`'s change-cutoff fire when a stable handle (a reused buffer, a recycled

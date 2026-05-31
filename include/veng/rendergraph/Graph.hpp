@@ -1,7 +1,8 @@
 /**
  * @file
  * @author chris
- * @brief The reactive render graph: @ref veng::graph::TypedHandle, @ref veng::graph::FramePlan, and @ref veng::graph::Graph.
+ * @brief The reactive render graph: @ref veng::graph::TypedHandle, @ref veng::graph::FramePlan, and @ref
+ * veng::graph::Graph.
  *
  * The @ref veng::graph::Graph is a persistent dependency graph evaluated by demand-driven incremental
  * computation. It owns all @ref veng::graph::Node and @ref veng::graph::Data slots, applies frame-boundary source

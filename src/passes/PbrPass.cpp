@@ -1,8 +1,8 @@
 /**
  * @file
  * @author chris
- * @brief Implementation of @ref veng::passes::PbrPass — the @ref veng::passes::PbrRenderNode private class, Cook-Torrance
- *        BRDF recording, descriptor management, and the @ref veng::passes::PbrPass public facade.
+ * @brief Implementation of @ref veng::passes::PbrPass — the @ref veng::passes::PbrRenderNode private class,
+ * Cook-Torrance BRDF recording, descriptor management, and the @ref veng::passes::PbrPass public facade.
  * @ingroup render_passes
  */
 

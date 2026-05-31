@@ -80,7 +80,7 @@ VKAPI_ATTR vk::Bool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagB
 												[[maybe_unused]] void*							 user_data)
 {
 	auto& logger  = Logger::instance();
-	auto  pattern = fmt::format("[IteratedFunction]{:<30}[%^%5l%$] %v", "[VulkanDebug]");
+	auto  pattern = fmt::format("[veng]{:<30}[%^%5l%$] %v", "[VulkanDebug]");
 	logger.set_pattern(pattern);
 	switch (severity)
 	{

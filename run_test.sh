@@ -18,10 +18,15 @@ cd "$(dirname "$0")"
 build_dir="build/coverage"
 
 echo "==> Configuring coverage build ($build_dir)"
+# VENG_TEST_VULKAN_ICD (optional): point the tests at a specific Vulkan ICD so the swapchain /
+# present / FrameExecutor tests (which need a surface) run instead of SKIPping — set it to Mesa
+# lavapipe's manifest to include that tier in coverage, e.g.
+#   VENG_TEST_VULKAN_ICD=/usr/share/vulkan/icd.d/lvp_icd.json ./run_test.sh
 # -fprofile-update=atomic so the multi-threaded SchedulerTests don't corrupt counters.
 cmake -S . -B "$build_dir" -G Ninja \
 	-DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
 	-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=26 \
+	-DVENG_TEST_VULKAN_ICD="${VENG_TEST_VULKAN_ICD:-}" \
 	-DCMAKE_CXX_FLAGS="--coverage -fprofile-update=atomic" \
 	-DCMAKE_EXE_LINKER_FLAGS="--coverage"
 

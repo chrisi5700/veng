@@ -6,8 +6,8 @@
  * @ref veng::passes::OutlinePass renders the silhouette of registered meshes, blurs that mask with a separable
  * Gaussian, and extracts the halo that spills outside the silhouette — a soft, colored outline.
  * Both knobs the effect exposes are reactive: change the glow's size or color at runtime via
- * @ref veng::passes::OutlinePass::set_width / @ref veng::passes::OutlinePass::set_color and only the affected nodes re-render
- * next frame (the silhouette stays cached).
+ * @ref veng::passes::OutlinePass::set_width / @ref veng::passes::OutlinePass::set_color and only the affected nodes
+ * re-render next frame (the silhouette stays cached).
  *
  * A "pass" here is a small sub-graph built onto the reactive @ref veng::graph::Graph — the constructor
  * declares three @ref veng::nodes::GraphicsNode instances and wires them together, then the engine
