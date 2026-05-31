@@ -260,7 +260,10 @@ class TransformNode<R(Args...)> final : public Node
 		return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> std::expected<bool, ExecError>
 		{
 			std::tuple<ValueData<Args>*...> args{dynamic_cast<ValueData<Args>*>(ctx.data(m_inputs[Is]))...};
-			if (((std::get<Is>(args) == nullptr) || ...))
+			// Bound to a named bool: `if ((a == b))` would trip clang's -Wparentheses-equality
+			// when the pack has one element (the fold collapses to a lone parenthesised ==).
+			const bool missing_input = ((std::get<Is>(args) == nullptr) || ...);
+			if (missing_input)
 			{
 				return std::unexpected(ExecError::MISSING_INPUT);
 			}

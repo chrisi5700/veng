@@ -132,7 +132,6 @@ class PhongPass
 	[[nodiscard]] graph::NodeHandle node() const noexcept { return m_node; }
 
 	 private:
-	graph::Graph*	  m_graph  = nullptr;
 	PhongRenderNode*  m_render = nullptr; ///< Graph-owned; @ref add_object extends it.
 	graph::DataHandle m_output;
 	graph::NodeHandle m_node;

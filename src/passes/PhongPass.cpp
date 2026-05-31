@@ -313,8 +313,7 @@ PhongPass::PhongPass(graph::Graph& graph, vk::Format color_format, vk::Format de
 					 graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
 					 graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye,
 					 const PhongConfig& config)
-	: m_graph(&graph)
-	, m_output(output)
+	: m_output(output)
 {
 	auto render = std::make_unique<PhongRenderNode>(color_format, depth_format, screen, output, view_proj, eye, config);
 	m_render	= render.get();

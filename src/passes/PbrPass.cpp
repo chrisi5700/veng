@@ -658,8 +658,7 @@ class PbrRenderNode final : public gpu::GpuNode
 PbrPass::PbrPass(graph::Graph& graph, vk::Format color_format, vk::Format depth_format,
 				 graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
 				 graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye, const PbrConfig& config)
-	: m_graph(&graph)
-	, m_output(output)
+	: m_output(output)
 {
 	auto render = std::make_unique<PbrRenderNode>(color_format, depth_format, screen, output, view_proj, eye, config);
 	m_render	= render.get();
