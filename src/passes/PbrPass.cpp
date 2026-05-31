@@ -1,6 +1,10 @@
-//
-// See veng/passes/PbrPass.hpp and review.md item 5.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::passes::PbrPass — the @ref veng::passes::PbrRenderNode private class, Cook-Torrance
+ *        BRDF recording, descriptor management, and the @ref veng::passes::PbrPass public facade.
+ * @ingroup render_passes
+ */
 
 #include <array>
 #include <cstddef>
@@ -94,7 +98,7 @@ class PbrRenderNode final : public gpu::GpuNode
 													   material.emissive, material.occlusion},
 									   .base_color	= material.base_color_factor,
 									   .mr_factors	= glm::vec4(material.metallic_factor, material.roughness_factor,
-															material.normal_scale, material.occlusion_strength),
+																material.normal_scale, material.occlusion_strength),
 									   .emissive	= glm::vec4(material.emissive_factor, cutoff),
 									   .transparent = material.alpha_mode == AlphaMode::Blend});
 		for (const graph::DataHandle texture : m_materials.back().textures)
@@ -120,12 +124,12 @@ class PbrRenderNode final : public gpu::GpuNode
 	void set_clustered_lights(graph::DataHandle view, graph::DataHandle lights, graph::DataHandle light_grid,
 							  graph::DataHandle light_index, const culling::ClusterGrid& grid)
 	{
-		m_cluster_view	= view;
-		m_lights		= lights;
-		m_light_grid	= light_grid;
-		m_light_index	= light_index;
-		m_cluster_grid	= grid;
-		m_clustered		= true;
+		m_cluster_view = view;
+		m_lights	   = lights;
+		m_light_grid   = light_grid;
+		m_light_index  = light_index;
+		m_cluster_grid = grid;
+		m_clustered	   = true;
 		m_inputs.push_back(view);
 		m_inputs.push_back(lights);
 		m_inputs.push_back(light_grid);
@@ -170,7 +174,7 @@ class PbrRenderNode final : public gpu::GpuNode
 																	  vk::ImageUsageFlagBits::eSampled);
 			m_depth_id = ctx.pool().declare_image(m_depth_format, vk::ImageUsageFlagBits::eDepthStencilAttachment,
 												  vk::ImageAspectFlagBits::eDepth);
-			m_frame_id		  = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
+			m_frame_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
 			m_default_ssbo_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eStorageBuffer);
 			m_declared		  = true;
 		}
@@ -396,9 +400,9 @@ class PbrRenderNode final : public gpu::GpuNode
 	// The buffers bound to the three light-SSBO bindings (7,8,9) this frame, with their byte ranges.
 	struct LightBuffers
 	{
-		vk::Buffer					 lights;
-		vk::Buffer					 grid;
-		vk::Buffer					 index;
+		vk::Buffer					  lights;
+		vk::Buffer					  grid;
+		vk::Buffer					  index;
 		std::array<vk::DeviceSize, 3> sizes; // lights, grid, index
 	};
 
@@ -473,9 +477,9 @@ class PbrRenderNode final : public gpu::GpuNode
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
-		m_pipeline	  = std::move(opaque.value());
-		m_blend_far	  = std::move(far.value());
-		m_blend_near  = std::move(near.value());
+		m_pipeline	 = std::move(opaque.value());
+		m_blend_far	 = std::move(far.value());
+		m_blend_near = std::move(near.value());
 
 		if (const auto* details = std::get_if<VertexDetails>(&vert.value().get_details()))
 		{
@@ -512,7 +516,7 @@ class PbrRenderNode final : public gpu::GpuNode
 	// clustered-light SSBOs at 7..9. Per-slot sets are safe to rewrite — the slot's set was last used
 	// by a now-retired frame.
 	std::expected<void, graph::ExecError> write_descriptor_sets(gpu::GpuExecContext& ctx, vk::Buffer frame_buffer,
-															   const LightBuffers& light_buffers)
+																const LightBuffers& light_buffers)
 	{
 		if (!m_descriptors.has_value())
 		{
@@ -578,9 +582,15 @@ class PbrRenderNode final : public gpu::GpuNode
 			// Clustered-light SSBOs (7,8,9). Real buffers when clustered, else the shared default
 			// buffer (never read by the shader since cluster_dims.w is 0, but the set must be complete).
 			const std::array<vk::DescriptorBufferInfo, 3> ssbo_infos{
-				vk::DescriptorBufferInfo().setBuffer(light_buffers.lights).setOffset(0).setRange(light_buffers.sizes[0]),
+				vk::DescriptorBufferInfo()
+					.setBuffer(light_buffers.lights)
+					.setOffset(0)
+					.setRange(light_buffers.sizes[0]),
 				vk::DescriptorBufferInfo().setBuffer(light_buffers.grid).setOffset(0).setRange(light_buffers.sizes[1]),
-				vk::DescriptorBufferInfo().setBuffer(light_buffers.index).setOffset(0).setRange(light_buffers.sizes[2])};
+				vk::DescriptorBufferInfo()
+					.setBuffer(light_buffers.index)
+					.setOffset(0)
+					.setRange(light_buffers.sizes[2])};
 			const std::array<std::uint32_t, 3> ssbo_bindings{LIGHTS_BINDING, LIGHT_GRID_BINDING, LIGHT_INDEX_BINDING};
 			for (std::size_t i = 0; i < ssbo_infos.size(); ++i)
 			{

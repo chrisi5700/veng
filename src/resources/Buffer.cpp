@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/25/26.
-//
-// See Buffer.hpp and design.md §L1.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::Buffer implementation — VMA buffer allocation and RAII lifecycle.
+ * @ingroup resources
+ */
 
 #include <utility>
 #include <veng/resources/Buffer.hpp>

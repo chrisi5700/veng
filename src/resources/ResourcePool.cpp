@@ -1,6 +1,9 @@
-//
-// See ResourcePool.hpp.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::ResourcePool implementation — copy acquisition, barrier transitions, and retirement.
+ * @ingroup resources
+ */
 
 #include <array>
 #include <utility>
@@ -183,8 +186,7 @@ void ResourcePool::touch_buffer(BufferId id) noexcept
 
 void ResourcePool::purge_retired_buffers() noexcept
 {
-	std::erase_if(m_retiring_buffers,
-				  [retired = retired_through()](const std::unique_ptr<Copy<Buffer>>& copy)
+	std::erase_if(m_retiring_buffers, [retired = retired_through()](const std::unique_ptr<Copy<Buffer>>& copy)
 				  { return copy->last_use <= retired; });
 }
 

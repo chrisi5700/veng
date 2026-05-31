@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build and run the test suite with coverage, per CLAUDE.md. Produces lcov coverage
-# information for the veng libraries (the L3 core is the priority — design.md §10).
+# information for the veng libraries (the L3 core is the priority).
 #
 # A separate gcov-instrumented build is used (not the sanitized llm-vcpkg preset):
 # coverage and ASan are orthogonal, and a clean coverage build keeps counts accurate.

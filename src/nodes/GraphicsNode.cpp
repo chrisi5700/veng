@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/26/26.
-//
-// See GraphicsNode.hpp and design.md §L4.
-//
+/**
+ * @file
+ * @author chris
+ * @brief GraphicsNode implementation: pipeline build, descriptor writes, and multi-draw recording.
+ * @ingroup graph_nodes
+ */
 
 #include <array>
 #include <cstddef>

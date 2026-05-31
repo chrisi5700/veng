@@ -1,5 +1,5 @@
 //
-// L2 ComputePipeline tests (design.md §L2.1). Builds a real compute pipeline on a
+// L2 ComputePipeline tests. Builds a real compute pipeline on a
 // headless device from a reflected Slang shader, and checks the builder's error and
 // RAII (move-only) behaviour.
 //

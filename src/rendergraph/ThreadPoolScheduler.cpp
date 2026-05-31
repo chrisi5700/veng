@@ -1,8 +1,10 @@
-//
-// Created by chris on 5/25/26.
-//
-// See ThreadPoolScheduler.hpp and design.md §L5.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::graph::ThreadPoolScheduler.
+ *
+ * @ingroup rendergraph
+ */
 
 #include <utility>
 #include <veng/rendergraph/ThreadPoolScheduler.hpp>

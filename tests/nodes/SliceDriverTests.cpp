@@ -1,5 +1,5 @@
 //
-// L4/L5 slice proof (design.md §1, §L4, §L5): the reactive rendering thesis, offscreen.
+// L4/L5 slice proof: the reactive rendering thesis, offscreen.
 // A ScreenSize source -> RasterTriangleNode -> scene ImageData; a BlitNode blits that
 // into a destination ImageData (the offscreen stand-in for a swapchain image) that is
 // dirtied every frame. A minimal driver loop re-feeds the destination and runs

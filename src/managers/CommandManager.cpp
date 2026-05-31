@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/25/26.
-//
-// See CommandManager.hpp and design.md §L2.4.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::CommandManager.
+ * @ingroup managers
+ */
 
 #include <utility>
 #include <veng/managers/CommandManager.hpp>

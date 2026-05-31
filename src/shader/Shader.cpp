@@ -1,6 +1,10 @@
-//
-// Created by chris on 1/7/26.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::Shader implementation: Slang session management, compilation, SPIR-V
+ *        generation, and per-stage reflection extraction.
+ * @ingroup shaders
+ */
 #include <map>
 #include <slang-com-ptr.h>
 #include <veng/common.hpp>

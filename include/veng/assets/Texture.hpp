@@ -1,17 +1,19 @@
-//
-// Created by chris on 5/30/26.
-//
-// L2 asset — a GPU-resident 2D texture loaded from a file or memory, with a generated mip chain
-// (review.md item 3). The one genuinely new piece of machinery for displaying real assets: it
-// fills the gap between `ResourcePool::constant_image` (a clear-colour fill) and an actual
-// decoded, mipped texture. It owns its backing `Image` and exposes a `gpu::ImageRef` you feed to
-// a graph source to sample it.
-//
-// Immutability: a texture is uploaded once and never written again, so — unlike a render target —
-// it is NOT pool-backed (its ref's pool_id is INVALID). One physical copy is safe to sample every
-// frame forever, and consumers never `touch` it. Lifetime is the caller's: keep the `Texture`
-// alive as long as anything samples its ref.
-//
+/**
+ * @file
+ * @author chris
+ * @brief GPU-resident 2D texture loaded from a file or memory buffer, with a full mip chain.
+ *
+ * @ref veng::assets::Texture fills the gap between `ResourcePool::constant_image` (a clear-colour fill)
+ * and an actual decoded, mipped texture. It owns its backing `Image` and exposes a
+ * `gpu::ImageRef` that is fed to a graph source node for sampling.
+ *
+ * Immutability: a texture is uploaded once and never written again. Unlike a render
+ * target, it is NOT pool-backed — its ref's `pool_id` is `INVALID`. One physical copy
+ * is safe to sample every frame forever and consumers never `touch` it. Lifetime is the
+ * caller's responsibility: keep the @ref veng::assets::Texture alive as long as anything samples its ref.
+ *
+ * @ingroup assets
+ */
 
 #ifndef VENG_TEXTURE_HPP
 #define VENG_TEXTURE_HPP
@@ -34,24 +36,38 @@ class Context;
 
 namespace veng::assets
 {
-/// Whether a texture's bytes are sRGB-encoded colour (baseColor, emissive) or linear data
-/// (normal, metallic-roughness, occlusion). Drives the image format so the sampler hardware
-/// decodes colour to linear on read and leaves data untouched (review.md item 8). Getting this
-/// wrong — decoding a normal map as sRGB — is the most common glTF rendering bug.
+/**
+ * @brief Whether a texture's bytes are sRGB-encoded colour or linear data.
+ *
+ * Drives the chosen `vk::Format` so the sampler hardware decodes colour to linear on
+ * read and leaves linear data untouched. Getting this wrong — e.g. decoding a normal
+ * map as sRGB — is the most common glTF rendering artefact.
+ *
+ * @ingroup assets
+ */
 enum class ColorSpace : std::uint8_t
 {
-	Srgb,	// colour: baseColor, emissive  -> eR8G8B8A8Srgb (sampler decodes to linear)
-	Linear, // data:   normal, metallic-roughness, occlusion -> eR8G8B8A8Unorm
+	Srgb,	///< Colour data (baseColor, emissive) → `eR8G8B8A8Srgb`; decoded to linear by the sampler.
+	Linear, ///< Linear data (normal, metallic-roughness, occlusion) → `eR8G8B8A8Unorm`.
 };
 
+/**
+ * @brief Error codes returned by @ref veng::assets::Texture factory methods.
+ * @ingroup assets
+ */
 enum class TextureError : std::uint8_t
 {
-	FileUnreadable, // stb_image could not open/decode the file
-	DecodeFailed,	// the bytes were not a recognisable image
-	GpuAllocation,	// Image/Buffer allocation failed
-	Upload,			// the staging upload / mip generation submit failed
+	FileUnreadable, ///< `stb_image` could not open or decode the file.
+	DecodeFailed,	///< The bytes were not a recognisable image format.
+	GpuAllocation,	///< `Image` or staging `Buffer` allocation failed.
+	Upload,			///< The staging upload or mip-generation submit failed.
 };
 
+/**
+ * @brief Stringify a @ref TextureError for logging and error reporting.
+ * @param error The error code to render.
+ * @return A human-readable description of the error.
+ */
 [[nodiscard]] constexpr std::string_view to_string(TextureError error) noexcept
 {
 	switch (error)
@@ -64,23 +80,62 @@ enum class TextureError : std::uint8_t
 	return "unknown texture error";
 }
 
+/**
+ * @brief RAII, move-only GPU-resident 2D texture with a full mip chain.
+ *
+ * Three factory paths cover the loading scenarios that arise in practice: filesystem
+ * files (`from_file`), pre-decoded RGBA8 pixel buffers (`from_pixels`), and
+ * in-memory encoded image bytes (`from_encoded`). All three produce the same immutable,
+ * pool-independent result.
+ *
+ * @ingroup assets
+ * @see GltfLoader
+ */
 class Texture
 {
 	 public:
-	/// Decode an image file (PNG/JPG/TGA/… — whatever stb_image supports) to RGBA8 and upload it
-	/// with a full mip chain, choosing the image format from `color_space`.
+	/**
+	 * @brief Decode an image file to RGBA8 and upload it with a full mip chain.
+	 *
+	 * Supports any format stb_image recognises (PNG, JPG, TGA, BMP, …).
+	 *
+	 * @param ctx         The engine context providing the Vulkan device and allocator.
+	 * @param path        Filesystem path to the image file.
+	 * @param color_space Whether the image contains sRGB colour or linear data.
+	 * @return The uploaded @ref veng::assets::Texture, or a @ref TextureError on failure.
+	 */
 	[[nodiscard]] static std::expected<Texture, TextureError> from_file(const Context& ctx, const std::string& path,
 																		ColorSpace color_space);
 
-	/// Upload tightly-packed RGBA8 pixels (`width * height * 4` bytes, row-major). The in-memory
-	/// path the glTF loader feeds decoded buffers into, and tests feed synthesized pixels into.
+	/**
+	 * @brief Upload tightly-packed RGBA8 pixels to the GPU with a full mip chain.
+	 *
+	 * The path the @ref veng::assets::load_gltf feeds decoded buffers into, and that tests use with
+	 * synthesized pixel data. Pixels are `width * height * 4` bytes, row-major.
+	 *
+	 * @param ctx         The engine context.
+	 * @param rgba8       Tightly-packed RGBA8 pixel data.
+	 * @param width       Image width in pixels.
+	 * @param height      Image height in pixels.
+	 * @param color_space Whether the pixels are sRGB colour or linear data.
+	 * @return The uploaded @ref veng::assets::Texture, or a @ref TextureError on failure.
+	 */
 	[[nodiscard]] static std::expected<Texture, TextureError> from_pixels(const Context&			 ctx,
 																		  std::span<const std::byte> rgba8,
 																		  std::uint32_t width, std::uint32_t height,
 																		  ColorSpace color_space);
 
-	/// Decode an in-memory *encoded* image (PNG/JPG/... bytes) to RGBA8 and upload it. The path the
-	/// glTF loader uses for textures embedded in a .glb or referenced from a buffer view.
+	/**
+	 * @brief Decode in-memory encoded image bytes (PNG/JPG/…) to RGBA8 and upload with mips.
+	 *
+	 * The path the @ref veng::assets::load_gltf uses for textures embedded in a `.glb` or referenced
+	 * from a buffer view.
+	 *
+	 * @param ctx         The engine context.
+	 * @param encoded     Encoded image bytes (any format stb_image recognises).
+	 * @param color_space Whether the image contains sRGB colour or linear data.
+	 * @return The uploaded @ref veng::assets::Texture, or a @ref TextureError on failure.
+	 */
 	[[nodiscard]] static std::expected<Texture, TextureError> from_encoded(const Context&			  ctx,
 																		   std::span<const std::byte> encoded,
 																		   ColorSpace				  color_space);
@@ -91,8 +146,14 @@ class Texture
 	Texture& operator=(Texture&&)	   = default;
 	~Texture()						   = default;
 
-	/// The edge value to feed a graph source. pool_id is INVALID (not pool-owned); version is a
-	/// fixed 1 (the texture is immutable, so it changes exactly once — cold — then caches).
+	/**
+	 * @brief The `gpu::ImageRef` to feed to a graph source node.
+	 *
+	 * `pool_id` is `INVALID` (not pool-owned); `version` is a fixed `1` because the
+	 * texture is immutable — it changes exactly once (the upload) and then caches.
+	 *
+	 * @return A `gpu::ImageRef` valid for the lifetime of this @ref veng::assets::Texture.
+	 */
 	[[nodiscard]] gpu::ImageRef ref() const noexcept
 	{
 		return gpu::ImageRef{.image	  = m_image.image(),
@@ -103,7 +164,9 @@ class Texture
 							 .version = 1};
 	}
 
-	[[nodiscard]] const Image&	image() const noexcept { return m_image; }
+	/** @brief The underlying RAII `Image` object. */
+	[[nodiscard]] const Image& image() const noexcept { return m_image; }
+	/** @brief Number of mip levels in the uploaded image. */
 	[[nodiscard]] std::uint32_t mip_levels() const noexcept { return m_image.mip_levels(); }
 
 	 private:

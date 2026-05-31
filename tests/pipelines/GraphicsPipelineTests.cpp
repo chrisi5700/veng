@@ -1,5 +1,5 @@
 //
-// L2.1 GraphicsPipeline tests (design.md §L2.1). Builds a real graphics pipeline via
+// L2.1 GraphicsPipeline tests. Builds a real graphics pipeline via
 // Vulkan 1.3 dynamic rendering from a reflected vertex+fragment pair on a headless
 // device, and checks the builder's stage/compat/format guards and RAII.
 //

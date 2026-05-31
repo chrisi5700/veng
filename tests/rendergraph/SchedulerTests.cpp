@@ -1,5 +1,5 @@
 //
-// L5 job-system tests (design.md §L5, §7). Drives the same reactive core through a
+// L5 job-system tests. Drives the same reactive core through a
 // real multi-threaded ThreadPoolScheduler to prove the concurrency machinery — CAS
 // completion, atomic wait/notify, and height-batched dispatch — is correct, that a
 // fixed pool never deadlocks regardless of graph depth, and that results match the

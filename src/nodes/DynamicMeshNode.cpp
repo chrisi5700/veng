@@ -1,6 +1,9 @@
-//
-// See DynamicMeshNode.hpp and design.md §L4.
-//
+/**
+ * @file
+ * @author chris
+ * @brief DynamicMeshNode implementation: pool-backed per-frame vertex/index upload.
+ * @ingroup graph_nodes
+ */
 
 #include <cstring>
 #include <veng/gpu/MeshRef.hpp>

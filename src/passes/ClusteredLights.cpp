@@ -1,13 +1,16 @@
-//
-// See veng/passes/ClusteredLights.hpp.
-//
-
-#include <veng/passes/ClusteredLights.hpp>
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::passes::wire_clustered_lights — FroxelGridCpu, LightCullCpu, and the
+ *        three SSBO upload nodes wired into a @ref veng::graph::Graph.
+ * @ingroup render_passes
+ */
 
 #include <memory>
 #include <vector>
 #include <veng/gpu/BufferRef.hpp>
 #include <veng/nodes/StorageBufferNode.hpp>
+#include <veng/passes/ClusteredLights.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 
 namespace veng::passes
@@ -24,7 +27,8 @@ graph::DataHandle upload(graph::Graph& graph, graph::TypedHandle<std::vector<T>>
 }
 } // namespace
 
-ClusteredLightEdges wire_clustered_lights(graph::Graph& graph, graph::TypedHandle<std::vector<culling::GpuLight>> lights,
+ClusteredLightEdges wire_clustered_lights(graph::Graph&										 graph,
+										  graph::TypedHandle<std::vector<culling::GpuLight>> lights,
 										  graph::TypedHandle<glm::mat4> view, graph::TypedHandle<glm::mat4> proj,
 										  const culling::ClusterGrid& grid)
 {
@@ -38,12 +42,12 @@ ClusteredLightEdges wire_clustered_lights(graph::Graph& graph, graph::TypedHandl
 	// only when the lights or the camera move.
 	const auto assignment = graph.add_transform(
 		[grid](const std::vector<culling::GpuLight>& ls, const std::vector<culling::Aabb>& fx, const glm::mat4& v)
-		{ return culling::assign_lights(fx, ls, v, grid); },
-		lights, froxels, view);
+		{ return culling::assign_lights(fx, ls, v, grid); }, lights, froxels, view);
 
 	// Split the assignment into its two arrays and upload all three buffers.
-	const auto grid_vec	 = graph.add_transform([](const culling::ClusterAssignment& a) { return a.grid; }, assignment);
-	const auto index_vec = graph.add_transform([](const culling::ClusterAssignment& a) { return a.indices; }, assignment);
+	const auto grid_vec = graph.add_transform([](const culling::ClusterAssignment& a) { return a.grid; }, assignment);
+	const auto index_vec =
+		graph.add_transform([](const culling::ClusterAssignment& a) { return a.indices; }, assignment);
 
 	return ClusteredLightEdges{.lights		= upload(graph, lights, "lights"),
 							   .light_grid	= upload(graph, grid_vec, "light_grid"),

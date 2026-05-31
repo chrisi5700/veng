@@ -1,20 +1,26 @@
-//
-// L4 upload node (design.md §L4) — the array counterpart to UniformNode. You give it a
-// *value edge* (a `TypedHandle<std::vector<T>>` source/transform) and the reflected binding
-// name; each time the vector changes it uploads the new bytes into its persistent storage
-// buffer and publishes a `gpu::BufferRef` carrying the buffer handle, per-element stride,
-// element count, and binding name. A `GraphicsNode::add_storage_buffer(handle)` consumes
-// the ref, matches the name to the shader's reflected descriptor, and binds it. The count
-// also drives `instanceCount` of every draw on the consuming node — this is the engine's
-// "many bodies" path: one `std::vector<Body>` source -> one upload -> one instanced draw.
-//
-// Like UniformNode this is genuinely reactive: the vector is an *input* edge, so changing
-// it re-runs the upload and re-renders every dependent GraphicsNode. The buffer is
-// pool-owned (N-buffered, persistently mapped) so frame N+1 never stomps the copy frame N's
-// GPU work is still reading. The buffer grows as `vector.size()` grows — a larger element
-// count reallocates the pool copies (do it only at frame boundaries; the pool's retirement
-// window keeps the in-flight copies alive).
-//
+/**
+ * @file
+ * @author chris
+ * @brief L4 upload node that mirrors a `std::vector<T>` value edge into a GPU storage buffer.
+ *
+ * This is the array counterpart to `UniformNode`. Supply a value edge (a
+ * `TypedHandle<std::vector<T>>` source or transform) and the reflected binding name. Each
+ * time the vector changes the node uploads the new bytes into its persistent storage buffer
+ * and publishes a @ref veng::gpu::BufferRef carrying the buffer handle, per-element stride, element
+ * count, and binding name. A `GraphicsNode::add_storage_buffer(handle)` consumes the ref,
+ * matches the name to the shader's reflected descriptor, and binds it. The count also drives
+ * `instanceCount` of every draw on the consuming node — this is the engine's "many bodies"
+ * path: one `std::vector<Body>` source -> one upload -> one instanced draw.
+ *
+ * Like `UniformNode` this is genuinely reactive: the vector is an input edge, so changing it
+ * re-runs the upload and re-renders every dependent `GraphicsNode`. The buffer is pool-owned
+ * (N-buffered, persistently mapped) via @ref veng::ResourcePool so frame N+1 never stomps the copy
+ * frame N's GPU work is still reading. The buffer grows as `vector.size()` grows — a larger
+ * element count reallocates the pool copies (do so only at frame boundaries; the pool's
+ * retirement window keeps the in-flight copies alive).
+ *
+ * @ingroup graph_nodes
+ */
 
 #ifndef VENG_STORAGEBUFFERNODE_HPP
 #define VENG_STORAGEBUFFERNODE_HPP
@@ -37,15 +43,29 @@
 
 namespace veng::nodes
 {
+/**
+ * @brief Concrete @ref veng::gpu::GpuNode that uploads a typed vector to a pool-owned storage buffer each frame.
+ *
+ * @ingroup graph_nodes
+ */
 class StorageBufferNode final : public gpu::GpuNode
 {
 	 public:
-	/// Upload the contents of `value` (a `TypedHandle<std::vector<T>>`) into a storage buffer
-	/// and publish a `gpu::BufferRef` on `output` (a `ValueData<gpu::BufferRef>`).
-	/// `binding_name` must match the reflected descriptor name in the consuming shader (the
-	/// `StructuredBuffer<T>` / `RWStructuredBuffer<T>` variable name). `T`'s memory layout must
-	/// match the shader's element type (std430 for storage buffers — tightly packed for the
-	/// usual POD physics-body structs). `T` is deduced from `value`.
+	/**
+	 * @brief Construct a storage-buffer upload node.
+	 *
+	 * Uploads the contents of `value` into a storage buffer declared in the @ref veng::ResourcePool
+	 * and publishes a @ref veng::gpu::BufferRef on `output`. `binding_name` must match the reflected
+	 * descriptor name in the consuming shader (the `StructuredBuffer<T>` /
+	 * `RWStructuredBuffer<T>` variable name). `T`'s memory layout must match the shader's
+	 * element type (std430 for storage buffers — tightly packed for the usual POD physics-body
+	 * structs). `T` is deduced from `value`.
+	 *
+	 * @tparam T            Element type of the source vector; must satisfy std430 layout.
+	 * @param value         Typed handle for the reactive `std::vector<T>` value edge.
+	 * @param binding_name  Reflected descriptor name in the consuming shader.
+	 * @param output        Data handle for the published @ref veng::gpu::BufferRef edge.
+	 */
 	template <class T>
 	StorageBufferNode(graph::TypedHandle<std::vector<T>> value, std::string binding_name,
 					  graph::DataHandle output) noexcept
@@ -81,9 +101,10 @@ class StorageBufferNode final : public gpu::GpuNode
 	[[nodiscard]] std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override;
 
 	 private:
-	// Erased view of the input vector: the captured lambda resolves the typed slot and hands
-	// back the bytes + count. `resolved` distinguishes a missing/wrong-type input slot
-	// (MISSING_INPUT) from a legitimately empty vector (count=0, bytes possibly null).
+	/// Erased view of the input vector: the captured lambda resolves the typed slot and hands
+	/// back the raw bytes and element count. `resolved` distinguishes a missing or wrong-type
+	/// input slot (`MISSING_INPUT`) from a legitimately empty vector (`count=0`, bytes possibly
+	/// null).
 	struct Reading
 	{
 		bool		  resolved = false;
@@ -91,14 +112,14 @@ class StorageBufferNode final : public gpu::GpuNode
 		std::uint32_t count	   = 0;
 	};
 
-	graph::DataHandle							m_value; // the reactive vector<T> edge
+	graph::DataHandle							m_value; ///< The reactive `vector<T>` edge.
 	graph::DataHandle							m_output;
 	std::string									m_name;
-	std::uint32_t								m_stride; // sizeof(T) — bytes per element
+	std::uint32_t								m_stride; ///< `sizeof(T)` — bytes per element.
 	std::function<Reading(graph::ExecContext&)> m_read;
-	bool										m_declared	= false; // m_buffer_id declared in the pool?
-	BufferId									m_buffer_id = 0;	 // pool-owned, N-buffered storage buffer
-	gpu::VersionedOutput						m_versioned; // owns the per-upload version bump for the BufferRef
+	bool				 m_declared	 = false; ///< Whether `m_buffer_id` has been declared in the pool.
+	BufferId			 m_buffer_id = 0;	  ///< Pool-owned, N-buffered storage buffer.
+	gpu::VersionedOutput m_versioned;		  ///< Owns the per-upload version bump for the @ref veng::gpu::BufferRef.
 };
 } // namespace veng::nodes
 

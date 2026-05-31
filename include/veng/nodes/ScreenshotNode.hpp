@@ -1,15 +1,22 @@
-//
-// L4 sink node — a screenshot is a peer sink ([[pass-draw-redesign]]). Demand the screenshot
-// alongside present (e.g. `resolve({frame_done, shot_done})`) the frame you want a capture; the
-// node records a copy from its input image into a host-visible staging buffer (recordable, runs
-// in the shared CB like any other node), and writes the file to disk in `on_retired` — the
-// post-fence hook that fires after the slot's in-flight fence has signalled, so the staging
-// buffer is guaranteed populated. The driver never special-cases screenshots; the same
-// mechanism would carry a video-encode sink.
-//
-// File format: PPM (P6 binary RGB), no library dependency. Channels: assumes RGBA8 input; RGB is
-// written, alpha dropped.
-//
+/**
+ * @file
+ * @author chris
+ * @brief L4 sink node that copies a rendered image to a host-visible buffer and writes a PPM file.
+ *
+ * A screenshot is a peer sink: demand it alongside present (e.g. `resolve({frame_done,
+ * shot_done})`) the frame you want a capture. The node records a `vkCmdCopyImageToBuffer`
+ * from its input image into a host-visible staging buffer in the shared command buffer, then
+ * writes the file to disk in `on_retired` — the post-fence hook that fires after the slot's
+ * in-flight fence has signalled, guaranteeing the staging buffer is fully populated. The driver
+ * never special-cases screenshots; the same mechanism would carry a video-encode sink.
+ *
+ * File format: PPM (P6 binary RGB), no external library required. Input is assumed to be RGBA8;
+ * RGB is written and the alpha channel is dropped.
+ *
+ * @ingroup graph_nodes
+ * @see PresentNode
+ * @see BlitNode
+ */
 
 #ifndef VENG_SCREENSHOTNODE_HPP
 #define VENG_SCREENSHOTNODE_HPP
@@ -29,18 +36,40 @@
 
 namespace veng::nodes
 {
+/**
+ * @brief Concrete @ref veng::gpu::GpuNode and @ref veng::gpu::Sink that reads back a rendered image and writes a PPM file.
+ *
+ * @ingroup graph_nodes
+ * @see PresentNode
+ * @see BlitNode
+ */
 class ScreenshotNode final : public gpu::GpuNode, public gpu::Sink
 {
 	 public:
-	/// Capture the image on `source` (a `ValueData<gpu::ImageRef>` left in TRANSFER_SRC by its
-	/// producer) and write it to `path` on the host once the frame's fence signals. `output` is
-	/// the done-token sink the driver demands.
+	/**
+	 * @brief Construct a screenshot node.
+	 *
+	 * Captures the image on `source` (a `ValueData<gpu::ImageRef>` left in `TRANSFER_SRC` by
+	 * its producer) and writes it to `path` on the host once the frame's fence signals.
+	 * `output` is the done-token sink the driver demands.
+	 *
+	 * @param source  Data handle for the source @ref veng::gpu::ImageRef edge (must be in `TRANSFER_SRC`).
+	 * @param output  Data handle for the done-token sink.
+	 * @param path    Filesystem path at which the PPM file will be written.
+	 */
 	ScreenshotNode(graph::DataHandle source, graph::DataHandle output, std::string path) noexcept;
 
 	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return {&m_input, 1}; }
 	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
 
-	/// Number of files this node has written (test lens).
+	/**
+	 * @brief Number of PPM files this node has successfully written.
+	 *
+	 * Useful as a test lens: a value that does not advance after a capture request indicates
+	 * a failed file write.
+	 *
+	 * @return Total number of captured frames written to disk.
+	 */
 	[[nodiscard]] std::size_t capture_count() const noexcept { return m_capture_count; }
 
 	 protected:

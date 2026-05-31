@@ -1,5 +1,5 @@
 
-# instanced_cubes — the rigid-body viewer slice (design.md §1, §L4, §L5). 125 instanced
+# instanced_cubes — the rigid-body viewer slice. 125 instanced
 # cubes orbiting the origin, driven by a CPU "physics" thread, lit by a directional light,
 # viewed through an interactive orbit camera. See main.cpp for the reactive-graph wiring;
 # the window/context/swapchain/camera/loop boilerplate all lives in veng_example_common.

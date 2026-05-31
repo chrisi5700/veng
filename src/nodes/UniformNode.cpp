@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/26/26.
-//
-// See UniformNode.hpp and design.md §L4.
-//
+/**
+ * @file
+ * @author chris
+ * @brief UniformNode implementation: pool-backed uniform-buffer upload and `UniformRef` publish.
+ * @ingroup graph_nodes
+ */
 
 #include <cstring>
 #include <utility>

@@ -31,6 +31,9 @@ enable_testing()
 
 add_subdirectory(src)
 add_subdirectory(example)
-add_subdirectory(bench)
 add_subdirectory(tests)
 # add_subdirectory(libs/SFML) # for example to add other cmake dependencies
+
+# Optional Doxygen API docs (doxygen-awesome-css theme, dark-mode). Generated into docs/html
+# at configure time when VENG_BUILD_DOCS=ON and doxygen is installed; a no-op otherwise.
+include(Docs)

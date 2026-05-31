@@ -1,5 +1,5 @@
 //
-// L4 test (design.md §L4): descriptor-set uniforms. A UniformNode uploads a tint into a
+// L4 test: descriptor-set uniforms. A UniformNode uploads a tint into a
 // uniform buffer and publishes it by name; a GraphicsNode bound with add_uniform writes it
 // into a descriptor set at the reflected binding and the fragment shader reads it. The mesh
 // is white, so the rendered color *is* the tint — a readback proves the uniform reached the

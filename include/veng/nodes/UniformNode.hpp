@@ -1,19 +1,25 @@
-//
-// Created by chris on 5/26/26.
-//
-// L4 upload node (design.md §L4) — the uniform counterpart to MeshNode. You give it a
-// *value edge* (a `ValueData<T>` source/transform) and the reflected binding name; each
-// time that value changes it uploads the new bytes into its persistent uniform buffer and
-// publishes a `gpu::UniformRef`. A `GraphicsNode::add_uniform(handle)` consumes the ref,
-// matches the name to the shader's reflected descriptor, and binds it. This is the user's
-// `UniformNode{light_pos, "light_pos"}`.
-//
-// Unlike MeshNode (geometry baked in, uploaded once) this is genuinely reactive: the value
-// is an *input* edge, so changing it re-runs the upload and re-renders every dependent
-// GraphicsNode. The buffer is host-visible + persistently mapped and reused across
-// uploads, so its handle is stable — the dependent node writes its descriptor set once and
-// just re-binds it as the contents change.
-//
+/**
+ * @file
+ * @author chris
+ * @brief L4 reactive uniform-buffer upload node: uploads a typed value each time it changes
+ *        and publishes a `gpu::UniformRef` for @ref veng::nodes::GraphicsNode to bind.
+ *
+ * You give it a value edge (a `ValueData<T>` source or transform) and the reflected binding
+ * name; each time that value changes it uploads the new bytes into its pool-owned persistent
+ * uniform buffer and publishes a `gpu::UniformRef`. A
+ * @ref veng::nodes::GraphicsNode::add_uniform "add_uniform(handle)" call consumes the ref, matches the name
+ * to the shader's reflected descriptor, and binds it.
+ *
+ * Unlike @ref veng::nodes::MeshNode (geometry baked in, uploaded once) this is genuinely reactive: the
+ * value is an input edge, so changing it re-runs the upload and re-renders every dependent
+ * @ref veng::nodes::GraphicsNode. The buffer is host-visible and persistently mapped and reused across
+ * uploads, so its handle is stable — the dependent node writes its descriptor set once and
+ * just re-binds it as the contents change.
+ *
+ * @ingroup graph_nodes
+ * @see GraphicsNode::add_uniform
+ * @see MeshNode
+ */
 
 #ifndef VENG_UNIFORMNODE_HPP
 #define VENG_UNIFORMNODE_HPP
@@ -35,14 +41,29 @@
 
 namespace veng::nodes
 {
+/**
+ * @brief L4 reactive uniform-buffer upload node: publishes a `gpu::UniformRef` that
+ *        @ref veng::nodes::GraphicsNode binds to the named shader `ConstantBuffer`.
+ * @ingroup graph_nodes
+ * @see GraphicsNode::add_uniform
+ */
 class UniformNode final : public gpu::GpuNode
 {
 	 public:
-	/// Upload the value on `value` (a typed edge, `TypedHandle<T>`) into a uniform buffer and
-	/// publish a `gpu::UniformRef` on `output` (a `ValueData<gpu::UniformRef>`). `binding_name`
-	/// must match the reflected descriptor name in the consuming shader (the `ConstantBuffer`
-	/// variable name). `T`'s memory layout must match the shader's uniform block (std140); for
-	/// a single `float4`/`glm::vec4` that is a plain 16-byte copy. `T` is deduced from `value`.
+	/**
+	 * @brief Construct a uniform node from a typed value edge and a reflected binding name.
+	 *
+	 * Uploads the value on `value` (a `TypedHandle<T>`) into a uniform buffer and publishes a
+	 * `gpu::UniformRef` on `output` (a `ValueData<gpu::UniformRef>`). `binding_name` must match
+	 * the reflected descriptor name in the consuming shader (the `ConstantBuffer` variable
+	 * name). `T`'s memory layout must match the shader's uniform block (std140); for a single
+	 * `float4` / `glm::vec4` that is a plain 16-byte copy. `T` is deduced from `value`.
+	 *
+	 * @tparam T           The uniform value type (deduced from `value`).
+	 * @param value        Reactive `TypedHandle<T>` edge whose value is uploaded each change.
+	 * @param binding_name Reflected `ConstantBuffer` name in the consuming shader.
+	 * @param output       `ValueData<gpu::UniformRef>` edge this node publishes its ref on.
+	 */
 	template <class T>
 	UniformNode(graph::TypedHandle<T> value, std::string binding_name, graph::DataHandle output) noexcept
 		: m_value(value.handle)
@@ -65,14 +86,14 @@ class UniformNode final : public gpu::GpuNode
 	[[nodiscard]] std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override;
 
 	 private:
-	graph::DataHandle								m_value; // the reactive value edge
+	graph::DataHandle								m_value; ///< The reactive value edge.
 	graph::DataHandle								m_output;
 	std::string										m_name;
 	vk::DeviceSize									m_size;
 	std::function<const void*(graph::ExecContext&)> m_read;
-	bool											m_declared	= false; // m_buffer_id declared in the pool?
-	BufferId										m_buffer_id = 0;	 // pool-owned, N-buffered uniform buffer
-	gpu::VersionedOutput							m_versioned; // owns the per-upload version bump for the UniformRef
+	bool				 m_declared	 = false; ///< `true` once `m_buffer_id` has been declared in the pool.
+	BufferId			 m_buffer_id = 0;	  ///< Pool-owned, N-buffered uniform buffer.
+	gpu::VersionedOutput m_versioned;		  ///< Owns the per-upload version bump for the published `UniformRef`.
 };
 } // namespace veng::nodes
 

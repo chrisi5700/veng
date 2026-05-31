@@ -1,6 +1,9 @@
-//
-// See ScreenshotNode.hpp.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::nodes::ScreenshotNode.
+ * @ingroup graph_nodes
+ */
 
 #include <cstdint>
 #include <cstdio>

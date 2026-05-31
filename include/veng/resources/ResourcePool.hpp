@@ -1,21 +1,29 @@
-//
-// L1.5 — the versioned, N-buffered transient resource pool (design.md §L1; the redesign in
-// [[pass-draw-redesign]]). It is the engine's owner of per-frame render targets and transient
-// buffers: nodes never own a `vk::Image`/`Buffer` for a target anymore — they declare a logical
-// resource once and ask the pool for a physical copy each frame. The pool decides how many
-// physical copies a logical resource needs and recycles them safely.
-//
-// Why a pool and not one image per node: with frames-in-flight > 1, frame N+1 is recorded on the
-// CPU while frame N still executes on the GPU. If a producer re-renders into the same physical
-// image every frame, it stomps pixels the GPU is still reading. The pool gives the producer a
-// *different* physical copy whenever the previous one might still be in flight.
-//
-// The subtle case (a cached producer feeding a still-running consumer across a frame boundary) is
-// why a copy is retained until every frame that *touched* it — write OR read — has retired. Both
-// `acquire_image` (producer) and `read_image` (consumer) stamp the copy with the current frame;
-// a copy is reusable only once that stamp is older than the in-flight window. So a copy a consumer
-// keeps sampling (because its producer is cached) is never recycled out from under it.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Versioned, N-buffered transient resource pool for per-frame render targets and buffers.
+ *
+ * L1.5 resource layer. The pool is the engine's sole owner of per-frame render targets and
+ * transient buffers: nodes never own a `vk::Image` or `Buffer` for a render target anymore —
+ * they declare a logical resource once (lazily, on first record) and ask the pool for a
+ * physical copy each frame. The pool decides how many physical copies a logical resource
+ * needs and recycles them safely.
+ *
+ * **Why a pool and not one image per node:**
+ * With frames-in-flight > 1, frame N+1 is recorded on the CPU while frame N still executes
+ * on the GPU. If a producer re-renders into the same physical image every frame it stomps
+ * pixels the GPU is still reading. The pool gives the producer a *different* physical copy
+ * whenever the previous one might still be in flight.
+ *
+ * **The subtle retained-consumer case:**
+ * A copy is retained until every frame that *touched* it — write or read — has retired. Both
+ * @ref veng::ResourcePool::acquire_image (producer) and @ref veng::ResourcePool::read_image (consumer)
+ * stamp the copy with the current frame; a copy is reusable only once that stamp is older
+ * than the in-flight window. So a copy that a consumer keeps sampling because its producer
+ * is cached is never recycled out from under it.
+ *
+ * @ingroup resources
+ */
 
 #ifndef VENG_RESOURCEPOOL_HPP
 #define VENG_RESOURCEPOOL_HPP
@@ -36,17 +44,58 @@ namespace veng
 {
 class Context;
 
-/// Opaque, stable handle to a logical resource declared on the pool. A node declares once
-/// (lazily, on first record) and keeps the id; the physical copy behind it varies per frame.
-using ImageId  = std::uint32_t;
+/**
+ * @brief Opaque, stable handle to a logical image declared on the pool.
+ *
+ * A node declares a logical image once (lazily on first record) and keeps this id; the
+ * physical @ref veng::Image copy behind it varies per frame. Ids are assigned by
+ * @ref veng::ResourcePool::declare_image and remain valid for the pool's lifetime.
+ *
+ * @ingroup resources
+ * @see ResourcePool::declare_image
+ * @see ResourcePool::acquire_image
+ */
+using ImageId = std::uint32_t;
+
+/**
+ * @brief Opaque, stable handle to a logical buffer declared on the pool.
+ *
+ * Analogous to @ref ImageId for buffers. Ids are assigned by
+ * @ref veng::ResourcePool::declare_buffer and remain valid for the pool's lifetime.
+ *
+ * @ingroup resources
+ * @see ResourcePool::declare_buffer
+ * @see ResourcePool::acquire_buffer
+ */
 using BufferId = std::uint32_t;
 
+/**
+ * @brief Versioned, N-buffered transient resource pool.
+ *
+ * Manages pools of physical @ref veng::Image and @ref veng::Buffer copies behind stable logical ids.
+ * Callers interact with logical resources; the pool selects and recycles physical copies
+ * based on the frames-in-flight retirement window.
+ *
+ * @ingroup resources
+ * @see ImageId
+ * @see BufferId
+ * @see gpu::ImageRef
+ * @see gpu::BufferRef
+ */
 class ResourcePool
 {
 	 public:
-	/// `frames_in_flight` is the retirement window: a copy stamped at frame F is reusable once
-	/// the current frame reaches F + frames_in_flight (the driver guarantees frame F has retired
-	/// by then, having waited that slot's fence in `acquire`).
+	/**
+	 * @brief Construct a pool bound to the given device and allocator.
+	 *
+	 * `frames_in_flight` is the retirement window: a copy stamped at frame F is reusable
+	 * once the current frame reaches `F + frames_in_flight` (the driver guarantees frame F
+	 * has retired by then, having waited that slot's fence in `acquire`).
+	 *
+	 * @param device           The Vulkan logical device (used to destroy image views).
+	 * @param allocator        The VMA allocator (used to allocate/free images and buffers).
+	 * @param frames_in_flight Number of frames that may be in flight simultaneously.
+	 */
 	ResourcePool(vk::Device device, vma::Allocator allocator, std::size_t frames_in_flight) noexcept;
 
 	ResourcePool(const ResourcePool&)			 = delete;
@@ -55,49 +104,114 @@ class ResourcePool
 	ResourcePool& operator=(ResourcePool&& other) noexcept;
 	~ResourcePool();
 
-	/// Advance to a new frame. `frame_index` is monotonic; the caller must have ensured the
-	/// frame `frame_index - frames_in_flight` has retired on the GPU before calling.
+	/**
+	 * @brief Advance to a new frame.
+	 *
+	 * `frame_index` is monotonically increasing. The caller must have ensured that the
+	 * frame `frame_index - frames_in_flight` has retired on the GPU before calling (i.e.
+	 * the corresponding in-flight fence has been waited).
+	 *
+	 * @param frame_index The new frame's monotonic index.
+	 */
 	void begin_frame(std::uint64_t frame_index) noexcept { m_frame = static_cast<std::int64_t>(frame_index); }
 
-	/// Declare a transient image. The extent is supplied per-`acquire_image` (it tracks a
-	/// screen-size edge); a change reallocates the copies (do it only when the device is idle).
+	/**
+	 * @brief Declare a transient image logical resource.
+	 *
+	 * The extent is supplied per @ref acquire_image call (it tracks a screen-size edge); a
+	 * change reallocates all physical copies (do this only when the device is idle).
+	 *
+	 * @param format The pixel format of the image.
+	 * @param usage  Vulkan image-usage flags.
+	 * @param aspect View aspect mask for the auto-created image view (colour or depth).
+	 * @return A stable @ref ImageId valid for the lifetime of this pool.
+	 */
 	[[nodiscard]] ImageId declare_image(vk::Format format, vk::ImageUsageFlags usage,
 										vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor);
 
-	/// Declare a transient host-visible buffer (persistently mapped). Size is supplied per
-	/// `acquire_buffer`.
+	/**
+	 * @brief Declare a transient host-visible buffer logical resource.
+	 *
+	 * The buffer is persistently mapped; size is supplied per @ref acquire_buffer call.
+	 *
+	 * @param usage Vulkan buffer-usage flags (e.g. uniform, storage).
+	 * @return A stable @ref BufferId valid for the lifetime of this pool.
+	 */
 	[[nodiscard]] BufferId declare_buffer(vk::BufferUsageFlags usage);
 
-	/// Declare an *immutable* image initialized to a clear color via an immediate submit on the
-	/// Context's graphics queue, transitioned to `SHADER_READ_ONLY_OPTIMAL`, and never recycled.
-	/// Returns a `gpu::ImageRef` ready to be fed as a graph source — this is the clean
-	/// replacement for hand-rolled command-pool + fence + clear sequences in user code (the leak
-	/// the old `make_black_texture` opened up).
+	/**
+	 * @brief Declare an immutable image initialized to a solid clear colour.
+	 *
+	 * Allocates a single physical @ref veng::Image, submits an immediate command on the
+	 * @ref veng::Context graphics queue to transition it from `Undefined` to `TransferDst`,
+	 * clears it, and transitions it to `SHADER_READ_ONLY_OPTIMAL` — all in one fence-waited
+	 * submit. The copy is marked immutable and is never recycled. Returns a
+	 * @ref veng::gpu::ImageRef ready to be fed as a graph source edge.
+	 *
+	 * This is the clean replacement for hand-rolled command-pool + fence + clear sequences
+	 * in user code.
+	 *
+	 * @param ctx    Engine context used for the immediate submit.
+	 * @param extent Width and height of the image in texels.
+	 * @param format Pixel format.
+	 * @param clear  RGBA clear colour applied once at initialization.
+	 * @return A @ref veng::gpu::ImageRef on success, or the `vk::Result` error on failure.
+	 */
 	[[nodiscard]] std::expected<gpu::ImageRef, vk::Result> constant_image(const Context& ctx, vk::Extent2D extent,
 																		  vk::Format		   format,
 																		  std::array<float, 4> clear);
 
-	/// Producer side: a physical copy to write this frame. Reuses a retired copy or allocates a
-	/// fresh one (and reallocates all copies if `extent` changed since last time). Marks the copy
-	/// current for `read_image` and stamps its last-use to the current frame.
+	/**
+	 * @brief Producer side: obtain a physical copy to write into this frame.
+	 *
+	 * Reuses the first physical copy whose last-touch stamp (write or read) has aged past
+	 * the in-flight window, or allocates a fresh one. If `extent` changed since the last
+	 * acquire, all existing copies are dropped and a fresh one is allocated (the caller must
+	 * ensure the device is idle before an extent change). Marks the chosen copy current and
+	 * stamps it with the current frame index.
+	 *
+	 * @param id     Logical image id returned by @ref declare_image.
+	 * @param extent Desired width and height; triggers a reallocation if changed.
+	 * @return A raw pointer to the physical @ref veng::Image on success, or a `vk::Result` error.
+	 * @note The returned pointer is stable until the next @ref acquire_image call for this id.
+	 */
 	[[nodiscard]] std::expected<Image*, vk::Result> acquire_image(ImageId id, vk::Extent2D extent);
 
-	/// Consumer side: the copy holding the latest produced version, or nullptr if never produced.
-	/// Stamps its last-use to the current frame so it is retained while this frame is in flight.
+	/**
+	 * @brief Consumer side: obtain the physical copy holding the latest produced version.
+	 *
+	 * Returns `nullptr` if the image has never been produced. Stamps the current copy's
+	 * last-use to the current frame so it is retained while this frame is in flight.
+	 *
+	 * @param id Logical image id returned by @ref declare_image.
+	 * @return A raw pointer to the current physical @ref veng::Image, or `nullptr` if never produced.
+	 */
 	[[nodiscard]] Image* read_image(ImageId id) noexcept;
 
-	/// Retention-only consumer stamp: marks the current copy of `id` used this frame, without
-	/// needing its `Image*` (the consumer already has the view via the published `ImageRef`). A
-	/// no-op for an id never produced or out of range. This is what keeps a copy a cached
-	/// producer's output is still being sampled from being recycled out from under the reader.
+	/**
+	 * @brief Retention-only consumer stamp: keep the current copy of `id` alive this frame.
+	 *
+	 * Marks the current copy of `id` as used this frame without needing its `Image*` (the
+	 * consumer already has the view via the published @ref veng::gpu::ImageRef). A no-op for an
+	 * id that has never been produced or is out of range. This is what keeps a copy whose
+	 * producer is cached from being recycled out from under a reader that is still sampling
+	 * it in an in-flight frame.
+	 *
+	 * @param id Logical image id returned by @ref declare_image.
+	 */
 	void touch(ImageId id) noexcept;
 
-	/// Consumer convenience: retain the pooled copy backing `ref` while this frame is in flight,
-	/// a no-op when `ref` is not pool-owned (the swapchain / a test target carries no pool id).
-	/// This folds the `if (ref.pool_id != INVALID) touch(ref.pool_id)` guard every sampling
-	/// consumer used to repeat into the pool itself, so a consumer reading an `ImageRef` cannot
-	/// forget the touch that keeps its copy from being recycled out from under an in-flight read
-	/// (the contract that used to live only in a comment on `ImageRef::pool_id`).
+	/**
+	 * @brief Convenience overload: retain the pooled copy backing `ref` while this frame is in flight.
+	 *
+	 * A no-op when `ref` is not pool-owned (the swapchain or a test target carries no pool
+	 * id). This folds the `if (ref.pool_id != INVALID) touch(ref.pool_id)` guard that every
+	 * sampling consumer used to repeat into the pool itself, so a consumer reading a
+	 * @ref veng::gpu::ImageRef cannot forget the touch that keeps its copy from being recycled out
+	 * from under an in-flight read.
+	 *
+	 * @param ref An @ref veng::gpu::ImageRef whose pool copy should be retained.
+	 */
 	void consume(const gpu::ImageRef& ref) noexcept
 	{
 		if (ref.pool_id != gpu::ImageRef::INVALID_POOL_ID)
@@ -106,15 +220,27 @@ class ResourcePool
 		}
 	}
 
-	/// Buffer analogue of `touch(ImageId)`: stamp the current copy of `id` as used this frame so a
-	/// cached producer's buffer is retained while an in-flight consumer still references it. No-op for
-	/// an id never produced / out of range.
+	/**
+	 * @brief Retention-only consumer stamp for a buffer: keep the current copy of `id` alive this frame.
+	 *
+	 * Buffer analogue of @ref touch(ImageId). Stamps the current copy of `id` as used this
+	 * frame so a cached producer's buffer is retained while an in-flight consumer still
+	 * references it. A no-op for an id that has never been produced or is out of range.
+	 *
+	 * @param id Logical buffer id returned by @ref declare_buffer.
+	 */
 	void touch_buffer(BufferId id) noexcept;
 
-	/// Buffer analogue of `consume(ImageRef)`: retain the pooled copy backing `ref` while this frame
-	/// is in flight (a no-op when `ref` is not pool-owned). A consumer binding an SSBO from a
-	/// StorageBufferNode whose producer may be cached this frame must call this — otherwise the pool
-	/// can recycle/destroy the copy out from under the descriptor set still referencing it.
+	/**
+	 * @brief Convenience overload: retain the pooled copy backing `ref` while this frame is in flight.
+	 *
+	 * Buffer analogue of @ref consume(const gpu::ImageRef&). A no-op when `ref` is not
+	 * pool-owned. A consumer binding an SSBO from a `StorageBufferNode` whose producer may
+	 * be cached this frame must call this — otherwise the pool can recycle or destroy the
+	 * copy out from under the descriptor set still referencing it.
+	 *
+	 * @param ref A @ref veng::gpu::BufferRef whose pool copy should be retained.
+	 */
 	void consume(const gpu::BufferRef& ref) noexcept
 	{
 		if (ref.pool_id != gpu::BufferRef::INVALID_POOL_ID)
@@ -123,26 +249,70 @@ class ResourcePool
 		}
 	}
 
-	/// Transition the current copy of `id` to `new_layout` on `cmd` if it is not already there,
-	/// using the prior usage's stage+access as the source of the barrier. This is the engine's
-	/// auto-barrier primitive: nodes declare what layout/stage/access they need via
-	/// `GpuNode::image_usages`, and the executor calls this for them — no node records its own
-	/// layout transitions for pool-backed images anymore. A no-op for an id never produced /
-	/// out of range / already in the target layout.
+	/**
+	 * @brief Insert a pipeline barrier to transition the current copy of `id` to `new_layout`.
+	 *
+	 * This is the engine's auto-barrier primitive. Nodes declare what layout, stage, and
+	 * access they need via `GpuNode::image_usages`, and the executor calls this for them —
+	 * no node records its own layout transitions for pool-backed images anymore. The barrier
+	 * uses the prior usage's stage and access as the source scope.
+	 *
+	 * A no-op when the image is already in `new_layout`, has never been produced, the id is
+	 * out of range, or `id` has no current copy.
+	 *
+	 * @param id         Logical image id returned by @ref declare_image.
+	 * @param cmd        The command buffer to record the barrier into.
+	 * @param new_layout The layout the image must be in before the next access.
+	 * @param new_stage  Pipeline stage at which the next access occurs.
+	 * @param new_access Access kind (read/write) of the next access.
+	 */
 	void transition_image(ImageId id, vk::CommandBuffer cmd, vk::ImageLayout new_layout,
 						  vk::PipelineStageFlags2 new_stage, vk::AccessFlags2 new_access) noexcept;
 
-	/// Producer side for a uniform/transient buffer: a copy to write this frame (reused/allocated
-	/// like images). Consumers read the buffer through the handle the producer publishes, so there
-	/// is no buffer `read_*`; the copy is retained for the in-flight window from its write stamp.
+	/**
+	 * @brief Producer side for a transient buffer: obtain a copy to write into this frame.
+	 *
+	 * Reuses a retired copy or allocates a fresh persistently-mapped host-visible buffer.
+	 * When `size` differs from the last acquire, existing copies are moved to an internal
+	 * retirement graveyard rather than destroyed immediately, because an in-flight frame's
+	 * descriptor set may still reference them; `purge_retired_buffers` releases them once
+	 * their last-use stamp has aged past the retirement window.
+	 *
+	 * Consumers read the buffer through the handle the producer publishes, so there is no
+	 * `read_buffer`; the copy is retained for the in-flight window from its write stamp.
+	 *
+	 * @param id   Logical buffer id returned by @ref declare_buffer.
+	 * @param size Desired size in bytes; triggers a resize/reallocation if changed.
+	 * @return A raw pointer to the physical @ref veng::Buffer on success, or a `vk::Result` error.
+	 */
 	[[nodiscard]] std::expected<Buffer*, vk::Result> acquire_buffer(BufferId id, vk::DeviceSize size);
 
-	/// The number of physical copies a logical image currently holds (test lens on the
-	/// reuse/retention behaviour).
+	/**
+	 * @brief Return the number of physical image copies currently held for a logical image.
+	 *
+	 * Test lens on the reuse and retention behaviour.
+	 *
+	 * @param id Logical image id returned by @ref declare_image.
+	 * @return The number of physical copies, including any in-flight ones.
+	 */
 	[[nodiscard]] std::size_t image_copy_count(ImageId id) const noexcept;
+
+	/**
+	 * @brief Return the number of physical buffer copies currently held for a logical buffer.
+	 * @param id Logical buffer id returned by @ref declare_buffer.
+	 * @return The number of physical copies, including any in-flight ones.
+	 */
 	[[nodiscard]] std::size_t buffer_copy_count(BufferId id) const noexcept;
 
-	/// Test lens: buffer copies set aside by a resize and not yet freed (awaiting retirement).
+	/**
+	 * @brief Return the number of buffer copies awaiting retirement after a resize.
+	 *
+	 * Test lens: buffer copies set aside by a resize are not freed immediately (an in-flight
+	 * frame may still reference them); they are released in @ref acquire_buffer once their
+	 * last-use stamp has aged past the retirement window.
+	 *
+	 * @return The count of buffers in the resize graveyard.
+	 */
 	[[nodiscard]] std::size_t retiring_buffer_count() const noexcept { return m_retiring_buffers.size(); }
 
 	 private:

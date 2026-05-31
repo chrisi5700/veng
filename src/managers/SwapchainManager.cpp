@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/25/26.
-//
-// See SwapchainManager.hpp and design.md §L4.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::SwapchainManager.
+ * @ingroup managers
+ */
 
 #include <utility>
 #include <veng/managers/SwapchainManager.hpp>
@@ -66,7 +67,7 @@ std::expected<void, vk::Result> SwapchainManager::build_swapchain(vk::Extent2D e
 		builder.set_desired_extent(extent.width, extent.height)
 			.set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR) // uncapped; FIFO fallback
 			// sRGB surface so the final write into the swapchain image hardware-encodes linear ->
-			// sRGB for the display (review.md item 8). A blit into an _SRGB image encodes its
+			// sRGB for the display. A blit into an _SRGB image encodes its
 			// (linear) source, so a scene rendered in linear light presents correctly. Was
 			// _UNORM, which presented linear values un-encoded — too dark once lighting is linear.
 			.set_desired_format(VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})

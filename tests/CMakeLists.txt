@@ -24,7 +24,7 @@ target_compile_options(ShaderLoadingTests PRIVATE -O0)
 add_executable(ShaderValidationTests shader/ShaderValidationTests.cpp)
 target_link_libraries(ShaderValidationTests PRIVATE veng_shader Catch2::Catch2WithMain)
 
-# L3 Reactive Core tests — Vulkan-free, the priority for coverage (design.md §10).
+# L3 Reactive Core tests — Vulkan-free, the priority for coverage.
 add_executable(GraphTests rendergraph/GraphTests.cpp)
 target_link_libraries(GraphTests PRIVATE veng_render_graph Catch2::Catch2WithMain)
 

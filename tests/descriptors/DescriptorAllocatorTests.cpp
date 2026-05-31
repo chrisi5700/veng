@@ -1,5 +1,5 @@
 //
-// L2.2 DescriptorAllocator tests (design.md §L2.2). Exercises allocation, transparent
+// L2.2 DescriptorAllocator tests. Exercises allocation, transparent
 // pool growth on exhaustion, recycling via reset(), and move semantics on a headless
 // device. Self-contained: builds its own one-binding layout rather than depending on a
 // pipeline.

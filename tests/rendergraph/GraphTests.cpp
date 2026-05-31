@@ -1,5 +1,5 @@
 //
-// L3 Reactive Core unit tests (design.md §10). The core is Vulkan-free and is the
+// L3 Reactive Core unit tests. The core is Vulkan-free and is the
 // priority for coverage, so these tests drive it with a deterministic inline
 // scheduler and plain CPU transform nodes — exercising invalidation propagation,
 // diamonds, change-cutoff, cycle rejection, lazy evaluation, and CAS completion.
@@ -89,7 +89,7 @@ TEST_CASE("a clean graph re-presents without re-running anything", "[graph][cach
 	REQUIRE(graph.frame(out, scheduler).has_value());
 	REQUIRE(*runs == 1);
 
-	// Nothing changed: the second frame plans and executes zero nodes (design.md §2.1).
+	// Nothing changed: the second frame plans and executes zero nodes.
 	const auto plan = graph.frame(out, scheduler);
 	REQUIRE(plan.has_value());
 	REQUIRE(plan->empty());
@@ -107,7 +107,7 @@ TEST_CASE("mutating a source re-runs only its dependents on the next frame", "[g
 	REQUIRE(graph.frame(out, scheduler).has_value());
 	REQUIRE(*runs == 1);
 
-	// Source mutation is queued and applied at the next frame boundary (design.md §2.5).
+	// Source mutation is queued and applied at the next frame boundary.
 	set_source<int>(graph, a, 5);
 	const auto plan = graph.frame(out, scheduler);
 
@@ -128,7 +128,7 @@ TEST_CASE("setting a source to an equal value is gated out", "[graph][cutoff][so
 	REQUIRE(graph.frame(out, scheduler).has_value());
 	REQUIRE(*runs == 1);
 
-	// Equality-gated source: same value => no change => no recompute (design.md §2.4).
+	// Equality-gated source: same value => no change => no recompute.
 	set_source<int>(graph, a, 7);
 	const auto plan = graph.frame(out, scheduler);
 	REQUIRE(plan.has_value());
@@ -160,7 +160,7 @@ TEST_CASE("change-cutoff stops a no-op recompute from rippling downstream", "[gr
 	REQUIRE(*upstream_runs == 2);
 
 	// The NEXT frame is where cutoff pays off: mid did not bump its stamp, so the
-	// downstream node drops out of the plan entirely (design.md §2.4 across frames).
+	// downstream node drops out of the plan entirely.
 	const auto plan = graph.frame(out, scheduler);
 	REQUIRE(plan.has_value());
 	REQUIRE(plan->empty());
@@ -185,7 +185,7 @@ TEST_CASE("a diamond resolves its shared dependency once and orders by height", 
 	REQUIRE(*shared_runs == 1);				   // resolved once despite two consumers
 	REQUIRE(value_of<int>(graph, sink) == 18); // (9+1) + (9-1)
 
-	// Height ordering: the shared dependency runs first, the sink last (design.md §2.6).
+	// Height ordering: the shared dependency runs first, the sink last.
 	const auto nodes = plan->nodes();
 	REQUIRE(nodes.front() == graph.get_data(shared)->producer());
 	REQUIRE(nodes.back() == graph.get_data(sink)->producer());
@@ -295,7 +295,7 @@ TEST_CASE("revision advances once per frame and stamps changed data", "[graph][r
 TEST_CASE("non-comparable outputs are treated as always-changed", "[graph][cutoff]")
 {
 	// A type with no operator== cannot be equality-gated, so every recompute counts
-	// as a change (design.md §2.4 conservative fallback).
+	// as a change.
 	struct Opaque
 	{
 		int payload = 0;

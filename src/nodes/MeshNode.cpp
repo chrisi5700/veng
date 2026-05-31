@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/26/26.
-//
-// See MeshNode.hpp and design.md §L4.
-//
+/**
+ * @file
+ * @author chris
+ * @brief MeshNode implementation: host-visible buffer allocation and geometry upload.
+ * @ingroup graph_nodes
+ */
 
 #include <cstring>
 #include <utility>

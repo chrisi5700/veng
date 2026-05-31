@@ -1,10 +1,17 @@
-//
-// Created by chris on 1/23/26.
-//
-// L2 construction layer — compute pipeline (design.md §L2.1). A reflection-driven
-// builder turns a compute `Shader` into an RAII, move-only `ComputePipeline`,
-// reporting failure via std::expected rather than asserts.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Reflection-driven compute pipeline builder that turns a compute @ref veng::Shader into an
+ *        RAII, move-only @ref veng::ComputePipeline, reporting failure via `std::expected`.
+ *
+ * This is the L2 construction layer for compute pipelines. The builder derives the
+ * descriptor-set layout and push-constant ranges directly from the shader's SPIR-V
+ * reflection, so there is no hand-written create-info boilerplate and the layout can
+ * never drift from the shader source. Descriptor allocation is a separate concern
+ * handled by @ref veng::DescriptorAllocator.
+ *
+ * @ingroup pipelines
+ */
 
 #ifndef VENG_COMPUTEPIPELINE_HPP
 #define VENG_COMPUTEPIPELINE_HPP
@@ -18,10 +25,18 @@
 
 namespace veng
 {
-/// RAII owner of a compute pipeline plus the layout and descriptor-set layout it
-/// was built with (design.md §L2.1). Move-only; constructed via
-/// `ComputePipelineBuilder`. Descriptor *allocation* is a separate concern
-/// (DescriptorAllocator, §L2.2) and intentionally not owned here.
+/**
+ * @brief RAII owner of a compute pipeline plus the layout and descriptor-set layout it
+ *        was built with.
+ *
+ * Move-only; constructed exclusively via @ref veng::ComputePipelineBuilder. Descriptor
+ * allocation is a separate concern (@ref veng::DescriptorAllocator) and is intentionally
+ * not owned here.
+ *
+ * @ingroup pipelines
+ * @see ComputePipelineBuilder
+ * @see DescriptorAllocator
+ */
 class ComputePipeline
 {
 	 public:
@@ -31,8 +46,11 @@ class ComputePipeline
 	ComputePipeline& operator=(ComputePipeline&& other) noexcept;
 	~ComputePipeline();
 
-	[[nodiscard]] vk::Pipeline			  pipeline() const noexcept { return m_pipeline; }
-	[[nodiscard]] vk::PipelineLayout	  layout() const noexcept { return m_pipeline_layout; }
+	/** @brief The underlying `vkPipeline` handle. */
+	[[nodiscard]] vk::Pipeline pipeline() const noexcept { return m_pipeline; }
+	/** @brief The pipeline layout (push-constant ranges + descriptor set layout). */
+	[[nodiscard]] vk::PipelineLayout layout() const noexcept { return m_pipeline_layout; }
+	/** @brief The descriptor-set layout derived from SPIR-V reflection. */
 	[[nodiscard]] vk::DescriptorSetLayout descriptor_set_layout() const noexcept { return m_descriptor_set_layout; }
 
 	 private:
@@ -47,18 +65,41 @@ class ComputePipeline
 	vk::Pipeline			m_pipeline;
 };
 
-/// Reflection-driven builder (design.md §L2.1): derives the descriptor-set layout
-/// and push-constant ranges from the shader's reflection, removing the create-info
-/// boilerplate. A shared `vk::PipelineCache` may be passed to reuse compilation
-/// work across rebuilds.
+/**
+ * @brief Reflection-driven builder that constructs a @ref veng::ComputePipeline from a single
+ *        compute @ref veng::Shader.
+ *
+ * The descriptor-set layout and push-constant ranges are derived from the shader's SPIR-V
+ * reflection, removing all create-info boilerplate. An optional `vk::PipelineCache` may
+ * be passed to reuse compilation work across rebuilds.
+ *
+ * @ingroup pipelines
+ * @see ComputePipeline
+ * @see PipelineError
+ */
 class ComputePipelineBuilder
 {
 	 public:
+	/**
+	 * @brief Construct a builder for the given compute shader.
+	 * @param compute A loaded and reflected compute-stage @ref veng::Shader.
+	 */
 	explicit ComputePipelineBuilder(const Shader& compute) noexcept
 		: m_shader(&compute)
 	{
 	}
 
+	/**
+	 * @brief Build the compute pipeline, creating the descriptor-set layout, pipeline
+	 *        layout, and pipeline from reflection data.
+	 * @param context The engine context that owns the `vk::Device`.
+	 * @param cache   An optional pipeline cache for reusing compiled shaders.
+	 * @return The fully constructed @ref veng::ComputePipeline, or a @ref veng::PipelineError on failure.
+	 * @retval PipelineError::WRONG_STAGE The shader is not a compute stage.
+	 * @retval PipelineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILED `vkCreateDescriptorSetLayout` failed.
+	 * @retval PipelineError::PIPELINE_LAYOUT_CREATION_FAILED `vkCreatePipelineLayout` failed.
+	 * @retval PipelineError::PIPELINE_CREATION_FAILED `vkCreateComputePipelines` failed.
+	 */
 	[[nodiscard]] std::expected<ComputePipeline, PipelineError> build(const Context&	context,
 																	  vk::PipelineCache cache = {}) const;
 

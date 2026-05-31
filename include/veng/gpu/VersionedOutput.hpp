@@ -1,18 +1,22 @@
-//
-// Created by chris on 5/30/26.
-//
-// The producer-side "stamp a fresh version, then produce" step every upload/producer node
-// repeats (design.md §L4). The reference types that flow on graph edges (MeshRef, UniformRef,
-// BufferRef, ImageRef) carry a `version` the producer bumps on every publish so two
-// structurally identical refs from consecutive runs still compare unequal — which is what
-// makes `ValueData<Ref>` change-cutoff fire when a stable handle (a reused buffer, a recycled
-// swapchain image) is re-filled with new contents (see ImageRef.hpp).
-//
-// Before this, MeshNode/UniformNode/StorageBufferNode/DynamicMeshNode/BlitNode/GraphicsNode each
-// carried their own `std::uint64_t m_version` and hand-wrote `++m_version; out->produce({…,
-// .version = m_version})`. VersionedOutput owns that counter and the publish step in one place,
-// making the "a producer always publishes a fresh ref" contract explicit and unforgettable.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Helper that centralises the "stamp a fresh version, then produce" step for producer nodes.
+ *
+ * The reference types that flow on graph edges — @ref veng::gpu::MeshRef, @ref veng::gpu::UniformRef, @ref veng::gpu::BufferRef,
+ * @ref veng::gpu::ImageRef — each carry a `version` the producer bumps on every publish so two structurally
+ * identical refs from consecutive runs still compare unequal. This is what makes
+ * `ValueData<Ref>`'s change-cutoff fire when a stable handle (a reused buffer, a recycled
+ * swapchain image) is re-filled with new contents.
+ *
+ * Before this helper, `MeshNode`, `UniformNode`, `StorageBufferNode`, `DynamicMeshNode`,
+ * `BlitNode`, and `GraphicsNode` each carried their own `std::uint64_t m_version` and
+ * hand-wrote `++m_version; out->produce({…, .version = m_version})`. @ref veng::gpu::VersionedOutput
+ * owns that counter and the publish step in one place, making the "a producer always publishes
+ * a fresh ref" contract explicit and unforgettable.
+ *
+ * @ingroup gpu_handles
+ */
 
 #ifndef VENG_VERSIONEDOUTPUT_HPP
 #define VENG_VERSIONEDOUTPUT_HPP
@@ -24,16 +28,35 @@
 
 namespace veng::gpu
 {
-/// Bundles a monotonic version counter with the stamp-and-produce a producer node does each
-/// time it publishes its output ref. `RefT` must have a `std::uint64_t version` member.
+/**
+ * @brief Monotonic version counter with a combined stamp-and-produce publish step.
+ *
+ * Owned by producer nodes. On each frame where the producer has new data, it calls @ref publish
+ * instead of manually incrementing its own counter and calling `out->produce`. The `RefT`
+ * template parameter must have a `std::uint64_t version` member.
+ *
+ * @ingroup gpu_handles
+ * @see ImageRef
+ * @see MeshRef
+ * @see UniformRef
+ * @see BufferRef
+ */
 class VersionedOutput
 {
 	 public:
-	/// Stamp the next version into `ref` and write it to the `output` slot. Defensively a no-op
-	/// (and does not bump) if `output` does not resolve to a `ValueData<RefT>` — the same guard
-	/// the nodes had inline. The produce result is intentionally discarded: a producer always
-	/// publishes a fresh ref (the bumped version guarantees the change), so it returns `true`
-	/// from its own `record`/`execute` regardless.
+	/**
+	 * @brief Stamp the next version into `ref` and write it to the `output` data slot.
+	 *
+	 * Defensively a no-op (and does not bump the counter) if `output` does not resolve to a
+	 * `ValueData<RefT>` — the same guard the nodes had inline. The produce result is
+	 * intentionally discarded: a producer always publishes a fresh ref (the bumped version
+	 * guarantees the change), so it returns `true` from its own `record`/`execute` regardless.
+	 *
+	 * @tparam RefT  A ref type with a `std::uint64_t version` member (e.g. @ref veng::gpu::ImageRef).
+	 * @param  ctx    The execution context used to resolve `output` to a `ValueData<RefT>`.
+	 * @param  output Data handle for the output slot to write into.
+	 * @param  ref    The ref to publish; `version` is overwritten with the bumped counter.
+	 */
 	template <class RefT>
 	void publish(graph::ExecContext& ctx, graph::DataHandle output, RefT ref)
 	{
@@ -44,12 +67,18 @@ class VersionedOutput
 		}
 	}
 
-	/// The current version (the value stamped into the most recent publish). A test/introspection
-	/// lens; also lets a node that publishes its ref by hand stay in lockstep with this counter.
+	/**
+	 * @brief The current version (the value stamped into the most recent publish).
+	 *
+	 * A test and introspection lens; also lets a node that publishes its ref by hand stay in
+	 * lockstep with this counter.
+	 *
+	 * @return The version stamped by the last @ref publish call (0 if never published).
+	 */
 	[[nodiscard]] std::uint64_t version() const noexcept { return m_version; }
 
 	 private:
-	std::uint64_t m_version = 0;
+	std::uint64_t m_version = 0; ///< Monotonically increasing counter, bumped on every @ref publish.
 };
 } // namespace veng::gpu
 

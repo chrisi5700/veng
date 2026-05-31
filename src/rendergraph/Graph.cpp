@@ -1,8 +1,10 @@
-//
-// Created by chris on 5/25/26.
-//
-// L3 Reactive Core implementation. See Graph.hpp and design.md §2.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of the reactive render graph core (@ref veng::graph::Graph).
+ *
+ * @ingroup rendergraph
+ */
 
 #include <algorithm>
 #include <atomic>
@@ -19,7 +21,7 @@ constexpr std::uint8_t GRAY	 = 1;
 constexpr std::uint8_t BLACK = 2;
 
 /// The concrete ExecContext handed to nodes during execute: resolves handles
-/// against the graph and reports the frame revision (design.md §L3).
+/// against the graph and reports the frame revision.
 class ExecContextImpl final : public ExecContext
 {
 	 public:
@@ -118,7 +120,7 @@ std::expected<void, GraphError> Graph::visit(std::uint32_t index, ResolveState& 
 
 	Node* node = m_nodes[index].get();
 	// Dirty if never computed/failed, or if it asks to keep refreshing (a progressive
-	// accumulator that has not converged — design.md §L4). Input-driven dirtiness is
+	// accumulator that has not converged). Input-driven dirtiness is
 	// added in the loop below.
 	bool		  dirty	 = node->state() != ExecutionState::VALID || node->needs_refresh();
 	std::uint32_t height = 0;
@@ -169,7 +171,7 @@ std::expected<void, GraphError> Graph::visit(std::uint32_t index, ResolveState& 
 
 std::expected<FramePlan, GraphError> Graph::resolve(std::span<const DataHandle> sinks)
 {
-	// 1. Apply queued source mutations, then bump the revision once (design.md §2.5/§2.6).
+	// 1. Apply queued source mutations, then bump the revision once.
 	std::vector<DataHandle> changed_sources;
 	for (const DataHandle handle : m_pending_sources)
 	{
@@ -196,7 +198,7 @@ std::expected<FramePlan, GraphError> Graph::resolve(std::span<const DataHandle> 
 		get_data(handle)->m_changed_at = m_revision;
 	}
 
-	// 2. Walk the demanded cone from each sink (design.md §2.2).
+	// 2. Walk the demanded cone from each sink.
 	const std::size_t count = m_nodes.size();
 	ResolveState	  state{
 		.color	= std::vector<std::uint8_t>(count, WHITE),
@@ -240,7 +242,7 @@ std::expected<FramePlan, GraphError> Graph::resolve(std::span<const DataHandle> 
 
 void Graph::run_node(Node& node, ExecContext& ctx, Revision revision, bool first_time) const
 {
-	// Change-cutoff (design.md §2.4): skip a node iff none of its inputs have changed
+	// Change-cutoff: skip a node iff none of its inputs have changed
 	// since the revision at which this node last produced (m_verified_at). The
 	// baseline MUST match resolve's dirtiness test (input.changed_at > verified_at) —
 	// using "changed this exact frame" instead silently drops an update that resolve
@@ -248,7 +250,7 @@ void Graph::run_node(Node& node, ExecContext& ctx, Revision revision, bool first
 	// Inputs live in strictly lower height bands, already completed at the execute
 	// barrier, so their stamps are settled and need no per-node wait here.
 	// A refreshing node (progressive accumulator) must re-run every demanded frame
-	// even with unchanged inputs, so it is never cut off (design.md §L4).
+	// even with unchanged inputs, so it is never cut off.
 	bool inputs_current = !first_time && !node.needs_refresh();
 	for (const DataHandle input : node.inputs())
 	{
@@ -282,12 +284,12 @@ void Graph::run_node(Node& node, ExecContext& ctx, Revision revision, bool first
 	catch (...)
 	{
 		// A throwing node must not strand the band barrier (frame hang) or escape the
-		// worker (std::terminate). Treat any exception as failure (design.md §9, H1).
+		// worker (std::terminate). Treat any exception as failure.
 		result = std::unexpected(ExecError::NODE_FAILED);
 	}
 
 	// Completion is a CAS, not a store, so re-invalidation during execute is detected
-	// rather than clobbered (design.md §L3, fixes the prototype's lost-update race).
+	// rather than clobbered.
 	if (result.has_value())
 	{
 		if (*result)
@@ -335,7 +337,7 @@ bool Graph::execute(const FramePlan& plan, Scheduler& scheduler, ExecContext& ct
 		was_valid[i] = (get_node(nodes[i])->state() == ExecutionState::VALID) ? 1 : 0;
 	}
 
-	// Height-batched dispatch (design.md §L5). The plan is sorted by ascending
+	// Height-batched dispatch. The plan is sorted by ascending
 	// height, so equal-height nodes form contiguous bands; nodes within a band are
 	// mutually independent. Dispatch a whole band, then barrier on it before the
 	// next. Because no task ever blocks on another task, a fixed-size worker pool

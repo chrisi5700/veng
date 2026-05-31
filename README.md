@@ -1,448 +1,195 @@
-# VENG
+# veng
 
-What am I doing here? I'm trying to build a sort of frame graph that additionally has reactive dataflow with memoization.
+[![CI](https://github.com/chrisi5700/veng/actions/workflows/ci.yml/badge.svg?branch=reactive-engine)](https://github.com/chrisi5700/veng/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![C++](https://img.shields.io/badge/C%2B%2B-23%2F26-blue.svg)
+![Vulkan](https://img.shields.io/badge/Vulkan-1.3-red.svg)
 
-# Reactive Render Graph Design Document
+**veng** is an experimental Vulkan rendering engine built around a *reactive render
+graph*: a persistent, demand-driven dependency graph that only recomputes the work an
+output actually depends on. A still camera over a static scene costs almost nothing; a
+changed uniform re-runs exactly the nodes downstream of it — no per-frame rebuild, no
+manual dirty-tracking.
 
-## Overview
+> ⚠️ **Status: early / experimental.** The architecture and public API are still moving.
+> It targets Linux + Vulkan 1.3 and is a personal engine, not a production library.
 
-A demand-driven, incremental computation system for Vulkan rendering pipelines that only regenerates data when invalidated. Built on a bipartite DAG structure alternating between compute nodes and data edges.
+## Why a reactive graph?
 
-**Key Properties:**
-- Pull-based evaluation (demand-driven)
-- Automatic invalidation propagation
-- Cache-aware execution (no redundant work)
-- Safe ownership semantics via `shared_ptr` chains
+Traditional frame graphs rebuild and re-record every frame. veng instead models rendering
+as incremental computation over a bipartite DAG of **nodes** (compute) and **values**
+(buffers, images, uniforms, meshes):
 
-## Core Concepts
+- **Pull-based** — you *demand* a sink (e.g. the swapchain image); only its transitive
+  inputs are resolved.
+- **Memoized** — a node whose inputs did not change is skipped (change-cutoff), so cached
+  results flow straight through.
+- **Temporal edges** — a first-class one-frame-delayed *history* edge expresses
+  ping-pong / TAA / progressive accumulation without hand-managed double buffers.
+- **Scheduler-injected** — the core is Vulkan-agnostic and runs through an injected
+  `Scheduler` (inline for tests, a thread pool for the real loop).
 
-### Bipartite DAG Structure
-
-```
-Node → Data → Node → Data → Node
- ○  ────▢────  ○  ────▢────  ○
-```
-
-- **Nodes** (○): Computation units (compute shaders, graphics pipelines, allocators)
-- **Data** (▢): Resources between nodes (buffers, images)
-- Strict alternation creates clear data flow
-
-### Ownership Model
-
-```cpp
-struct Data {
-    std::shared_ptr<Node> parent;      // Who produces this data
-    std::vector<Node*> next;           // Who consumes this data
-    bool valid;
-    // + buffer handle, version, etc.
-};
-
-struct Node {
-    std::vector<std::shared_ptr<Data>> in_bound;   // Inputs (owned)
-    std::vector<Data*> out_bound;                  // Outputs (borrowed)
-    Fence done_fence;
-};
-```
-
-**Invariant:** *"If you can call a method on a Node/Data, all its raw pointers are valid"*
-
-**Why it's safe:**
-- Data owns its producer (parent)
-- Nodes own their inputs (in_bound)
-- Creates dependency chain: leaf outputs keep entire upstream alive
-- Raw pointers (`next`, `out_bound`) can never dangle because:
-    - Objects holding them are kept alive by the ownership chain
-    - Objects pointed to cannot be destroyed while reachable
-
-## API Design
-
-### Node Interface
+### The core in a nutshell
 
 ```cpp
-struct Node {
-    std::string name;
-    
-    // Connection API
-    void set_input(std::string descriptor_name, std::shared_ptr<Data> data);
-    std::vector<std::shared_ptr<Data>> get_output(Allocator& alloc);
-    
-    // Execution
-    void generate();        // Demand-driven generation
-    void invalidate();      // Cascade invalidation
-    
-protected:
-    virtual void executeImpl() = 0;  // Vulkan work here
-    
-private:
-    std::vector<Data*> out_bound;
-    std::vector<std::shared_ptr<Data>> in_bound;
-    Fence done_fence;
-};
+#include <veng/rendergraph/Graph.hpp>
+using namespace veng::graph;
+
+Graph g;
+auto width  = g.add_source<int>(1280);
+auto height = g.add_source<int>(720);
+auto aspect = g.add_transform(
+    [](const int& w, const int& h) { return static_cast<float>(w) / static_cast<float>(h); },
+    width, height);
+
+InlineScheduler sched;                  // runs tasks inline; swap for ThreadPoolScheduler
+auto plan = g.frame(aspect, sched);     // resolve + execute the demanded sub-graph
+
+g.set(width, 1920);                     // queued, applied at the next frame boundary
+plan = g.frame(aspect, sched);          // only `aspect` re-runs; unchanged sources are cut
 ```
 
-### Data Interface
+GPU nodes (`MeshNode`, `UniformNode`, `GraphicsNode`, …) are the same idea with Vulkan
+resources flowing on the edges. See [`example/`](example/) for the rendering API in use.
 
-```cpp
-struct Data {
-    std::string name;
-    
-    // State
-    bool valid;
-    uint64_t version;
-    
-    // Resource
-    std::shared_ptr<BufferAllocation> buffer;  // Ref-counted
-    
-    // Lifecycle
-    void request();         // Pull generation
-    void invalidate();      // Cascade invalidation
-    Fence& get_fence();     // Synchronization
-    
-private:
-    std::vector<Node*> next;
-    std::shared_ptr<Node> parent;
-};
+## Features
+
+- Clustered-forward **PBR** (metallic-roughness) with HDR + tonemapping
+- **glTF 2.0** scene loading via [fastgltf](https://github.com/spnda/fastgltf) (static
+  meshes, materials, node hierarchy, textures)
+- Phong materials, transparency ordering, hardware **instancing**
+- Screen-space **outline** post-process and GPU **object picking** passes
+- Versioned, **N-buffered** transient resource pool (frames-in-flight safe)
+- Reflection-driven pipeline + descriptor builders (shaders authored in **Slang**)
+- Multi-threaded, height-batched graph scheduler
+
+## Examples
+
+Each demo under [`example/`](example/) builds to its own executable:
+
+| Example | Shows |
+|---|---|
+| `static_shapes` | minimal lit scene; the reactive idle (cached% → ~100% when still) |
+| `instanced_cubes` | 125 instanced cubes under an orbit camera |
+| `phong_materials` | Phong shading + transparency |
+| `pbr_materials` | metallic-roughness PBR spheres |
+| `gltf_viewer` | load + render a glTF model (e.g. DamagedHelmet) |
+| `picking_outline` | GPU picking + screen-space outline |
+
+## Getting started
+
+### Prerequisites
+
+- **Linux** with a **Vulkan 1.3** driver (a discrete/integrated GPU, or
+  [lavapipe](https://docs.mesa3d.org/drivers/llvmpipe.html) for software rendering)
+- A C++23/26 compiler — **GCC 14+** or **Clang 18+** (developed against GCC 16)
+- **CMake ≥ 3.28** (3.30+ recommended for C++26) and **Ninja**
+- **[vcpkg](https://github.com/microsoft/vcpkg)** — set `VCPKG_ROOT` to your checkout
+- **[Slang](https://github.com/shader-slang/slang)** — installed system-wide or via the
+  Vulkan SDK (provides `slang::slang` / `slangConfig.cmake`)
+
+> All other dependencies (GLFW, glm, spdlog, Dear ImGui, vk-bootstrap, VMA-Hpp, stb,
+> fastgltf, Catch2, Google Benchmark) are resolved by vcpkg from [`vcpkg.json`](vcpkg.json).
+
+### Build
+
+```bash
+export VCPKG_ROOT=/path/to/vcpkg
+cmake --preset dev-vcpkg          # Debug; use release-vcpkg for optimized builds
+cmake --build --preset dev-vcpkg
 ```
 
-### Graph Builder
+Run an example (built into `build/dev-vcpkg/example/<name>/`):
 
-```cpp
-class RenderGraph {
-public:
-    // Node creation
-    template<typename NodeType, typename... Args>
-    std::shared_ptr<NodeType> add_node(std::string name, Args&&... args);
-    
-    // Connection
-    std::shared_ptr<Data> connect(
-        std::shared_ptr<Node> producer,
-        std::shared_ptr<Node> consumer,
-        std::string data_name,
-        BufferHandle buffer = {}
-    );
-    
-    // Multiple consumers
-    std::shared_ptr<Data> connect(
-        std::shared_ptr<Node> producer,
-        std::vector<std::shared_ptr<Node>> consumers,
-        std::string data_name,
-        BufferHandle buffer = {}
-    );
-    
-    // Debug
-    void validate();
-    void print_graph();
-    
-private:
-    std::vector<std::shared_ptr<Node>> all_nodes;
-    std::vector<std::shared_ptr<Data>> all_data;
-};
+```bash
+./build/dev-vcpkg/example/gltf_viewer/gltf_viewer
 ```
 
-## Usage Example
+> **Windowed examples & WSI:** if you built the Vulkan loader through vcpkg it may lack
+> the window-system (WSI) surface extensions GLFW needs. Prefer your **system** Vulkan
+> loader (`libvulkan`) when running the windowed examples.
 
-### Basic IFS Renderer
+### Available CMake presets
 
-```cpp
-RenderGraph graph;
+| Preset | Purpose |
+|---|---|
+| `dev-vcpkg` | Debug, warnings on, no sanitizers |
+| `release-vcpkg` | Optimized + LTO |
+| `llm-vcpkg` | Debug + warnings-as-errors + Address/UB sanitizers (the safety gate) |
+| `ci-coverage` | Debug + gcov coverage instrumentation (used by CI) |
 
-// Create nodes
-auto allocator = graph.add_node<AllocatorNode>("Allocator");
-auto compute = graph.add_node<ComputeNode>("Compute", compute_pipeline);
-auto graphics = graph.add_node<GraphicsNode>("Graphics", graphics_pipeline);
-auto present = graph.add_node<PresentNode>("Present", swapchain);
+## Testing
 
-// Connect pipeline
-auto raw_data = graph.connect(allocator, compute, "Raw Data", buffer_42);
-auto particle_data = graph.connect(compute, graphics, "Particle Data", buffer_42); // Same buffer!
-auto image = graph.connect(graphics, present, "Image");
+Tests use **Catch2 v3** and register with CTest. They exercise the reactive core on the
+CPU and the GPU layers end-to-end (rendering + pixel readback) on a real or software
+Vulkan device.
 
-// Render loop
-while (running) {
-    present->generate();  // Only recomputes invalid data
-}
+```bash
+# Coverage build + run + lcov HTML report (writes build/coverage/html/index.html)
+./run_test.sh
 
-// User interaction
-on_slider_change([&](int particle_count) {
-    raw_data->invalidate();  // Cascade to all dependents
-});
-
-on_window_resize([&]() {
-    image->invalidate();  // Only graphics+present regenerate
-});
+# The safety gate: warnings-as-errors + ASan/UBSan
+cmake --build --preset llm-vcpkg
+ASAN_OPTIONS=detect_leaks=0 ctest --preset llm-vcpkg
 ```
 
-### Output Behavior
+`./fix_and_format.sh` applies clang-format and runs clang-tidy + cppcheck (advisory).
 
-**Initial generation:**
-```
-Allocator → Compute → Graphics → Present
-All stages execute (cache cold)
-```
+## Continuous integration
 
-**Window resize (image invalidated):**
-```
-Graphics → Present
-Particle data stays cached! ✅
-```
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds the engine, runs the full
+test suite on **lavapipe** (software Vulkan — the runners have no GPU), and publishes an
+lcov coverage report as a build artifact plus a summary on each run. vcpkg dependencies
+are pinned and binary-cached for fast reruns.
 
-**Slider change (raw_data invalidated):**
-```
-Allocator → Compute → Graphics → Present
-Full cascade (particles need regeneration)
-```
+## Documentation
 
-## Execution Flow
+The API reference is generated from the in-source Doxygen comments using the clean,
+dark-mode [doxygen-awesome-css](https://github.com/jothepro/doxygen-awesome-css) theme.
+When `doxygen` is installed it is regenerated into `docs/html/` (gitignored) at CMake
+configure time — open `docs/html/index.html`. Regenerate on demand with:
 
-### Pull-Based Generation
-
-```cpp
-void Node::generate() {
-    // 1. Check if already valid
-    if (done_fence.is_signaled() && all_outputs_valid()) {
-        return;  // Cache hit!
-    }
-    
-    // 2. Request inputs (recursive)
-    for (auto& data : in_bound) {
-        if (!data->valid) {
-            data->request();  // → parent->generate()
-        }
-    }
-    
-    // 3. Wait for inputs
-    for (auto& data : in_bound) {
-        data->get_fence().wait();
-    }
-    
-    // 4. Execute
-    executeImpl();  // Record/submit Vulkan commands
-    
-    // 5. Mark outputs valid
-    for (auto* data : out_bound) {
-        data->valid = true;
-    }
-    done_fence.set_done();
-}
+```bash
+cmake --build --preset dev-vcpkg --target docs
 ```
 
-### Invalidation Propagation
+Pass `-DVENG_BUILD_DOCS=OFF` to skip documentation generation.
 
-```cpp
-void Data::invalidate() {
-    if (!valid) return;  // Already invalid
-    
-    valid = false;
-    version++;
-    
-    // Cascade to consumers
-    for (auto* node : next) {
-        node->invalidate();
-    }
-}
+## Project layout
 
-void Node::invalidate() {
-    // Cascade to outputs
-    for (auto* data : out_bound) {
-        data->invalidate();
-    }
-    done_fence.reset();
-}
+```
+include/veng/   Public headers (mirrors src/ by subsystem)
+src/            Implementation, layered:
+  context/        L0  Vulkan device/context (vk-bootstrap, VMA)
+  resources/      L1  RAII Buffer/Image + versioned N-buffered ResourcePool
+  shader/         L2  Slang runtime compilation + reflection
+  pipelines/      L2  reflection-driven compute/graphics pipeline builders
+  descriptors/    L2  growable descriptor allocator
+  managers/       L2  command pools, swapchain, per-frame executor
+  rendergraph/    L3  the reactive core (Vulkan-agnostic) + thread-pool scheduler
+  nodes/          L4  concrete GPU graph nodes (mesh, uniform, graphics, blit, present…)
+  culling/        clustered-shading froxel/light-cull math (pure CPU)
+  passes/         L5  reusable effects (Phong, PBR, Outline, Picking, ClusteredLights)
+  assets/         texture + glTF loaders
+tests/          Catch2 unit + integration tests (mirrors src/)
+bench/          Google Benchmark micro-benchmarks
+example/        Runnable demos
+shaders/        Slang shader sources (compiled at runtime)
+cmake/          Target helpers + compiler settings
 ```
 
-## Vulkan Integration
+## Contributing
 
-### VulkanNode Example
+This is a personal project, but issues and PRs are welcome. Please run
+`./fix_and_format.sh` and make sure `ctest` passes (the `llm-vcpkg` gate is the bar)
+before opening a PR. See [`CLAUDE.md`](CLAUDE.md) for the coding conventions.
 
-```cpp
-struct ComputeNode : Node {
-    VkPipeline pipeline;
-    VkDescriptorSet descriptor_set;
-    VkCommandBuffer cmd;
-    VkQueue queue;
-    
-    void executeImpl() override {
-        // Update descriptors from in_bound data
-        for (size_t i = 0; i < in_bound.size(); ++i) {
-            VkDescriptorBufferInfo info{
-                .buffer = in_bound[i]->buffer->vk_buffer,
-                .offset = 0,
-                .range = VK_WHOLE_SIZE
-            };
-            // Write descriptor...
-        }
-        
-        // Record commands
-        vkBeginCommandBuffer(cmd, ...);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-        vkCmdBindDescriptorSets(cmd, ..., 1, &descriptor_set, ...);
-        vkCmdDispatch(cmd, ...);
-        vkEndCommandBuffer(cmd);
-        
-        // Submit
-        VkSubmitInfo submit{
-            .commandBufferCount = 1,
-            .pCommandBuffers = &cmd
-        };
-        vkQueueSubmit(queue, 1, &submit, done_fence.vk_fence);
-    }
-};
-```
+## License
 
-### Fence Wrapper
+[MIT](LICENSE) © 2026 Chris (chrisi5700)
 
-```cpp
-struct Fence {
-    VkDevice device;
-    VkFence vk_fence;
-    std::atomic<bool> signaled{false};
-    
-    void wait() {
-        if (signaled.load()) return;
-        vkWaitForFences(device, 1, &vk_fence, VK_TRUE, UINT64_MAX);
-        signaled.store(true);
-    }
-    
-    void set_done() {
-        signaled.store(true);
-    }
-    
-    void reset() {
-        vkResetFences(device, 1, &vk_fence);
-        signaled.store(false);
-    }
-};
-```
+## Acknowledgements
 
-### Buffer Aliasing
-
-Multiple Data objects can share the same buffer:
-
-```cpp
-// Compute reads and writes same buffer (in-place)
-auto raw_data = std::make_shared<Data>("Raw", buffer_42, version=0);
-auto particle_data = std::make_shared<Data>("Particles", buffer_42, version=1);
-
-compute->set_input("input", raw_data);
-compute->out_bound.push_back(particle_data.get());
-```
-
-Logical DAG maintained despite physical buffer reuse.
-
-## Implementation Considerations
-
-### Thread Safety
-
-```cpp
-struct Node {
-    std::mutex gen_mutex;
-    std::atomic<bool> generating{false};
-    
-    void generate() {
-        // Prevent duplicate execution
-        std::unique_lock lock(gen_mutex);
-        if (generating.load()) {
-            lock.unlock();
-            done_fence.wait();
-            return;
-        }
-        generating.store(true);
-        lock.unlock();
-        
-        // ... generation logic ...
-        
-        generating.store(false);
-    }
-};
-```
-
-### Partial Invalidation
-
-Invalidate specific outputs without affecting siblings:
-
-```cpp
-void Node::invalidate_output(size_t index) {
-    out_bound[index]->invalidate();
-    // Other outputs stay valid
-}
-```
-
-### Callbacks/Hooks
-
-```cpp
-struct Data {
-    std::function<void()> on_invalidate;
-    std::function<void()> on_validated;
-    
-    void invalidate() {
-        if (on_invalidate) on_invalidate();
-        // ... rest of invalidation
-    }
-};
-
-// Usage: UI feedback
-particle_data->on_invalidate = [&] { 
-    ui->show_status("Recomputing particles..."); 
-};
-```
-
-### Debug Validation
-
-```cpp
-void RenderGraph::validate() {
-    for (auto& data : all_data) {
-        // Check parent exists
-        assert(data->parent != nullptr);
-        
-        // Check bidirectional links
-        for (auto* consumer : data->next) {
-            auto it = std::find_if(
-                consumer->in_bound.begin(),
-                consumer->in_bound.end(),
-                [&](auto& d) { return d.get() == data.get(); }
-            );
-            assert(it != consumer->in_bound.end());
-        }
-    }
-}
-```
-
-## Advantages
-
-1. **Automatic cache management** - No manual tracking of "dirty" state
-2. **No redundant work** - Only recomputes when truly needed
-3. **Clear data flow** - Bipartite structure makes dependencies explicit
-4. **Safe lifetimes** - Ownership chain prevents dangling pointers
-5. **Flexible invalidation** - Selective or cascading as needed
-6. **Extensible** - Easy to add hooks, metrics, debugging
-
-## Comparison to Traditional Frame Graphs
-
-| Feature | Traditional Frame Graph | This System |
-|---------|------------------------|-------------|
-| Regeneration | Every frame | On-demand (cached) |
-| Persistent resources | Imported manually | First-class citizens |
-| Invalidation | Manual tracking | Automatic propagation |
-| Data flow | Implicit (resource names) | Explicit (graph edges) |
-| Execution order | Topological sort once | Pull-based, dynamic |
-
-## Future Work
-
-- **Parallel execution** - Independent branches record commands concurrently
-- **Incremental barriers** - Only insert barriers for actually-executed stages
-- **Profiling integration** - Track regeneration patterns
-- **Serialization** - Save/load graph structure
-- **Visual debugging** - GraphViz export of current graph state
-- **Smart invalidation** - Partial invalidation for large buffers
-- **Resource pooling** - Automatic buffer reuse between frames
-
-## References
-
-- Frostbite Frame Graph (GDC 2017)
-- Halide autoscheduler
-- Incremental computation (adapton, salsa)
-- Self-adjusting computation theory
-
----
-
- 
+The reactive-graph design draws on incremental/self-adjusting computation (Adapton,
+Salsa) and the Frostbite frame-graph talk (GDC 2017), with shaders authored in
+[Slang](https://github.com/shader-slang/slang).

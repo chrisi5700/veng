@@ -1,6 +1,10 @@
-//
-// See veng/passes/PickingPass.hpp.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::passes::PickingPass — the @ref veng::passes::PickingReadbackNode private class
+ *        (async staging-buffer readback and callback dispatch) and the @ref veng::passes::PickingPass facade.
+ * @ingroup render_passes
+ */
 
 #include <atomic>
 #include <cstdint>

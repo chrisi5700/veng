@@ -1,7 +1,7 @@
 //
 // veng example — many instanced cubes orbiting the origin, lit by a directional light,
-// viewed through the orbit camera. Demonstrates the rigid-body slice (design.md §1, §L4,
-// §L5): one StorageBufferNode per-frame upload feeds an instanced GraphicsNode whose
+// viewed through the orbit camera. Demonstrates the rigid-body slice:
+// one StorageBufferNode per-frame upload feeds an instanced GraphicsNode whose
 // `instanceCount` is reactive on the SSBO's published count. With `example::AppLoop`
 // owning all of the window / context / swapchain / camera / frame-closer / loop boilerplate,
 // this file is just the graph wiring + the CPU "physics" thread.

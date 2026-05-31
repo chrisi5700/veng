@@ -1,9 +1,14 @@
-//
-// Created by chris on 5/25/26.
-//
-// L2 construction layer — shared pipeline-builder error type (design.md §L2.1, §9).
-// Used by both the compute and graphics pipeline builders.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Shared pipeline-builder error type used by both the compute and graphics pipeline builders.
+ *
+ * Both @ref veng::ComputePipelineBuilder and @ref veng::GraphicsPipelineBuilder return
+ * `std::expected<…, PipelineError>` on failure. Having a single error enum here avoids
+ * duplicating the same set of failure codes in each pipeline header.
+ *
+ * @ingroup pipelines
+ */
 
 #ifndef VENG_PIPELINEERROR_HPP
 #define VENG_PIPELINEERROR_HPP
@@ -13,16 +18,26 @@
 
 namespace veng
 {
+/**
+ * @brief Error codes returned by @ref veng::ComputePipelineBuilder::build and
+ *        @ref veng::GraphicsPipelineBuilder::build.
+ * @ingroup pipelines
+ */
 enum class PipelineError : std::uint8_t
 {
-	WRONG_STAGE,						   // a shader is not the stage the builder expects
-	STAGE_INCOMPATIBLE,					   // adjacent stage interfaces do not match (reflection)
-	MISSING_COLOR_FORMATS,				   // a graphics pipeline was built with no color formats
-	DESCRIPTOR_SET_LAYOUT_CREATION_FAILED, // vkCreateDescriptorSetLayout failed
-	PIPELINE_LAYOUT_CREATION_FAILED,	   // vkCreatePipelineLayout failed
-	PIPELINE_CREATION_FAILED,			   // vkCreate{Compute,Graphics}Pipelines failed
+	WRONG_STAGE,						   ///< A shader is not the stage the builder expects.
+	STAGE_INCOMPATIBLE,					   ///< Adjacent stage interfaces do not match (reflection check).
+	MISSING_COLOR_FORMATS,				   ///< A graphics pipeline was built with no color formats.
+	DESCRIPTOR_SET_LAYOUT_CREATION_FAILED, ///< `vkCreateDescriptorSetLayout` failed.
+	PIPELINE_LAYOUT_CREATION_FAILED,	   ///< `vkCreatePipelineLayout` failed.
+	PIPELINE_CREATION_FAILED,			   ///< `vkCreate{Compute,Graphics}Pipelines` failed.
 };
 
+/**
+ * @brief Stringify a @ref veng::PipelineError for logging and error reporting.
+ * @param error The error code to render.
+ * @return A human-readable description of the error.
+ */
 [[nodiscard]] constexpr std::string_view to_string(PipelineError error) noexcept
 {
 	switch (error)

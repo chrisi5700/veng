@@ -1,5 +1,5 @@
 //
-// L4 test (design.md §L4): the generic GraphicsNode draws the cube shaders from an MVP
+// L4 test: the generic GraphicsNode draws the cube shaders from an MVP
 // push-constant — there is no cube-specific node. A pure transform turns (angle, screen)
 // into the MVP; the GraphicsNode draws 36 vertices with it into a depth-tested target. A
 // readback proves the cube lands in the center over the dark clear corner — which also

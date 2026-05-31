@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/25/26.
-//
-// See Image.hpp and design.md §L1.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::Image implementation — VMA image allocation, view creation, and RAII lifecycle.
+ * @ingroup resources
+ */
 
 #include <utility>
 #include <veng/resources/Image.hpp>

@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/25/26.
-//
-// See GraphicsPipeline.hpp and design.md §L2.1.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::GraphicsPipeline and @ref veng::GraphicsPipelineBuilder implementation.
+ * @ingroup pipelines
+ */
 
 #include <array>
 #include <map>

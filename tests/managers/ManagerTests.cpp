@@ -1,5 +1,5 @@
 //
-// L2.4 manager tests (design.md §L2.4). CommandManager (per queue/slot/thread command pools)
+// L2.4 manager tests. CommandManager (per queue/slot/thread command pools)
 // on a headless device: command recording that executes on-GPU, per-frame reset, and
 // per-thread pool isolation under concurrency.
 //

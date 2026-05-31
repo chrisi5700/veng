@@ -1,6 +1,10 @@
-//
-// See Texture.hpp and review.md item 3.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::assets::Texture implementation: stb_image decoding, mip-chain generation, and
+ *        GPU staging upload.
+ * @ingroup assets
+ */
 
 #include <algorithm>
 #include <cmath>

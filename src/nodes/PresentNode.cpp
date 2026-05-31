@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/25/26.
-//
-// See PresentNode.hpp and design.md §L4.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::nodes::PresentNode.
+ * @ingroup graph_nodes
+ */
 
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/managers/QueueKind.hpp>

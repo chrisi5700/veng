@@ -1,6 +1,10 @@
-//
-// See veng/assets/GltfLoader.hpp and review.md items 6 + 7.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::assets::load_gltf implementation: fastgltf parsing, mesh/texture upload, and
+ *        render-graph wiring for glTF 2.0 scenes.
+ * @ingroup assets
+ */
 
 #include <array>
 #include <cstddef>
@@ -79,7 +83,7 @@ std::span<const std::byte> image_bytes(const fastgltf::Asset& asset, const fastg
 
 // Per-vertex tangents (xyz + handedness) from positions, normals and UVs — used when a primitive
 // has a normal map but no TANGENT attribute. A simple accumulate-then-orthonormalize (not
-// mikktspace; see findings.md). Returns default +X tangents when there are no usable UVs.
+// mikktspace). Returns default +X tangents when there are no usable UVs.
 std::vector<glm::vec4> compute_tangents(const std::vector<glm::vec3>& positions, const std::vector<glm::vec3>& normals,
 										const std::vector<glm::vec2>& uvs, const std::vector<std::uint32_t>& indices)
 {
@@ -273,15 +277,9 @@ class Loader
 				strength;
 			switch (material.alphaMode)
 			{
-				case fastgltf::AlphaMode::Mask:
-					desc.alpha_mode = AlphaMode::Mask;
-					break;
-				case fastgltf::AlphaMode::Blend:
-					desc.alpha_mode = AlphaMode::Blend;
-					break;
-				default:
-					desc.alpha_mode = AlphaMode::Opaque;
-					break;
+				case fastgltf::AlphaMode::Mask: desc.alpha_mode = AlphaMode::Mask; break;
+				case fastgltf::AlphaMode::Blend: desc.alpha_mode = AlphaMode::Blend; break;
+				default: desc.alpha_mode = AlphaMode::Opaque; break;
 			}
 			desc.alpha_cutoff = static_cast<float>(material.alphaCutoff);
 			m_model.materials.push_back(desc);

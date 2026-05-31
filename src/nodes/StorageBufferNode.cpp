@@ -1,6 +1,9 @@
-//
-// See StorageBufferNode.hpp and design.md §L4.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::nodes::StorageBufferNode.
+ * @ingroup graph_nodes
+ */
 
 #include <cstring>
 #include <utility>
@@ -51,9 +54,9 @@ std::expected<bool, graph::ExecError> StorageBufferNode::record(gpu::GpuExecCont
 	// empty array therefore binds a one-stride range the shader never reads — `count` (0) is what tells
 	// the consuming draw to emit zero instances, so nothing accesses it.
 	m_versioned.publish(ctx, m_output,
-						gpu::BufferRef{.buffer  = buffer.value()->buffer(),
+						gpu::BufferRef{.buffer	= buffer.value()->buffer(),
 									   .size	= alloc_bytes,
-									   .stride  = m_stride,
+									   .stride	= m_stride,
 									   .count	= reading.count,
 									   .name	= m_name,
 									   .pool_id = m_buffer_id}); // let SSBO consumers retain this copy

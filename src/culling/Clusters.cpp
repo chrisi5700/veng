@@ -1,13 +1,16 @@
-//
-// See veng/culling/Clusters.hpp.
-//
-
-#include <veng/culling/Clusters.hpp>
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::culling::build_view_froxels and @ref veng::culling::assign_lights implementation: froxel AABB
+ *        construction via inverse projection and sphere-vs-AABB light culling.
+ * @ingroup culling
+ */
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
+#include <veng/culling/Clusters.hpp>
 
 namespace veng::culling
 {
@@ -72,10 +75,9 @@ std::vector<Aabb> build_view_froxels(const glm::mat4& inv_proj, const ClusterGri
 									(2.0F * static_cast<float>(y + 1) / dim_y) - 1.0F};
 			// The four tile-corner rays (unprojected at the near plane; any z works — the ray through
 			// the origin is what we keep).
-			const std::array<glm::vec3, 4> corners{unproject({ndc_min.x, ndc_min.y}, 0.0F, inv_proj),
-												   unproject({ndc_max.x, ndc_min.y}, 0.0F, inv_proj),
-												   unproject({ndc_min.x, ndc_max.y}, 0.0F, inv_proj),
-												   unproject({ndc_max.x, ndc_max.y}, 0.0F, inv_proj)};
+			const std::array<glm::vec3, 4> corners{
+				unproject({ndc_min.x, ndc_min.y}, 0.0F, inv_proj), unproject({ndc_max.x, ndc_min.y}, 0.0F, inv_proj),
+				unproject({ndc_min.x, ndc_max.y}, 0.0F, inv_proj), unproject({ndc_max.x, ndc_max.y}, 0.0F, inv_proj)};
 
 			for (std::uint32_t z = 0; z < grid.dims.z; ++z)
 			{
@@ -89,8 +91,8 @@ std::vector<Aabb> build_view_froxels(const glm::mat4& inv_proj, const ClusterGri
 				{
 					const glm::vec3 at_near = ray_to_z(corner, z_near);
 					const glm::vec3 at_far	= ray_to_z(corner, z_far);
-					lo = glm::min(lo, glm::min(at_near, at_far));
-					hi = glm::max(hi, glm::max(at_near, at_far));
+					lo						= glm::min(lo, glm::min(at_near, at_far));
+					hi						= glm::max(hi, glm::max(at_near, at_far));
 				}
 				froxels[cluster_index(x, y, z, grid)] = Aabb{.min = lo, .max = hi};
 			}
@@ -101,15 +103,15 @@ std::vector<Aabb> build_view_froxels(const glm::mat4& inv_proj, const ClusterGri
 
 bool intersects_sphere(const Aabb& box, glm::vec3 center, float radius) noexcept
 {
-	const glm::vec3 closest	 = glm::clamp(center, box.min, box.max);
-	const glm::vec3 delta	 = closest - center;
+	const glm::vec3 closest = glm::clamp(center, box.min, box.max);
+	const glm::vec3 delta	= closest - center;
 	return glm::dot(delta, delta) <= radius * radius;
 }
 
 ClusterAssignment assign_lights(const std::vector<Aabb>& froxels, std::span<const GpuLight> lights,
 								const glm::mat4& view, const ClusterGrid& grid, std::uint32_t max_per_cluster)
 {
-	const std::uint32_t cluster_count = grid.count();
+	const std::uint32_t						cluster_count = grid.count();
 	std::vector<std::vector<std::uint32_t>> per_cluster(cluster_count);
 
 	for (std::uint32_t li = 0; li < lights.size(); ++li)

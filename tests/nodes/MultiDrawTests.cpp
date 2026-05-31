@@ -1,5 +1,5 @@
 //
-// L4 test (design.md §L4): the Pass/Draw split — ONE GraphicsNode hosts several draws. Two
+// L4 test: the Pass/Draw split — ONE GraphicsNode hosts several draws. Two
 // MeshNodes upload a red and a blue triangle; a single GraphicsNode draws both into one target,
 // each with its own per-draw push constant (a model matrix translating it left vs. right). A
 // readback proves both draws landed: red in the left half, blue in the right half, the corner

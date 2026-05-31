@@ -1,5 +1,5 @@
 //
-// GPU bridge tests (design.md §L4). Proves the L3 -> Vulkan seam end to end: a GpuNode
+// GPU bridge tests. Proves the L3 -> Vulkan seam end to end: a GpuNode
 // dispatched by Graph::execute with an injected GpuExecContext receives the command
 // buffer, records a real command, and that command executes on the GPU with an
 // observable result (a host-visible buffer fill read back through the mapped pointer).

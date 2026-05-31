@@ -107,7 +107,7 @@ target_include_directories(veng_assets PRIVATE ${Stb_INCLUDE_DIR})
 # stb_image is third-party and not -Wall/-Werror clean; silence warnings for its one impl TU.
 set_source_files_properties(assets/StbImpl.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
-# L3 Reactive Core. Deliberately Vulkan-agnostic (design.md §3): no link to the
+# L3 Reactive Core. Deliberately Vulkan-agnostic: no link to the
 # Vulkan construction layers, so it builds and unit-tests without a GPU.
 target_add_library(veng_render_graph)
 target_sources(veng_render_graph PRIVATE rendergraph/Graph.cpp rendergraph/ThreadPoolScheduler.cpp)

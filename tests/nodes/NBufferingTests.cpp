@@ -1,5 +1,5 @@
 //
-// N-buffering integration proof (design.md §L1; [[pass-draw-redesign]]). The ResourcePool's
+// N-buffering integration proof ([[pass-draw-redesign]]). The ResourcePool's
 // reuse/retention logic is unit-tested in ResourcePoolTests; this proves the *wired* path: with
 // frames_in_flight = 2 and a producer that re-renders every frame, two frames submitted while both
 // are in flight must render into DISTINCT physical target copies — otherwise frame N+1 would stomp

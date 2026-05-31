@@ -1,5 +1,5 @@
 //
-// L4 slice test (design.md §L4): the engine's first rendered frame, via the generic
+// L4 slice test: the engine's first rendered frame, via the generic
 // GraphicsNode. A ScreenSize source feeds a GraphicsNode (color-only, no depth) that
 // draws a triangle into its scene-color image via dynamic rendering; the graph dispatches
 // it through a GpuExecContext, and a readback proves a red triangle landed in the center

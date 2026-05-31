@@ -1,5 +1,5 @@
 //
-// L3 temporal / accumulation tests (design.md §L4 "Temporal / history", §8). These
+// L3 temporal / accumulation tests. These
 // exercise the reactive core's demand-refresh hook (Node::needs_refresh) and the
 // temporal self-edge pattern — a node reading its own previous output without forming
 // a cycle — which together implement the design's headline accumulation showcase:
@@ -114,7 +114,7 @@ TEST_CASE("an accumulator advances one sample per idle frame, then converges", "
 	}
 
 	// Frame 5: converged (reached max) -> stops refreshing -> nothing to execute, and
-	// the converged value holds. A still scene now costs nothing (design.md §1).
+	// the converged value holds. A still scene now costs nothing.
 	const auto converged = fix.graph.frame(fix.output, fix.scheduler);
 	REQUIRE(converged.has_value());
 	REQUIRE(converged->empty());
@@ -209,7 +209,7 @@ TEST_CASE("a history edge feeds a node its own previous output without a cycle",
 
 	// Frame 5: the history snapshot is now equal (3 == 3), so it stops dirtying the node and the
 	// plan is empty — the feedback loop converges and then costs nothing, purely via change
-	// propagation (design.md §1). This is what the manual needs_refresh path had to fake.
+	// propagation. This is what the manual needs_refresh path had to fake.
 	const auto converged = graph.frame(out, scheduler);
 	REQUIRE(converged.has_value());
 	REQUIRE(converged->empty());

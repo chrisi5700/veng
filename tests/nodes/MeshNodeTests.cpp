@@ -1,5 +1,5 @@
 //
-// L4 test (design.md §L4): real buffer-backed geometry. A MeshNode uploads an actual
+// L4 test: real buffer-backed geometry. A MeshNode uploads an actual
 // vertex buffer (positions + per-vertex color) and an index buffer; a GraphicsNode bound to
 // that mesh draws it indexed into a scene target. A readback proves both halves flowed
 // through the VkBuffers: the triangle covers the center (positions) in its vertex color

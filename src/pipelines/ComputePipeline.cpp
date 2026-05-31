@@ -1,8 +1,9 @@
-//
-// Created by chris on 1/23/26.
-//
-// See ComputePipeline.hpp and design.md §L2.1.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::ComputePipeline and @ref veng::ComputePipelineBuilder implementation.
+ * @ingroup pipelines
+ */
 
 #include <ranges>
 #include <vector>
@@ -83,7 +84,7 @@ std::expected<ComputePipeline, PipelineError> ComputePipelineBuilder::build(cons
 
 	const vk::Device device = context.device();
 
-	// Descriptor-set layout straight from reflection (design.md §L2.1): no
+	// Descriptor-set layout straight from reflection: no
 	// hand-written bindings, so the layout can never drift from the shader.
 	const auto bindings = m_shader->get_descriptor_infos() |
 						  v::transform(

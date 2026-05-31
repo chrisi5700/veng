@@ -1,6 +1,10 @@
-//
-// See veng/passes/PhongPass.hpp.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::passes::PhongPass — the @ref veng::passes::PhongRenderNode private class and the
+ *        three-pipeline opaque/transparent draw recording.
+ * @ingroup render_passes
+ */
 
 #include <array>
 #include <cstddef>

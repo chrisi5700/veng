@@ -1,5 +1,5 @@
 //
-// L4 test (design.md §L4): one pass sampling another's output — the basis of multi-pass
+// L4 test: one pass sampling another's output — the basis of multi-pass
 // effects. Pass 1 (fullscreen) fills an image with a known color and leaves it in
 // SHADER_READ_ONLY; pass 2 (fullscreen) samples it via add_sampled_image (a node-owned
 // sampler + an image descriptor matched by reflected name) and writes it out. A readback

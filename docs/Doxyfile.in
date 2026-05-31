@@ -1,0 +1,98 @@
+# Doxygen configuration template for veng — processed by cmake/Docs.cmake (configure_file,
+# @ONLY). Tags left at their defaults are omitted; Doxygen fills them in. The HTML theme is
+# doxygen-awesome-css (clean, dark-mode-capable) fetched at configure time.
+
+#---------------------------------------------------------------------------
+# Project
+#---------------------------------------------------------------------------
+PROJECT_NAME           = "veng"
+PROJECT_NUMBER         = "@VENG_DOXY_VERSION@"
+PROJECT_BRIEF          = "A reactive Vulkan render graph"
+OUTPUT_DIRECTORY       = "@VENG_DOXY_OUTPUT_DIR@"
+CREATE_SUBDIRS         = NO
+ALLOW_UNICODE_NAMES    = YES
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = "@VENG_DOXY_STRIP_PATH@"
+TAB_SIZE               = 4
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+BUILTIN_STL_SUPPORT    = YES
+
+#---------------------------------------------------------------------------
+# Build / extraction
+#---------------------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_PRIV_VIRTUAL   = YES
+EXTRACT_ANON_NSPACES   = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_SCOPE_NAMES       = NO
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = NO
+GENERATE_TODOLIST      = YES
+SHOW_USED_FILES        = YES
+LAYOUT_FILE            =
+
+#---------------------------------------------------------------------------
+# Messages
+#---------------------------------------------------------------------------
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_AS_ERROR          = NO
+
+#---------------------------------------------------------------------------
+# Input
+#---------------------------------------------------------------------------
+INPUT                  = @VENG_DOXY_INPUT@
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.hpp *.cpp *.h *.md
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */build/* */vcpkg_installed/* */_deps/*
+USE_MDFILE_AS_MAINPAGE = "@VENG_DOXY_MAINPAGE@"
+
+#---------------------------------------------------------------------------
+# Source browser
+#---------------------------------------------------------------------------
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = YES
+REFERENCED_BY_RELATION = NO
+REFERENCES_RELATION    = NO
+
+#---------------------------------------------------------------------------
+# Preprocessor (help Doxygen through modern C++ / Vulkan-Hpp macros)
+#---------------------------------------------------------------------------
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = "VULKAN_HPP_NO_EXCEPTIONS=1" \
+                         "VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1"
+
+#---------------------------------------------------------------------------
+# HTML output — doxygen-awesome-css theme (clean, dark-mode toggle)
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HTML_OUTPUT            = html
+HTML_COLORSTYLE        = LIGHT
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_HEADER            = "@VENG_DOXY_HEADER@"
+HTML_EXTRA_STYLESHEET  = @VENG_DOXY_EXTRA_STYLESHEETS@
+HTML_EXTRA_FILES       = @VENG_DOXY_EXTRA_FILES@
+HTML_COPY_CLIPBOARD    = NO
+
+#---------------------------------------------------------------------------
+# Diagrams (Graphviz)
+#---------------------------------------------------------------------------
+HAVE_DOT               = @VENG_DOXY_HAVE_DOT@
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = NO
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO

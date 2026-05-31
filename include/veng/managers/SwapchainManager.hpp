@@ -1,15 +1,19 @@
-//
-// Created by chris on 5/25/26.
-//
-// L2 manager — the windowed swapchain (design.md §L4 swapchain & present). Owns the
-// VkSwapchainKHR over the Context's surface, its images, and the binary acquire /
-// render-finished semaphores. The acquired swapchain image is the per-frame target the
-// PresentNode blits into; `acquire` returns the image index plus the semaphore the
-// submit must wait on, `present` queues it for display. RAII, move-only.
-//
-// The surface itself is owned by the Context (it must be destroyed before the
-// instance); this manager only borrows it.
-//
+/**
+ * @file
+ * @author chris
+ * @brief L2 manager for the windowed Vulkan swapchain.
+ *
+ * Owns the `VkSwapchainKHR` over the @ref veng::Context's surface, its images, and the binary
+ * acquire/render-finished semaphores. The acquired swapchain image is the per-frame target
+ * that `PresentNode` blits into: @ref veng::SwapchainManager::acquire "acquire" returns the image
+ * index plus the semaphore the submit must wait on, and @ref veng::SwapchainManager::present
+ * "present" queues it for display. RAII, move-only.
+ *
+ * The surface itself is owned by the @ref veng::Context (it must be destroyed before the
+ * instance); this manager only borrows it.
+ *
+ * @ingroup managers
+ */
 
 #ifndef VENG_SWAPCHAINMANAGER_HPP
 #define VENG_SWAPCHAINMANAGER_HPP
@@ -24,17 +28,36 @@
 
 namespace veng
 {
+/**
+ * @brief Manages the `VkSwapchainKHR`, its images, and the per-frame synchronisation
+ *        semaphores and fences.
+ *
+ * @ingroup managers
+ * @see FrameExecutor
+ * @see Context
+ */
 class SwapchainManager
 {
 	 public:
+	/**
+	 * @brief Per-frame synchronisation bundle returned by @ref acquire.
+	 * @ingroup managers
+	 */
 	struct Frame
 	{
 		std::uint32_t image_index;
-		vk::Semaphore image_available; // the submit waits on this (per frame-in-flight slot)
-		vk::Semaphore render_finished; // the submit signals, present waits (per swapchain image)
-		vk::Fence	  in_flight;	   // the submit signals this; `acquire` waited+reset it (per slot)
+		vk::Semaphore image_available; ///< The submit waits on this (one per frame-in-flight slot).
+		vk::Semaphore render_finished; ///< The submit signals this; present waits on it (one per swapchain image).
+		vk::Fence	  in_flight;	   ///< The submit signals this; `acquire` waited + reset it (one per slot).
 	};
 
+	/**
+	 * @brief Create the swapchain manager and build the initial swapchain.
+	 * @param context          The engine @ref veng::Context owning the surface.
+	 * @param extent           The initial swapchain extent in pixels.
+	 * @param frames_in_flight Number of in-flight frame slots (defaults to 1).
+	 * @return A ready manager, or a `vk::Result` error on failure.
+	 */
 	[[nodiscard]] static std::expected<SwapchainManager, vk::Result> create(const Context& context, vk::Extent2D extent,
 																			std::size_t frames_in_flight = 1);
 
@@ -44,22 +67,47 @@ class SwapchainManager
 	SwapchainManager& operator=(SwapchainManager&& other) noexcept;
 	~SwapchainManager();
 
+	/** @return The current swapchain extent in pixels. */
 	[[nodiscard]] vk::Extent2D extent() const noexcept { return m_extent; }
-	[[nodiscard]] vk::Format   format() const noexcept { return m_format; }
-	[[nodiscard]] vk::Image	   image(std::uint32_t index) const noexcept { return m_images[index]; }
+	/** @return The swapchain surface format. */
+	[[nodiscard]] vk::Format format() const noexcept { return m_format; }
+	/**
+	 * @brief Return the swapchain `vk::Image` at @p index.
+	 * @param index Swapchain image index as returned by `acquire`.
+	 */
+	[[nodiscard]] vk::Image image(std::uint32_t index) const noexcept { return m_images[index]; }
 
-	/// Acquire the next image for `frame_slot`. First waits on (and resets) that slot's
-	/// in-flight fence, so the previous frame using the slot has fully retired before the
-	/// caller reuses its command pool — the caller never touches a fence itself. A `nullopt`
-	/// Frame means the swapchain is out of date and the caller should `rebuild`.
+	/**
+	 * @brief Acquire the next swapchain image for @p frame_slot.
+	 *
+	 * First waits on (and resets) that slot's in-flight fence so the previous frame using
+	 * the slot has fully retired before the caller reuses its command pool — the caller never
+	 * touches a fence itself. A `nullopt` @ref Frame means the swapchain is out of date and
+	 * the caller should call @ref rebuild.
+	 *
+	 * @param frame_slot The in-flight slot index for this frame.
+	 * @return The synchronisation @ref Frame, or `nullopt` if out-of-date, or a `vk::Result`
+	 *         error on a hard failure.
+	 */
 	[[nodiscard]] std::expected<std::optional<Frame>, vk::Result> acquire(std::size_t frame_slot);
 
-	/// Present `image_index`, waiting on `wait`. Returns true if the swapchain is now
-	/// out of date / suboptimal (rebuild).
+	/**
+	 * @brief Queue @p image_index for display, waiting on @p wait.
+	 * @param queue       The graphics queue to present on.
+	 * @param image_index Index of the swapchain image to present.
+	 * @param wait        Semaphore the presentation engine waits on before scanning out.
+	 * @return `true` if the swapchain is now out of date or suboptimal (caller should
+	 *         rebuild); `false` on clean success; unexpected `vk::Result` on hard failure.
+	 */
 	[[nodiscard]] std::expected<bool, vk::Result> present(vk::Queue queue, std::uint32_t image_index,
 														  vk::Semaphore wait);
 
-	/// Recreate the swapchain at `extent`. Call after the device is idle.
+	/**
+	 * @brief Recreate the swapchain at @p extent.
+	 * @pre The device is idle (no frames in flight).
+	 * @param extent The new swapchain extent in pixels.
+	 * @return `void` on success, or a `vk::Result` error.
+	 */
 	[[nodiscard]] std::expected<void, vk::Result> rebuild(vk::Extent2D extent);
 
 	 private:
@@ -69,16 +117,16 @@ class SwapchainManager
 
 	vk::Device				   m_device;
 	vk::PhysicalDevice		   m_physical;
-	vk::SurfaceKHR			   m_surface; // borrowed from Context, not destroyed here
+	vk::SurfaceKHR			   m_surface; ///< Borrowed from @ref veng::Context; not destroyed here.
 	std::uint32_t			   m_graphics_family{};
 	std::size_t				   m_frames_in_flight{};
 	vk::SwapchainKHR		   m_swapchain;
 	std::vector<vk::Image>	   m_images;
 	vk::Format				   m_format = vk::Format::eUndefined;
 	vk::Extent2D			   m_extent{};
-	std::vector<vk::Semaphore> m_image_available; // size == frames_in_flight
-	std::vector<vk::Semaphore> m_render_finished; // size == image count
-	std::vector<vk::Fence>	   m_in_flight;		  // size == frames_in_flight (created signaled)
+	std::vector<vk::Semaphore> m_image_available; ///< One per frame-in-flight slot.
+	std::vector<vk::Semaphore> m_render_finished; ///< One per swapchain image.
+	std::vector<vk::Fence>	   m_in_flight;		  ///< One per frame-in-flight slot; created signalled.
 };
 } // namespace veng
 

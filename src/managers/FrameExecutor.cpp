@@ -1,6 +1,9 @@
-//
-// See FrameExecutor.hpp.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::FrameExecutor.
+ * @ingroup managers
+ */
 
 #include <utility>
 #include <veng/gpu/GpuExecContext.hpp>

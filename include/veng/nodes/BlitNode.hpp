@@ -1,17 +1,20 @@
-//
-// Created by chris on 5/26/26.
-//
-// L4 node — a generic image blit (design.md §L4). Reads two image edges, `src` and
-// `dst` (both `ImageData` = `ValueData<ImageRef>`), and records a `vkCmdBlitImage` of
-// src -> dst, absorbing any size/format difference (linear filter). It knows nothing
-// about the swapchain: "present" is just a blit whose `dst` happens to be the acquired
-// swapchain image and whose `final_layout` is `ePresentSrcKHR`. Its output carries the
-// `dst` ref forward so the next consumer (e.g. PresentNode) is ordered after it and sees
-// the now-written image.
-//
-// `src` is expected in TRANSFER_SRC layout (the convention a raster node leaves its
-// target in); `dst` is overwritten in full, so its prior contents/layout are discarded.
-//
+/**
+ * @file
+ * @author chris
+ * @brief L4 graph node that blits one image into another via `vkCmdBlitImage`.
+ *
+ * Reads two image edges, `src` and `dst` (both `ImageData` = `ValueData<ImageRef>`), and
+ * records a `vkCmdBlitImage` of src -> dst, absorbing any size or format difference using a
+ * linear filter. The node knows nothing about the swapchain: "present" is simply a blit whose
+ * `dst` happens to be the acquired swapchain image and whose `final_layout` is
+ * `ePresentSrcKHR`. Its output carries the `dst` ref forward so the next consumer (e.g.
+ * @ref veng::nodes::PresentNode) is ordered after it and sees the now-written image.
+ *
+ * `src` is expected in `TRANSFER_SRC` layout (the convention a raster node leaves its target
+ * in); `dst` is overwritten in full, so its prior contents and layout are discarded.
+ *
+ * @ingroup graph_nodes
+ */
 
 #ifndef VENG_BLITNODE_HPP
 #define VENG_BLITNODE_HPP
@@ -28,20 +31,39 @@
 
 namespace veng::nodes
 {
+/**
+ * @brief Concrete @ref veng::gpu::GpuNode that records a `vkCmdBlitImage` each frame.
+ *
+ * @ingroup graph_nodes
+ * @see PresentNode
+ * @see ScreenshotNode
+ */
 class BlitNode final : public gpu::GpuNode
 {
 	 public:
-	/// `src`/`dst` are the source and destination `ImageData` edges; `output` carries the
-	/// written `dst` ref forward. `final_layout` is the layout `dst` is left in —
-	/// `ePresentSrcKHR` when the next step is presentation, or `eTransferSrcOptimal` for a
-	/// readback (the default; also the layout a blit-into-blit chain expects).
+	/**
+	 * @brief Construct a blit node.
+	 *
+	 * `src` and `dst` are the source and destination `ImageData` edges. `output` carries the
+	 * written `dst` ref forward to the next consumer. `final_layout` is the layout `dst` is
+	 * left in: use `ePresentSrcKHR` when the next step is presentation, or
+	 * `eTransferSrcOptimal` for a readback or a further blit (the default).
+	 *
+	 * @param src         Data handle for the source @ref veng::gpu::ImageRef edge.
+	 * @param dst         Data handle for the destination @ref veng::gpu::ImageRef edge.
+	 * @param output      Data handle into which the written `dst` ref is forwarded.
+	 * @param final_layout Layout to leave `dst` in after the blit completes.
+	 */
 	BlitNode(graph::DataHandle src, graph::DataHandle dst, graph::DataHandle output,
 			 vk::ImageLayout final_layout = vk::ImageLayout::eTransferSrcOptimal) noexcept;
 
 	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return m_inputs; }
 	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
 
-	/// How many times this node has actually recorded — the lens for the caching proof.
+	/**
+	 * @brief How many times this node has actually recorded — the lens for the caching proof.
+	 * @return The total number of `record` invocations.
+	 */
 	[[nodiscard]] std::size_t record_count() const noexcept { return m_record_count; }
 
 	 protected:
@@ -49,11 +71,11 @@ class BlitNode final : public gpu::GpuNode
 	std::vector<gpu::ImageUsage>						image_usages(graph::ExecContext& ctx) override;
 
 	 private:
-	std::array<graph::DataHandle, 2> m_inputs; // [src, dst]
+	std::array<graph::DataHandle, 2> m_inputs; ///< [src, dst]
 	graph::DataHandle				 m_output;
 	vk::ImageLayout					 m_final_layout;
 	std::size_t						 m_record_count = 0;
-	gpu::VersionedOutput			 m_versioned; // owns the per-produce version bump for the forwarded ImageRef
+	gpu::VersionedOutput m_versioned; ///< Owns the per-produce version bump for the forwarded @ref veng::gpu::ImageRef.
 };
 } // namespace veng::nodes
 

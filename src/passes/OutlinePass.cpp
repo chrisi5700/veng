@@ -1,6 +1,10 @@
-//
-// See veng/passes/OutlinePass.hpp.
-//
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::passes::OutlinePass — silhouette, horizontal blur, and ring nodes wired
+ *        into the reactive graph.
+ * @ingroup render_passes
+ */
 
 #include <memory>
 #include <utility>

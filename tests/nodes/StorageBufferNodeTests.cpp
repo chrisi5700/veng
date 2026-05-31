@@ -1,5 +1,5 @@
 //
-// L4 test (design.md §L4): the array counterpart to UniformNodeTests. A StorageBufferNode
+// L4 test: the array counterpart to UniformNodeTests. A StorageBufferNode
 // uploads a std::vector<T> into a pool-owned storage buffer and publishes a `gpu::BufferRef`
 // carrying its buffer handle, per-element stride, element count, and the reflected binding
 // name it fills. The unit test does not need a consuming GraphicsNode: it submits the upload

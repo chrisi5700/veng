@@ -1,18 +1,24 @@
-//
-// Created by chris on 5/30/26.
-//
-// L2 asset — a glTF 2.0 scene loader built on fastgltf (review.md items 6 + 7). It turns a
-// .gltf/.glb file into graph-ready data: each mesh primitive becomes a MeshNode (gpu::PbrVertex
-// geometry) added to the graph, each material's textures are decoded + uploaded as `Texture`s and
-// exposed as graph source edges, and the node hierarchy is flattened to a per-primitive world
-// matrix (a model-matrix source edge). The result wires directly into a `passes::PbrPass`:
-//   for (m : model.materials) pass.add_material({...m...});
-//   for (p : model.primitives) pass.add_object(p.mesh, p.model, p.material);
-//
-// Scope (review.md "static PBR mesh" acceptance): static geometry + materials + node transforms.
-// No skinning, animation, morph targets, cameras or lights. Tangents are read from the asset when
-// present and computed from UVs otherwise; normals are required. See findings.md for the cut edges.
-//
+/**
+ * @file
+ * @author chris
+ * @brief glTF 2.0 scene loader built on fastgltf, producing graph-ready data wired directly
+ *        into a PBR render pass.
+ *
+ * Each mesh primitive becomes a `MeshNode` (`gpu::PbrVertex` geometry) added to the graph;
+ * each material's textures are decoded and uploaded as @ref veng::assets::Texture objects and exposed as
+ * graph source edges; and the node hierarchy is flattened to a per-primitive world matrix
+ * (a model-matrix source edge). The result wires directly into a `passes::PbrPass`:
+ * @code
+ *   for (auto& m : model.materials) pass.add_material({...m...});
+ *   for (auto& p : model.primitives) pass.add_object(p.mesh, p.model, p.material);
+ * @endcode
+ *
+ * Scope: static geometry, materials, and node transforms. No skinning, animation, morph
+ * targets, cameras, or lights. Tangents are read from the asset when present and computed
+ * from UVs otherwise; normals are required.
+ *
+ * @ingroup assets
+ */
 
 #ifndef VENG_GLTFLOADER_HPP
 #define VENG_GLTFLOADER_HPP
@@ -34,17 +40,26 @@ class Context;
 
 namespace veng::assets
 {
+/**
+ * @brief Error codes returned by @ref veng::assets::load_gltf.
+ * @ingroup assets
+ */
 enum class GltfError : std::uint8_t
 {
-	FileUnreadable,	 // the file could not be opened / read
-	ParseFailed,	 // fastgltf rejected the document
-	NoGeometry,		 // the asset has no renderable triangle primitives
-	MissingPosition, // a primitive lacked the required POSITION attribute
-	MissingNormal,	 // a primitive lacked NORMAL (we do not synthesize normals)
-	TextureLoad,	 // an image failed to decode / upload
-	GpuUpload,		 // a mesh/texture GPU upload failed
+	FileUnreadable,	 ///< The file could not be opened or read.
+	ParseFailed,	 ///< fastgltf rejected the glTF/GLB document.
+	NoGeometry,		 ///< The asset has no renderable triangle primitives.
+	MissingPosition, ///< A primitive lacked the required `POSITION` attribute.
+	MissingNormal,	 ///< A primitive lacked `NORMAL` (normals are not synthesized).
+	TextureLoad,	 ///< An image failed to decode or upload.
+	GpuUpload,		 ///< A mesh or texture GPU upload failed.
 };
 
+/**
+ * @brief Stringify a @ref GltfError for logging and error reporting.
+ * @param error The error code to render.
+ * @return A human-readable description of the error.
+ */
 [[nodiscard]] constexpr std::string_view to_string(GltfError error) noexcept
 {
 	switch (error)
@@ -60,64 +75,100 @@ enum class GltfError : std::uint8_t
 	return "unknown glTF error";
 }
 
-/// glTF alpha mode (3.9.3). Mirrors `passes::AlphaMode` value-for-value; kept in the assets layer so
-/// the loader stays decoupled from the passes library (the caller maps one to the other).
+/**
+ * @brief glTF 2.0 alpha mode (spec §3.9.3).
+ *
+ * Mirrors `passes::AlphaMode` value-for-value; kept in the assets layer so the loader
+ * stays decoupled from the passes library. The caller maps one to the other when wiring
+ * materials into a pass.
+ *
+ * @ingroup assets
+ */
 enum class AlphaMode : std::uint8_t
 {
-	Opaque,
-	Mask,
-	Blend,
+	Opaque, ///< Fully opaque; alpha is ignored.
+	Mask,	///< Alpha-test: fragments below `alpha_cutoff` are discarded.
+	Blend,	///< Straight-alpha blending (src*srcA + dst*(1-srcA)).
 };
 
-/// A material resolved to graph texture-source edges + scalar factors. Maps one-to-one onto
-/// `passes::PbrMaterial`; missing glTF channels point at the model's shared default textures.
+/**
+ * @brief A glTF material resolved to graph texture-source edges and scalar factors.
+ *
+ * Maps one-to-one onto `passes::PbrMaterial`. Missing glTF texture channels point at
+ * the model's shared default textures (white/flat-normal/etc.) so every channel is
+ * always valid.
+ *
+ * @ingroup assets
+ */
 struct GltfMaterialDesc
 {
-	graph::DataHandle base_color;
-	graph::DataHandle normal;
-	graph::DataHandle metal_rough;
-	graph::DataHandle emissive;
-	graph::DataHandle occlusion;
+	graph::DataHandle base_color;  ///< Graph source edge for the base-color texture.
+	graph::DataHandle normal;	   ///< Graph source edge for the normal map.
+	graph::DataHandle metal_rough; ///< Graph source edge for the metallic-roughness texture.
+	graph::DataHandle emissive;	   ///< Graph source edge for the emissive texture.
+	graph::DataHandle occlusion;   ///< Graph source edge for the occlusion texture.
 
-	glm::vec4 base_color_factor	 = glm::vec4(1.0F);
-	float	  metallic_factor	 = 1.0F;
-	float	  roughness_factor	 = 1.0F;
-	float	  normal_scale		 = 1.0F;
-	float	  occlusion_strength = 1.0F;
-	glm::vec3 emissive_factor	 = glm::vec3(0.0F);
+	glm::vec4 base_color_factor	 = glm::vec4(1.0F); ///< Multiplied with the base-color texture sample.
+	float	  metallic_factor	 = 1.0F;			///< Metallic scale factor.
+	float	  roughness_factor	 = 1.0F;			///< Roughness scale factor.
+	float	  normal_scale		 = 1.0F;			///< Normal-map intensity scale.
+	float	  occlusion_strength = 1.0F;			///< Occlusion intensity scale.
+	glm::vec3 emissive_factor	 = glm::vec3(0.0F); ///< Emissive tint/strength multiplier.
 
-	AlphaMode alpha_mode   = AlphaMode::Opaque;
-	float	  alpha_cutoff = 0.5F;
+	AlphaMode alpha_mode   = AlphaMode::Opaque; ///< Alpha blending mode for this material.
+	float	  alpha_cutoff = 0.5F;				///< Discard threshold for `AlphaMode::Mask`.
 };
 
-/// One drawable primitive: a mesh edge (a MeshNode's output), a per-primitive world-matrix source
-/// edge, and an index into `GltfModel::materials`.
+/**
+ * @brief One drawable primitive: a mesh edge, a per-primitive world-matrix source edge,
+ *        and an index into @ref veng::assets::GltfModel::materials.
+ * @ingroup assets
+ */
 struct GltfPrimitive
 {
-	graph::DataHandle mesh;
-	graph::DataHandle model;
-	std::uint32_t	  material = 0;
+	graph::DataHandle mesh;			///< Output edge of the `MeshNode` holding this primitive's geometry.
+	graph::DataHandle model;		///< Source edge for the per-primitive world transform matrix.
+	std::uint32_t	  material = 0; ///< Index into `GltfModel::materials`.
 };
 
-/// The loaded model. Owns the GPU `Texture`s (keep it alive while anything renders the model — the
-/// material edges reference these textures' image handles). The meshes and model matrices live as
-/// nodes/sources the loader added to the graph.
+/**
+ * @brief The fully loaded model returned by @ref veng::assets::load_gltf.
+ *
+ * Owns all GPU @ref veng::assets::Texture objects — keep it alive as long as anything renders the
+ * model, because the material edges reference these textures' image handles. The meshes
+ * and model-matrix source nodes live in the graph and are valid as long as the graph is
+ * alive.
+ *
+ * @ingroup assets
+ */
 struct GltfModel
 {
-	std::vector<Texture>		  textures; // owns every uploaded texture incl. the shared defaults
-	std::vector<GltfMaterialDesc> materials;
-	std::vector<GltfPrimitive>	  primitives;
+	std::vector<Texture>		  textures;	  ///< Owns every uploaded texture including shared defaults.
+	std::vector<GltfMaterialDesc> materials;  ///< One entry per glTF material.
+	std::vector<GltfPrimitive>	  primitives; ///< One entry per renderable triangle primitive.
 
-	// World-space axis-aligned bounds of all geometry, for framing a camera on the model.
+	/// World-space axis-aligned bounding box of all geometry (for framing a camera).
 	glm::vec3 bounds_min = glm::vec3(0.0F);
+	/// @copydoc bounds_min
 	glm::vec3 bounds_max = glm::vec3(0.0F);
 
+	/** @brief Geometric centre of the world-space bounding box. */
 	[[nodiscard]] glm::vec3 center() const noexcept { return (bounds_min + bounds_max) * 0.5F; }
-	[[nodiscard]] float		radius() const noexcept { return glm::length(bounds_max - bounds_min) * 0.5F; }
+	/** @brief Half the diagonal length of the world-space bounding box. */
+	[[nodiscard]] float radius() const noexcept { return glm::length(bounds_max - bounds_min) * 0.5F; }
 };
 
-/// Load `path` (.gltf or .glb), uploading geometry + textures into `ctx` and adding the resulting
-/// MeshNodes / source edges to `graph`. The returned model is wired into a PbrPass by the caller.
+/**
+ * @brief Load a `.gltf` or `.glb` file, uploading geometry and textures to the GPU and
+ *        adding the resulting `MeshNode`s / source edges to `graph`.
+ *
+ * The returned @ref veng::assets::GltfModel is wired into a `passes::PbrPass` by the caller.
+ *
+ * @param ctx   The engine context providing the Vulkan device and allocator.
+ * @param graph The render graph to which mesh nodes and source edges are added.
+ * @param path  Filesystem path to the `.gltf` or `.glb` file.
+ * @return A fully loaded @ref veng::assets::GltfModel, or a @ref GltfError on failure.
+ */
 [[nodiscard]] std::expected<GltfModel, GltfError> load_gltf(const Context& ctx, graph::Graph& graph,
 															const std::string& path);
 } // namespace veng::assets

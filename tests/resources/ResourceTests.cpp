@@ -1,5 +1,5 @@
 //
-// L1 resource tests (design.md §L1). Allocates real Buffer/Image objects via VMA on a
+// L1 resource tests. Allocates real Buffer/Image objects via VMA on a
 // headless device and checks creation, accessors, and move-only RAII (no double-free,
 // verified under the llm-vcpkg ASan/UBSan gate).
 //

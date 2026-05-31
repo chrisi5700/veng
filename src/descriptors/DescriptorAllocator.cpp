@@ -1,8 +1,9 @@
-//
-// Created by chris on 5/25/26.
-//
-// See DescriptorAllocator.hpp and design.md §L2.2.
-//
+/**
+ * @file
+ * @author chris
+ * @brief @ref veng::DescriptorAllocator implementation.
+ * @ingroup descriptors
+ */
 
 #include <algorithm>
 #include <utility>

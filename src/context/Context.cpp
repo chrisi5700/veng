@@ -1,7 +1,10 @@
-//
-// Created by chris on 1/22/26.
-//
-// VulkanContext.cpp
+/**
+ * @file
+ * @author chris
+ * @brief Implementation of @ref veng::Context — instance, device, VMA allocator creation and
+ *        the @ref veng::Context::immediate_submit helper.
+ * @ingroup context
+ */
 
 #include <utility>
 #include <veng/context/Context.hpp>
@@ -221,12 +224,12 @@ std::expected<Context, ContextCreationError> Context::create(
 	vk::PhysicalDeviceFeatures features{};
 	features.tessellationShader = vk::True;
 	features.geometryShader		= vk::True;
-	features.samplerAnisotropy	= vk::True; // anisotropic filtering for sampled textures (review.md item 4)
+	features.samplerAnisotropy	= vk::True; // anisotropic filtering for sampled textures
 
 	vk::PhysicalDeviceVulkan11Features features11{};
 	features11.shaderDrawParameters = vk::True;
 
-	// Vulkan 1.3 core features the design mandates (design.md §L0): dynamic rendering
+	// Vulkan 1.3 core features the design mandates: dynamic rendering
 	// (pipelines built with formats instead of a VkRenderPass — required for
 	// GraphicsPipelineBuilder), synchronization2 (barrier helpers), and timeline
 	// semaphores (the GPU-side revision clock, §2.7/§5).
