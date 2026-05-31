@@ -38,6 +38,10 @@ benchmark_output/
 *.log
 *.tmp
 
+# Runtime log output — keep the directory, ignore its contents
+/logs/*
+!/logs/.gitkeep
+
 # Ignore CLion workspace logs and directories
 .idea/workspace.xml
 .idea/tasks.xml
