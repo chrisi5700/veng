@@ -1,6 +1,6 @@
 # veng
 
-[![CI](https://github.com/chrisi5700/veng/actions/workflows/ci.yml/badge.svg?branch=reactive-engine)](https://github.com/chrisi5700/veng/actions/workflows/ci.yml)
+[![CI](https://github.com/chrisi5700/veng/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/chrisi5700/veng/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![C++](https://img.shields.io/badge/C%2B%2B-23%2F26-blue.svg)
 ![Vulkan](https://img.shields.io/badge/Vulkan-1.3-red.svg)
@@ -137,10 +137,20 @@ ASAN_OPTIONS=detect_leaks=0 ctest --preset llm-vcpkg
 
 ## Continuous integration
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds the engine, runs the full
-test suite on **lavapipe** (software Vulkan — the runners have no GPU), and publishes an
-lcov coverage report as a build artifact plus a summary on each run. vcpkg dependencies
-are pinned and binary-cached for fast reruns.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the suite on **lavapipe**
+(software Vulkan — the runners have no GPU) across four lanes:
+
+| Lane | Compiler | Build | What it guards |
+|---|---|---|---|
+| **coverage** | GCC 14 | `ci-coverage` | full suite + lcov report (artifact + run summary) |
+| **asan+ubsan** | GCC 14 | `llm-vcpkg` | the safety gate: warnings-as-errors + Address/UB sanitizers |
+| **clang** | Clang 18 | `dev-vcpkg` (`-Werror`) | the suite compiles + passes under a second compiler |
+| **tsan** | GCC 14 | `tsan-vcpkg` | ThreadSanitizer over the Vulkan-free reactive core (the threaded scheduler) |
+
+TSan is scoped to the CPU-only core tests (`SchedulerTests`, `GraphTests`,
+`TemporalTests`) — running it over the GPU suite would only surface noise from the
+uninstrumented Mesa driver. vcpkg dependencies are pinned and binary-cached per compiler
+for fast reruns.
 
 ## Documentation
 
@@ -172,7 +182,6 @@ src/            Implementation, layered:
   passes/         L5  reusable effects (Phong, PBR, Outline, Picking, ClusteredLights)
   assets/         texture + glTF loaders
 tests/          Catch2 unit + integration tests (mirrors src/)
-bench/          Google Benchmark micro-benchmarks
 example/        Runnable demos
 shaders/        Slang shader sources (compiled at runtime)
 cmake/          Target helpers + compiler settings

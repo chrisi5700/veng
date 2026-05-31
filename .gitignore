@@ -51,9 +51,8 @@ benchmark_output/
 # Ignore VSCode if you use it alongside CLion
 .vscode/
 
-# Ignore Nix store links in your project directory (if using Nix)
-result/
-flake.lock
+# Build tree
 build
+
 # Fetched glTF sample models (see tests/assets/models.cmake)
 tests/assets/models/

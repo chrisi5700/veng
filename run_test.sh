@@ -47,7 +47,7 @@ ignore="--ignore-errors=mismatch,negative,unused,gcov,source,empty,inconsistent,
 echo "==> Capturing coverage"
 lcov --capture --directory "$build_dir" --output-file "$build_dir/coverage.info" $ignore
 lcov --remove "$build_dir/coverage.info" \
-	'*/vcpkg_installed/*' '/usr/*' '*/tests/*' '*/playground/*' '*/bench/*' \
+	'*/vcpkg_installed/*' '/usr/*' '*/tests/*' '*/bench/*' \
 	--output-file "$build_dir/coverage.filtered.info" $ignore
 lcov --list "$build_dir/coverage.filtered.info" $ignore
 genhtml "$build_dir/coverage.filtered.info" --output-directory "$build_dir/html" $ignore || true

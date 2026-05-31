@@ -15,10 +15,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test-coverage:
-    name: Build · Test · Coverage (Linux · lavapipe)
+  build-test:
+    name: ${{ matrix.label }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Canonical run: full suite on lavapipe + lcov coverage report.
+          - label: "Coverage (GCC · lavapipe)"
+            preset: ci-coverage
+            cc: gcc-14
+            cxx: g++-14
+            coverage: true
+          # The safety gate from CLAUDE.md/README, now enforced in CI.
+          - label: "ASan+UBSan (GCC · lavapipe)"
+            preset: llm-vcpkg
+            cc: gcc-14
+            cxx: g++-14
+            # The GPU driver/loader leak via libdbus at exit (see run_test.sh); UBSan
+            # aborts on the first error since llm-vcpkg sets -fno-sanitize-recover=all.
+            test_env: "ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1"
+          # Second compiler, warnings-as-errors. dev-vcpkg has no sanitizers; the -D
+          # override turns the warning gate on without editing the preset.
+          - label: "Clang -Werror (lavapipe)"
+            preset: dev-vcpkg
+            cc: clang-18
+            cxx: clang++-18
+            cmake_extra: "-D TREAT_WARNINGS_AS_ERRORS=ON"
+          # ThreadSanitizer over the Vulkan-free reactive core only (the threaded
+          # scheduler). core_only builds + runs just those test binaries directly.
+          - label: "TSan (reactive core)"
+            preset: tsan-vcpkg
+            cc: gcc-14
+            cxx: g++-14
+            core_only: true
+            test_env: "TSAN_OPTIONS=halt_on_error=1"
     env:
       # vcpkg is cloned at a pinned commit (the one veng is developed against) so CI
       # resolves the exact dependency versions that build locally.
@@ -30,10 +63,13 @@ jobs:
       SLANG_VERSION: "2026.10"
       SLANG_PREFIX: ${{ github.workspace }}/.slang
       DEBIAN_FRONTEND: noninteractive
+      # vcpkg builds ports with this compiler; CMake configure uses it for veng.
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system packages
         run: |
@@ -41,15 +77,14 @@ jobs:
           sudo apt-get update
           # Vulkan loader/headers + lavapipe (software ICD for headless test runs);
           # GLFW build dependencies (vcpkg builds glfw3 from source); lcov for coverage.
+          # Both toolchains are installed on every lane; the matrix's CC/CXX select one.
           sudo apt-get install -y --no-install-recommends \
             ninja-build pkg-config lcov ca-certificates curl tar \
-            gcc-14 g++-14 \
+            gcc-14 g++-14 clang-18 \
             libvulkan-dev vulkan-tools libvulkan1 mesa-vulkan-drivers \
             xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols libwayland-bin \
             libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev \
             autoconf automake libtool
-          echo "CC=gcc-14"  >> "$GITHUB_ENV"
-          echo "CXX=g++-14" >> "$GITHUB_ENV"
           # Pin the Vulkan loader to the lavapipe ICD so tests run on the software
           # rasterizer (GitHub runners have no GPU).
           lvp="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1 || true)"
@@ -85,13 +120,13 @@ jobs:
           echo "slang library dir: $(dirname "$lib")"
 
       - name: Cache vcpkg binary archives
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ matrix.cc }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
-            vcpkg-${{ runner.os }}-
+            vcpkg-${{ runner.os }}-${{ matrix.cc }}-${{ env.VCPKG_COMMIT }}-
+            vcpkg-${{ runner.os }}-${{ matrix.cc }}-
 
       - name: Set up vcpkg @ pinned commit
         run: |
@@ -105,24 +140,51 @@ jobs:
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
 
       - name: Configure
-        run: cmake --preset ci-coverage -D "slang_DIR=$slang_DIR"
+        run: cmake --preset ${{ matrix.preset }} -D "slang_DIR=$slang_DIR" ${{ matrix.cmake_extra }}
 
-      - name: Build
-        run: cmake --build --preset ci-coverage
+      # Full build for every lane except TSan, which only needs the Vulkan-free core
+      # test binaries (running TSan over the GPU suite just surfaces Mesa-driver noise).
+      - name: Build (full)
+        if: ${{ !matrix.core_only }}
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Build (reactive core)
+        if: ${{ matrix.core_only }}
+        run: cmake --build --preset ${{ matrix.preset }} --target SchedulerTests GraphTests TemporalTests
 
       - name: Test (lavapipe software Vulkan)
-        run: ctest --preset ci-coverage -j 2
+        if: ${{ !matrix.core_only }}
+        run: ${{ matrix.test_env }} ctest --test-dir build/${{ matrix.preset }} --output-on-failure -j 2
+
+      # TSan lane: run the core test binaries directly (ctest test names are per-CASE,
+      # so a name regex would be brittle — the executables are the stable handle).
+      - name: Test (reactive core under TSan)
+        if: ${{ matrix.core_only }}
+        run: |
+          set -euo pipefail
+          for t in SchedulerTests GraphTests TemporalTests; do
+            echo "::group::$t"
+            ${{ matrix.test_env }} "build/${{ matrix.preset }}/tests/$t"
+            echo "::endgroup::"
+          done
 
       - name: Coverage (lcov)
-        if: always()
+        if: ${{ matrix.coverage && always() }}
         run: |
           set -uo pipefail
-          bd=build/ci-coverage
+          bd=build/${{ matrix.preset }}
+          # The build uses g++-14, so lcov must read .gcda with the matching gcov — the
+          # runner's default `gcov` is gcc-13's and silently produces an empty report.
+          gcov_tool="${CC/gcc/gcov}"   # gcc-14 -> gcov-14
           # lcov 2.x is strict; tolerate the usual gcov/source mismatches (mirrors run_test.sh).
           ig="--ignore-errors=mismatch,negative,unused,gcov,source,empty,inconsistent,range"
-          lcov --capture --directory "$bd" --output-file "$bd/coverage.info" $ig || exit 0
+          if ! lcov --capture --directory "$bd" --gcov-tool "$gcov_tool" \
+               --output-file "$bd/coverage.info" $ig; then
+            echo "::warning::lcov capture failed; no coverage report produced"
+            exit 0
+          fi
           lcov --remove "$bd/coverage.info" \
-            '*/vcpkg_installed/*' '/usr/*' '*/tests/*' '*/playground/*' '*/bench/*' \
+            '*/vcpkg_installed/*' '/usr/*' '*/tests/*' '*/bench/*' \
             '*/example/*' "$SLANG_PREFIX/*" \
             --output-file "$bd/coverage.filtered.info" $ig
           lcov --list "$bd/coverage.filtered.info" $ig | tee "$bd/coverage.txt"
@@ -135,9 +197,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage report
-        if: always()
+        if: ${{ matrix.coverage && always() }}
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: |

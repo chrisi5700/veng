@@ -78,6 +78,17 @@
         "CMAKE_SHARED_LINKER_FLAGS": "--coverage",
         "VENG_BUILD_DOCS": "OFF"
       }
+    },
+    {
+      "name": "tsan-vcpkg",
+      "inherits": ["dev", "vcpkg"],
+      "description": "ThreadSanitizer build for the Vulkan-free reactive core (ThreadPoolScheduler). Used by the CI 'tsan' lane, which builds + runs only the CPU-only core tests (SchedulerTests, GraphTests, TemporalTests) — running TSan over the GPU suite only surfaces noise from the uninstrumented Mesa driver. TSan is mutually exclusive with ASan/UBSan, hence a separate preset from llm-vcpkg.",
+      "cacheVariables": {
+        "TREAT_WARNINGS_AS_ERRORS": "ON",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "VENG_BUILD_DOCS": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -109,6 +120,11 @@
     {
       "name": "ci-coverage",
       "configurePreset": "ci-coverage",
+      "jobs": 0
+    },
+    {
+      "name": "tsan-vcpkg",
+      "configurePreset": "tsan-vcpkg",
       "jobs": 0
     }
   ],

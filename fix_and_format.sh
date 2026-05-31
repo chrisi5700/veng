@@ -10,7 +10,10 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 echo "==> clang-format (in place)"
-find include src tests playground bench -type f \( -name '*.hpp' -o -name '*.cpp' \) -print0 |
+# Format whichever of these source trees exist (bench/ is added when benchmarks land).
+fmt_dirs=()
+for d in include src tests bench; do [ -d "$d" ] && fmt_dirs+=("$d"); done
+find "${fmt_dirs[@]}" -type f \( -name '*.hpp' -o -name '*.cpp' \) -print0 |
 	xargs -0 -r clang-format -i
 echo "    formatted."
 

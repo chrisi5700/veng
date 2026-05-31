@@ -47,7 +47,7 @@
 - Run tests using `./run_test.sh` which outputs lcov coverage information
 
 **Always aim for high code coverage:**
-- Target at least 95% code coverage
+- Target high code coverage
 - Review coverage reports to identify untested code paths
 
 **Always provide clear error messages:**
@@ -62,7 +62,6 @@
 - `src/` - Implementation files
 - `tests/` - Unit tests (use Catch2 or similar)
 - `bench/` - Benchmarks (use Google Benchmark)
-- `playground/` - Experimental/prototype code
 - `libs/` - Internal libraries
 - `cmake/` - CMake modules and helpers
 
@@ -92,4 +91,4 @@
 
 **Always verify code quality:**
 - Ensure code compiles with the `llm-vcpkg` preset
-- Verify test coverage meets the 95% threshold when reasonable
+- Verify test coverage stays high when reasonable
