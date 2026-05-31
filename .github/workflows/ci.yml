@@ -39,10 +39,12 @@ jobs:
             test_env: "ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1"
           # Second compiler, warnings-as-errors. dev-vcpkg has no sanitizers; the -D
           # override turns the warning gate on without editing the preset.
-          - label: "Clang -Werror (lavapipe)"
+          # Clang 19+ is required: clang-18's preliminary C++26 mode leaves libstdc++'s
+          # std::expected gated off (it doesn't advertise the C++23 library feature set).
+          - label: "Clang 19 -Werror (lavapipe)"
             preset: dev-vcpkg
-            cc: clang-18
-            cxx: clang++-18
+            cc: clang-19
+            cxx: clang++-19
             cmake_extra: "-D TREAT_WARNINGS_AS_ERRORS=ON"
           # ThreadSanitizer over the Vulkan-free reactive core only (the threaded
           # scheduler). core_only builds + runs just those test binaries directly.
@@ -80,7 +82,7 @@ jobs:
           # Both toolchains are installed on every lane; the matrix's CC/CXX select one.
           sudo apt-get install -y --no-install-recommends \
             ninja-build pkg-config lcov ca-certificates curl tar \
-            gcc-14 g++-14 clang-18 \
+            gcc-14 g++-14 clang-19 \
             libvulkan-dev vulkan-tools libvulkan1 mesa-vulkan-drivers \
             xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols libwayland-bin \
             libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev \
@@ -139,6 +141,16 @@ jobs:
           git -C "$VCPKG_ROOT" checkout --detach "$VCPKG_COMMIT"
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
 
+      # Records the std-library feature state this toolchain actually exposes at C++26.
+      # std::expected needs __cpp_lib_expected, gated on __cplusplus>=202100 && __cpp_concepts>=202002
+      # — if a build fails with "no template named 'expected'", these values explain why.
+      - name: Compiler feature check
+        continue-on-error: true
+        run: |
+          echo "CXX=$CXX"; "$CXX" --version | head -1
+          echo '#include <version>' | "$CXX" -std=gnu++26 -x c++ -dM -E - \
+            | grep -E '__cplusplus|__cpp_concepts|__cpp_lib_expected' | sort || true
+
       - name: Configure
         run: cmake --preset ${{ matrix.preset }} -D "slang_DIR=$slang_DIR" ${{ matrix.cmake_extra }}
 
@@ -177,7 +189,9 @@ jobs:
           # runner's default `gcov` is gcc-13's and silently produces an empty report.
           gcov_tool="${CC/gcc/gcov}"   # gcc-14 -> gcov-14
           # lcov 2.x is strict; tolerate the usual gcov/source mismatches (mirrors run_test.sh).
-          ig="--ignore-errors=mismatch,negative,unused,gcov,source,empty,inconsistent,range"
+          # NB: 'range' is intentionally omitted — the runner's lcov predates that
+          # ignore-category and errors out on it (it's fine in the newer local lcov).
+          ig="--ignore-errors=mismatch,negative,unused,gcov,source,empty,inconsistent"
           if ! lcov --capture --directory "$bd" --gcov-tool "$gcov_tool" \
                --output-file "$bd/coverage.info" $ig; then
             echo "::warning::lcov capture failed; no coverage report produced"

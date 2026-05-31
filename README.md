@@ -82,7 +82,8 @@ Each demo under [`example/`](example/) builds to its own executable:
 
 - **Linux** with a **Vulkan 1.3** driver (a discrete/integrated GPU, or
   [lavapipe](https://docs.mesa3d.org/drivers/llvmpipe.html) for software rendering)
-- A C++23/26 compiler — **GCC 14+** or **Clang 18+** (developed against GCC 16)
+- A C++23/26 compiler — **GCC 14+** or **Clang 19+** (developed against GCC 16). Clang
+  18 is too old: its preliminary C++26 mode leaves libstdc++'s `std::expected` gated off.
 - **CMake ≥ 3.28** (3.30+ recommended for C++26) and **Ninja**
 - **[vcpkg](https://github.com/microsoft/vcpkg)** — set `VCPKG_ROOT` to your checkout
 - **[Slang](https://github.com/shader-slang/slang)** — installed system-wide or via the
@@ -144,7 +145,7 @@ ASAN_OPTIONS=detect_leaks=0 ctest --preset llm-vcpkg
 |---|---|---|---|
 | **coverage** | GCC 14 | `ci-coverage` | full suite + lcov report (artifact + run summary) |
 | **asan+ubsan** | GCC 14 | `llm-vcpkg` | the safety gate: warnings-as-errors + Address/UB sanitizers |
-| **clang** | Clang 18 | `dev-vcpkg` (`-Werror`) | the suite compiles + passes under a second compiler |
+| **clang** | Clang 19 | `dev-vcpkg` (`-Werror`) | the suite compiles + passes under a second compiler |
 | **tsan** | GCC 14 | `tsan-vcpkg` | ThreadSanitizer over the Vulkan-free reactive core (the threaded scheduler) |
 
 TSan is scoped to the CPU-only core tests (`SchedulerTests`, `GraphTests`,
