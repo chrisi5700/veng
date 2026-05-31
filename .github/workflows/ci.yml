@@ -80,9 +80,11 @@ jobs:
           # Vulkan loader/headers + lavapipe (software ICD for headless test runs);
           # GLFW build dependencies (vcpkg builds glfw3 from source); lcov for coverage.
           # Both toolchains are installed on every lane; the matrix's CC/CXX select one.
+          # clang-tools-19 provides clang-scan-deps-19, which CMake needs for its C++20
+          # module dependency scan under Clang (GCC scans via the compiler itself).
           sudo apt-get install -y --no-install-recommends \
             ninja-build pkg-config lcov ca-certificates curl tar \
-            gcc-14 g++-14 clang-19 \
+            gcc-14 g++-14 clang-19 clang-tools-19 \
             libvulkan-dev vulkan-tools libvulkan1 mesa-vulkan-drivers \
             xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols libwayland-bin \
             libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev \
