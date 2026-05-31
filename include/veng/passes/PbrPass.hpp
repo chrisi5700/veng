@@ -183,7 +183,6 @@ class PbrPass
 	[[nodiscard]] graph::NodeHandle node() const noexcept { return m_node; }
 
 	 private:
-	graph::Graph*	  m_graph  = nullptr;
 	PbrRenderNode*	  m_render = nullptr; ///< Graph-owned; the pass holds a non-owning pointer.
 	graph::DataHandle m_output;
 	graph::NodeHandle m_node;
