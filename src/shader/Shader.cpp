@@ -370,7 +370,8 @@ std::vector<DescriptorInfo> extract_descriptors(slang::IComponentType* linked, v
 	for (unsigned i = 0; i < layout->getParameterCount(); i++)
 	{
 		auto extracted = extract_bindings(layout->getParameterByIndex(i), stage);
-		descriptors.append_range(std::move(extracted));
+		descriptors.insert(descriptors.end(), std::make_move_iterator(extracted.begin()),
+						   std::make_move_iterator(extracted.end()));
 	}
 
 	Logger::instance().debug("Extracted {} descriptor bindings", descriptors.size());
