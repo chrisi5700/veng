@@ -203,12 +203,20 @@ jobs:
             '*/vcpkg_installed/*' '/usr/*' '*/tests/*' '*/bench/*' \
             '*/example/*' "$SLANG_PREFIX/*" \
             --output-file "$bd/coverage.filtered.info" $ig
-          lcov --list "$bd/coverage.filtered.info" $ig | tee "$bd/coverage.txt"
-          genhtml "$bd/coverage.filtered.info" --output-directory "$bd/html" $ig || true
+          # The headline comes from `lcov --summary` — the global, de-duped count
+          # (identical to genhtml's). NOT from `lcov --list`: this lcov's --list
+          # double-counts header lines instrumented in every TU, producing impossible
+          # >100% per-file rates and a meaningless ~22% total for an ~88% codebase.
+          lcov --summary "$bd/coverage.filtered.info" $ig 2>&1 | tee "$bd/coverage.txt"
+          # genhtml accepts a narrower --ignore-errors set than lcov/geninfo (it has
+          # no 'gcov' category), so it needs its own minimal list or it hard-errors
+          # and silently produces no HTML.
+          genhtml "$bd/coverage.filtered.info" --output-directory "$bd/html" \
+            --ignore-errors source,unused,empty || true
           {
             echo "### Coverage (veng libraries)"
             echo '```'
-            tail -n 25 "$bd/coverage.txt"
+            cat "$bd/coverage.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

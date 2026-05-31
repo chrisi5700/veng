@@ -52,8 +52,6 @@ struct MeshVertex
 	glm::vec3 position;
 	glm::vec3 normal;
 	glm::vec3 color;
-
-	friend bool operator==(const MeshVertex&, const MeshVertex&) noexcept = default;
 };
 static_assert(sizeof(MeshVertex) == 36);
 

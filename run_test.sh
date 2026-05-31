@@ -49,7 +49,11 @@ lcov --capture --directory "$build_dir" --output-file "$build_dir/coverage.info"
 lcov --remove "$build_dir/coverage.info" \
 	'*/vcpkg_installed/*' '/usr/*' '*/tests/*' '*/bench/*' \
 	--output-file "$build_dir/coverage.filtered.info" $ignore
-lcov --list "$build_dir/coverage.filtered.info" $ignore
-genhtml "$build_dir/coverage.filtered.info" --output-directory "$build_dir/html" $ignore || true
+# Headline from --summary (global, de-duped). Avoid `lcov --list`: it double-counts
+# header lines instrumented across TUs and reports impossible >100% per-file rates.
+lcov --summary "$build_dir/coverage.filtered.info" $ignore
+# genhtml takes a narrower --ignore-errors set than lcov (no 'gcov'); give it its own.
+genhtml "$build_dir/coverage.filtered.info" --output-directory "$build_dir/html" \
+	--ignore-errors source,unused,empty || true
 
 echo "==> Coverage HTML: $build_dir/html/index.html"

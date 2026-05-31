@@ -21,21 +21,6 @@
 
 namespace example
 {
-namespace
-{
-bool plan_contains_present(const veng::graph::FramePlan& plan, veng::graph::NodeHandle present)
-{
-	for (const veng::graph::NodeHandle handle : plan.nodes())
-	{
-		if (handle == present)
-		{
-			return true;
-		}
-	}
-	return false;
-}
-} // namespace
-
 AppLoop::AppLoop(const AppConfig& config)
 	: m_config(config)
 	, m_window(config.title, config.width, config.height)
