@@ -67,6 +67,17 @@
         "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all",
         "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
       }
+    },
+    {
+      "name": "ci-coverage",
+      "inherits": ["dev", "vcpkg"],
+      "description": "CI preset: Debug + gcov coverage instrumentation, no sanitizers. Used by .github/workflows/ci.yml; the gcov flags mirror run_test.sh (-fprofile-update=atomic keeps the multi-threaded SchedulerTests' counters correct).",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "--coverage -fprofile-update=atomic",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage",
+        "CMAKE_SHARED_LINKER_FLAGS": "--coverage",
+        "VENG_BUILD_DOCS": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -94,6 +105,11 @@
       "name": "llm-vcpkg",
       "configurePreset": "llm-vcpkg",
       "jobs": 0
+    },
+    {
+      "name": "ci-coverage",
+      "configurePreset": "ci-coverage",
+      "jobs": 0
     }
   ],
   "testPresets": [
@@ -114,6 +130,13 @@
     {
       "name": "llm-vcpkg",
       "configurePreset": "llm-vcpkg",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-coverage",
+      "configurePreset": "ci-coverage",
       "output": {
         "outputOnFailure": true
       }

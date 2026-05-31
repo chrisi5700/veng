@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same ref cancels an in-flight run for it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-coverage:
+    name: Build · Test · Coverage (Linux · lavapipe)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      # vcpkg is cloned at a pinned commit (the one veng is developed against) so CI
+      # resolves the exact dependency versions that build locally.
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_COMMIT: 22d9c655dc24ad24c6cac27607005e619ce46740
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg
+      # Slang is not a vcpkg port; it is fetched from the Khronos release page. The
+      # glibc-2.27 build is the most portable across runner images.
+      SLANG_VERSION: "2026.10"
+      SLANG_PREFIX: ${{ github.workspace }}/.slang
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system packages
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # Vulkan loader/headers + lavapipe (software ICD for headless test runs);
+          # GLFW build dependencies (vcpkg builds glfw3 from source); lcov for coverage.
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config lcov ca-certificates curl tar \
+            gcc-14 g++-14 \
+            libvulkan-dev vulkan-tools libvulkan1 mesa-vulkan-drivers \
+            xorg-dev libxkbcommon-dev libwayland-dev wayland-protocols libwayland-bin \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev \
+            autoconf automake libtool
+          echo "CC=gcc-14"  >> "$GITHUB_ENV"
+          echo "CXX=g++-14" >> "$GITHUB_ENV"
+          # Pin the Vulkan loader to the lavapipe ICD so tests run on the software
+          # rasterizer (GitHub runners have no GPU).
+          lvp="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -1 || true)"
+          if [ -n "$lvp" ]; then
+            echo "VK_ICD_FILENAMES=$lvp" >> "$GITHUB_ENV"
+            echo "VK_DRIVER_FILES=$lvp"  >> "$GITHUB_ENV"
+            echo "lavapipe ICD: $lvp"
+          else
+            echo "::warning::lavapipe ICD not found under /usr/share/vulkan/icd.d"
+          fi
+
+      - name: Install CMake + Ninja (recent)
+        uses: lukka/get-cmake@latest
+
+      - name: Install Slang ${{ env.SLANG_VERSION }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$SLANG_PREFIX"
+          url="https://github.com/shader-slang/slang/releases/download/v${SLANG_VERSION}/slang-${SLANG_VERSION}-linux-x86_64-glibc-2.27.tar.gz"
+          echo "Downloading $url"
+          curl -fsSL --retry 3 "$url" -o /tmp/slang.tar.gz
+          tar -xzf /tmp/slang.tar.gz -C "$SLANG_PREFIX"
+          cfg="$(find "$SLANG_PREFIX" \( -name 'slangConfig.cmake' -o -name 'slang-config.cmake' \) | head -1)"
+          lib="$(find "$SLANG_PREFIX" -name 'libslang.so*' | head -1)"
+          if [ -z "$cfg" ] || [ -z "$lib" ]; then
+            echo "::error::slang cmake config or libslang.so not found after extraction"
+            find "$SLANG_PREFIX" -maxdepth 3 | head -60
+            exit 1
+          fi
+          echo "slang_DIR=$(dirname "$cfg")"                  >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$(dirname "$lib"):${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "slang config dir: $(dirname "$cfg")"
+          echo "slang library dir: $(dirname "$lib")"
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ env.VCPKG_COMMIT }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Set up vcpkg @ pinned commit
+        run: |
+          set -euo pipefail
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          if [ ! -d "$VCPKG_ROOT/.git" ]; then
+            git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT"
+          fi
+          git -C "$VCPKG_ROOT" fetch --depth 1 origin "$VCPKG_COMMIT"
+          git -C "$VCPKG_ROOT" checkout --detach "$VCPKG_COMMIT"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Configure
+        run: cmake --preset ci-coverage -D "slang_DIR=$slang_DIR"
+
+      - name: Build
+        run: cmake --build --preset ci-coverage
+
+      - name: Test (lavapipe software Vulkan)
+        run: ctest --preset ci-coverage -j 2
+
+      - name: Coverage (lcov)
+        if: always()
+        run: |
+          set -uo pipefail
+          bd=build/ci-coverage
+          # lcov 2.x is strict; tolerate the usual gcov/source mismatches (mirrors run_test.sh).
+          ig="--ignore-errors=mismatch,negative,unused,gcov,source,empty,inconsistent,range"
+          lcov --capture --directory "$bd" --output-file "$bd/coverage.info" $ig || exit 0
+          lcov --remove "$bd/coverage.info" \
+            '*/vcpkg_installed/*' '/usr/*' '*/tests/*' '*/playground/*' '*/bench/*' \
+            '*/example/*' "$SLANG_PREFIX/*" \
+            --output-file "$bd/coverage.filtered.info" $ig
+          lcov --list "$bd/coverage.filtered.info" $ig | tee "$bd/coverage.txt"
+          genhtml "$bd/coverage.filtered.info" --output-directory "$bd/html" $ig || true
+          {
+            echo "### Coverage (veng libraries)"
+            echo '```'
+            tail -n 25 "$bd/coverage.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            build/ci-coverage/coverage.filtered.info
+            build/ci-coverage/coverage.txt
+            build/ci-coverage/html
+          if-no-files-found: warn
