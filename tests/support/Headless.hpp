@@ -55,7 +55,7 @@ inline Context headless_context(std::string_view title = "Headless Surface Test"
 			}
 			const VkHeadlessSurfaceCreateInfoEXT info{
 				.sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT, .pNext = nullptr, .flags = 0};
-			VkSurfaceKHR						 surface = VK_NULL_HANDLE;
+			VkSurfaceKHR surface = VK_NULL_HANDLE;
 			(void)VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateHeadlessSurfaceEXT(instance, &info, nullptr, &surface);
 			return surface;
 		});

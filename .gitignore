@@ -56,3 +56,9 @@ build
 
 # Fetched glTF sample models (see tests/assets/models.cmake)
 tests/assets/models/
+
+# Fetched CC0 steel PBR texture set for the stl_viewer example (see example/stl_viewer/steel.cmake)
+example/stl_viewer/assets/
+
+# Local scratchpad / backlog notes (not pushed)
+notes.md
