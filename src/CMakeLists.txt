@@ -108,7 +108,7 @@ find_package(Stb REQUIRED)
 find_package(fastgltf CONFIG REQUIRED)
 find_package(meshoptimizer CONFIG REQUIRED)
 target_add_library(veng_assets)
-target_sources(veng_assets PRIVATE assets/Texture.cpp assets/StbImpl.cpp assets/GltfLoader.cpp assets/StlLoader.cpp assets/MeshProcessing.cpp)
+target_sources(veng_assets PRIVATE assets/Texture.cpp assets/StbImpl.cpp assets/GltfLoader.cpp assets/StlLoader.cpp assets/MeshProcessing.cpp assets/MeshData.cpp)
 # meshoptimizer (decimation) is an implementation detail of the loaders — PRIVATE so it never leaks
 # into a public header, exactly like fastgltf.
 target_link_libraries(veng_assets PUBLIC veng_resources veng_managers veng_nodes glm::glm PRIVATE fastgltf::fastgltf meshoptimizer::meshoptimizer)

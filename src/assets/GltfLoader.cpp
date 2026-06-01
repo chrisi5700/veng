@@ -22,13 +22,12 @@
 #include <variant>
 #include <vector>
 #include <veng/assets/GltfLoader.hpp>
+#include <veng/assets/MeshData.hpp>
 #include <veng/context/Context.hpp>
 #include <veng/gpu/MeshRef.hpp>
 #include <veng/gpu/Vertex.hpp>
 #include <veng/nodes/MeshNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
-
-#include "MeshProcessing.hpp"
 
 namespace veng::assets
 {
@@ -82,57 +81,6 @@ std::span<const std::byte> image_bytes(const fastgltf::Asset& asset, const fastg
 	}
 	return inline_bytes(image.data);
 }
-
-// Per-vertex tangents (xyz + handedness) from positions, normals and UVs — used when a primitive
-// has a normal map but no TANGENT attribute. A simple accumulate-then-orthonormalize (not
-// mikktspace). Returns default +X tangents when there are no usable UVs.
-std::vector<glm::vec4> compute_tangents(const std::vector<glm::vec3>& positions, const std::vector<glm::vec3>& normals,
-										const std::vector<glm::vec2>& uvs, const std::vector<std::uint32_t>& indices)
-{
-	std::vector<glm::vec3> tan(positions.size(), glm::vec3(0.0F));
-	std::vector<glm::vec3> bitan(positions.size(), glm::vec3(0.0F));
-	for (std::size_t i = 0; i + 2 < indices.size(); i += 3)
-	{
-		const std::uint32_t i0	= indices[i];
-		const std::uint32_t i1	= indices[i + 1];
-		const std::uint32_t i2	= indices[i + 2];
-		const glm::vec3		e1	= positions[i1] - positions[i0];
-		const glm::vec3		e2	= positions[i2] - positions[i0];
-		const glm::vec2		d1	= uvs[i1] - uvs[i0];
-		const glm::vec2		d2	= uvs[i2] - uvs[i0];
-		const float			det = (d1.x * d2.y) - (d2.x * d1.y);
-		const float			f	= std::abs(det) < 1e-8F ? 0.0F : 1.0F / det;
-		const glm::vec3		t	= f * ((d2.y * e1) - (d1.y * e2));
-		const glm::vec3		b	= f * ((d1.x * e2) - (d2.x * e1));
-		for (const std::uint32_t idx : {i0, i1, i2})
-		{
-			tan[idx] += t;
-			bitan[idx] += b;
-		}
-	}
-
-	std::vector<glm::vec4> result(positions.size());
-	for (std::size_t v = 0; v < positions.size(); ++v)
-	{
-		const glm::vec3 n = normals[v];
-		glm::vec3		t = tan[v] - (n * glm::dot(n, tan[v])); // Gram-Schmidt
-		if (glm::dot(t, t) < 1e-12F)
-		{
-			// Degenerate (no UV gradient): pick any axis perpendicular to the normal.
-			t = std::abs(n.x) < 0.9F ? glm::cross(n, glm::vec3(1, 0, 0)) : glm::cross(n, glm::vec3(0, 1, 0));
-		}
-		t					   = glm::normalize(t);
-		const float handedness = (glm::dot(glm::cross(n, t), bitan[v]) < 0.0F) ? -1.0F : 1.0F;
-		result[v]			   = glm::vec4(t, handedness);
-	}
-	return result;
-}
-
-struct Geometry
-{
-	std::vector<veng::gpu::PbrVertex> vertices;
-	std::vector<std::uint32_t>		  indices;
-};
 
 // State for one load: caches uploaded textures by (image, colour space) and owns the in-progress model.
 class Loader
@@ -342,12 +290,12 @@ class Loader
 				prim.materialIndex.has_value() ? static_cast<std::uint32_t>(*prim.materialIndex) : m_default_material;
 
 			// Normal mode emits one mesh per primitive; LOD mode (m_lods set) emits a decimated chain.
+			// Both run the shared pipeline; glTF's authored normals/UVs are carried through and preserved.
 			if (m_lods.empty())
 			{
-				m_model.primitives.push_back(
-					GltfPrimitive{.mesh		= make_mesh_node(geometry->vertices, geometry->indices),
-								  .model	= model_handle,
-								  .material = material});
+				const ProcessedMesh mesh = process(*geometry, m_process_opts);
+				m_model.primitives.push_back(GltfPrimitive{
+					.mesh = make_mesh_node(mesh.vertices, mesh.indices), .model = model_handle, .material = material});
 			}
 			else
 			{
@@ -355,9 +303,9 @@ class Loader
 					GltfLodPrimitive{.lods = build_lods(*geometry), .model = model_handle, .material = material});
 			}
 
-			for (const veng::gpu::PbrVertex& vertex : geometry->vertices)
+			for (const glm::vec3& position : geometry->positions)
 			{
-				const glm::vec3 world_pos = glm::vec3(world * glm::vec4(vertex.position, 1.0F));
+				const glm::vec3 world_pos = glm::vec3(world * glm::vec4(position, 1.0F));
 				m_bounds_min			  = m_has_bounds ? glm::min(m_bounds_min, world_pos) : world_pos;
 				m_bounds_max			  = m_has_bounds ? glm::max(m_bounds_max, world_pos) : world_pos;
 				m_has_bounds			  = true;
@@ -378,41 +326,18 @@ class Loader
 		return mesh_handle;
 	}
 
-	// Decimate one primitive into the configured LOD chain. Decimation is attribute-aware (authored
-	// normals + UVs feed the metric); surviving vertices keep their exact attributes, so the texturing
-	// is identical across levels. A full-detail level (ratio ≥ 1) uploads the geometry unchanged.
-	std::vector<graph::DataHandle> build_lods(const Geometry& geometry)
+	// Decimate one primitive into the configured LOD chain via the shared pipeline: prepare once, then
+	// finalise per level. Decimation is attribute-aware (authored normals + UVs feed the metric) and
+	// surviving vertices keep their exact attributes, so texturing is identical across levels.
+	std::vector<graph::DataHandle> build_lods(const MeshData& data)
 	{
-		std::vector<glm::vec3> positions;
-		std::vector<glm::vec3> normals;
-		std::vector<glm::vec2> uvs;
-		positions.reserve(geometry.vertices.size());
-		normals.reserve(geometry.vertices.size());
-		uvs.reserve(geometry.vertices.size());
-		for (const veng::gpu::PbrVertex& vertex : geometry.vertices)
-		{
-			positions.push_back(vertex.position);
-			normals.push_back(vertex.normal);
-			uvs.push_back(vertex.uv);
-		}
-
+		const PreparedMesh			   prep = prepare(data, m_process_opts);
 		std::vector<graph::DataHandle> result;
 		result.reserve(m_lods.size());
 		for (const LodLevel& level : m_lods)
 		{
-			if (level.target_ratio >= 1.0F)
-			{
-				result.push_back(make_mesh_node(geometry.vertices, geometry.indices));
-				continue;
-			}
-			const detail::DecimateResult dec = detail::decimate(
-				positions, normals, geometry.indices,
-				detail::DecimateOptions{
-					.target_ratio = level.target_ratio, .max_error = level.max_error, .aggressive = level.aggressive},
-				uvs);
-			const std::vector<veng::gpu::PbrVertex> slim =
-				detail::apply_vertex_remap(geometry.vertices, dec.remap, dec.vertex_count);
-			result.push_back(make_mesh_node(slim, dec.indices));
+			const ProcessedMesh mesh = finalize(prep, level, m_process_opts);
+			result.push_back(make_mesh_node(mesh.vertices, mesh.indices));
 		}
 		return result;
 	}
@@ -462,7 +387,9 @@ class Loader
 	}
 
 	 private:
-	std::expected<Geometry, GltfError> build_geometry(const fastgltf::Primitive& prim)
+	// Parse one primitive into a MeshData. UVs and tangents are left empty when the asset omits them,
+	// so the shared pipeline synthesises them (box UVs / computed tangents) rather than this loader.
+	std::expected<MeshData, GltfError> build_geometry(const fastgltf::Primitive& prim)
 	{
 		const auto* position = prim.findAttribute("POSITION");
 		if (position == prim.attributes.cend())
@@ -475,75 +402,58 @@ class Loader
 			return std::unexpected(GltfError::MissingNormal);
 		}
 
-		std::vector<glm::vec3> positions;
+		MeshData data;
 		fastgltf::iterateAccessor<glm::vec3>(*m_asset, m_asset->accessors[position->accessorIndex],
-											 [&](glm::vec3 v) { positions.push_back(v); });
-		std::vector<glm::vec3> normals;
+											 [&](glm::vec3 v) { data.positions.push_back(v); });
 		fastgltf::iterateAccessor<glm::vec3>(*m_asset, m_asset->accessors[normal_attr->accessorIndex],
-											 [&](glm::vec3 v) { normals.push_back(v); });
-		if (positions.empty() || normals.size() != positions.size())
+											 [&](glm::vec3 v) { data.normals.push_back(v); });
+		if (data.positions.empty() || data.normals.size() != data.positions.size())
 		{
 			return std::unexpected(GltfError::MissingNormal);
 		}
 
-		std::vector<glm::vec2> uvs(positions.size(), glm::vec2(0.0F));
-		bool				   has_uv = false;
 		if (const auto* uv = prim.findAttribute("TEXCOORD_0"); uv != prim.attributes.cend())
 		{
-			has_uv		   = true;
+			data.uvs.resize(data.positions.size());
 			std::size_t at = 0;
 			fastgltf::iterateAccessor<glm::vec2>(*m_asset, m_asset->accessors[uv->accessorIndex],
 												 [&](glm::vec2 v)
 												 {
-													 if (at < uvs.size())
+													 if (at < data.uvs.size())
 													 {
-														 uvs[at++] = v;
+														 data.uvs[at++] = v;
 													 }
 												 });
 		}
 
-		std::vector<std::uint32_t> indices;
 		if (prim.indicesAccessor.has_value())
 		{
 			fastgltf::iterateAccessor<std::uint32_t>(*m_asset, m_asset->accessors[*prim.indicesAccessor],
-													 [&](std::uint32_t i) { indices.push_back(i); });
+													 [&](std::uint32_t i) { data.indices.push_back(i); });
 		}
 		else
 		{
-			indices.resize(positions.size());
-			for (std::uint32_t i = 0; i < positions.size(); ++i)
+			data.indices.resize(data.positions.size());
+			for (std::uint32_t i = 0; i < data.positions.size(); ++i)
 			{
-				indices[i] = i;
+				data.indices[i] = i;
 			}
 		}
 
-		std::vector<glm::vec4> tangents(positions.size(), glm::vec4(1.0F, 0.0F, 0.0F, 1.0F));
 		if (const auto* tan = prim.findAttribute("TANGENT"); tan != prim.attributes.cend())
 		{
+			data.tangents.resize(data.positions.size(), glm::vec4(1.0F, 0.0F, 0.0F, 1.0F));
 			std::size_t at = 0;
 			fastgltf::iterateAccessor<glm::vec4>(*m_asset, m_asset->accessors[tan->accessorIndex],
 												 [&](glm::vec4 v)
 												 {
-													 if (at < tangents.size())
+													 if (at < data.tangents.size())
 													 {
-														 tangents[at++] = v;
+														 data.tangents[at++] = v;
 													 }
 												 });
 		}
-		else if (has_uv)
-		{
-			tangents = compute_tangents(positions, normals, uvs, indices);
-		}
-
-		Geometry geometry;
-		geometry.vertices.reserve(positions.size());
-		for (std::size_t v = 0; v < positions.size(); ++v)
-		{
-			geometry.vertices.push_back(veng::gpu::PbrVertex{
-				.position = positions[v], .normal = normals[v], .tangent = tangents[v], .uv = uvs[v]});
-		}
-		geometry.indices = std::move(indices);
-		return geometry;
+		return data;
 	}
 
 	const Context*													m_ctx;
@@ -559,9 +469,10 @@ class Loader
 	glm::vec3														m_bounds_max{0.0F};
 	bool															m_has_bounds = false;
 
-	std::vector<LodLevel>	  m_lod_storage; ///< Owns the levels for LOD mode (run_lods).
-	std::span<const LodLevel> m_lods{};		 ///< Non-empty ⇒ LOD mode (add_mesh emits chains).
-	GltfLodModel			  m_lod_model;	 ///< Assembled by run_lods.
+	ProcessOptions			  m_process_opts{}; ///< Geometry pipeline options (authored attrs are preserved).
+	std::vector<LodLevel>	  m_lod_storage;	///< Owns the levels for LOD mode (run_lods).
+	std::span<const LodLevel> m_lods{};			///< Non-empty ⇒ LOD mode (add_mesh emits chains).
+	GltfLodModel			  m_lod_model;		///< Assembled by run_lods.
 };
 } // namespace
 
