@@ -28,6 +28,8 @@
 #include <veng/nodes/MeshNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 
+#include "MeshProcessing.hpp"
+
 namespace veng::assets
 {
 namespace
@@ -245,17 +247,11 @@ BuiltMesh build(const std::vector<Triangle>& tris, const StlOptions& opts)
 						.z = static_cast<std::int64_t>(std::llround(p.z / quant))};
 	};
 
-	struct Face
-	{
-		std::array<std::uint32_t, 3> pos;	 ///< welded position index per corner
-		glm::vec3					 normal; ///< geometric face normal
-		float						 area;	 ///< triangle area (normal weight)
-	};
-	std::vector<Face> faces;
-	faces.reserve(tris.size());
+	std::vector<detail::Face> raw_faces;
+	raw_faces.reserve(tris.size());
 	for (const Triangle& tri : tris)
 	{
-		std::array<std::uint32_t, 3> idx{};
+		detail::Face idx{};
 		for (int c = 0; c < 3; ++c)
 		{
 			const QuantKey key		  = to_key(tri.p[static_cast<std::size_t>(c)]);
@@ -266,11 +262,33 @@ BuiltMesh build(const std::vector<Triangle>& tris, const StlOptions& opts)
 			}
 			idx[static_cast<std::size_t>(c)] = it->second;
 		}
-		const glm::vec3 cross = glm::cross(tri.p[1] - tri.p[0], tri.p[2] - tri.p[0]);
+		raw_faces.push_back(idx);
+	}
+
+	// 2b) Automatic repair: drop duplicate/degenerate triangles, unify winding, orient outward — so
+	//     the face normals below are trustworthy (and the caller can backface-cull). Runs in place.
+	if (opts.repair)
+	{
+		[[maybe_unused]] const detail::RepairStats stats = detail::repair_orientation(positions, raw_faces);
+	}
+
+	// 2c) Per-face normal + area from the (repaired) winding. Geometric slivers contribute no normal.
+	struct Face
+	{
+		std::array<std::uint32_t, 3> pos;	 ///< welded position index per corner
+		glm::vec3					 normal; ///< geometric face normal
+		float						 area;	 ///< triangle area (normal weight)
+	};
+	std::vector<Face> faces;
+	faces.reserve(raw_faces.size());
+	for (const detail::Face& idx : raw_faces)
+	{
+		const glm::vec3 p0	  = positions[idx[0]];
+		const glm::vec3 cross = glm::cross(positions[idx[1]] - p0, positions[idx[2]] - p0);
 		const float		len	  = glm::length(cross);
 		if (len < 1e-12F)
 		{
-			continue; // degenerate sliver: contributes no normal and no triangle
+			continue;
 		}
 		faces.push_back(Face{.pos = idx, .normal = cross / len, .area = 0.5F * len});
 	}
@@ -344,11 +362,15 @@ BuiltMesh build(const std::vector<Triangle>& tris, const StlOptions& opts)
 		indices.push_back(tri[2]);
 	}
 
-	// 7) Box UVs + tangents.
+	// 7) Box UVs + tangents. UV density is resolved here so it stays unit-agnostic: an absolute
+	//    world-units-per-tile if the caller set one, otherwise `texture_tiles` repeats across the
+	//    mesh's longest extent (so the result is sane whatever units the file used).
+	const float uv_scale =
+		opts.world_units_per_tile > 0.0F ? 1.0F / opts.world_units_per_tile : opts.texture_tiles / max_extent;
 	std::vector<glm::vec2> uvs(out_pos.size());
 	for (std::size_t v = 0; v < out_pos.size(); ++v)
 	{
-		uvs[v] = box_uv(out_pos[v], out_nrm[v], opts.uv_scale);
+		uvs[v] = box_uv(out_pos[v], out_nrm[v], uv_scale);
 	}
 	const std::vector<glm::vec4> tangents = compute_tangents(out_pos, out_nrm, uvs, indices);
 

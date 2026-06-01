@@ -1,0 +1,52 @@
+/**
+ * @file
+ * @author chris
+ * @brief Internal, format-agnostic mesh-repair helpers shared by the asset loaders.
+ *
+ * Not a public header — this lives under `src/` so the repair logic stays an implementation detail
+ * of `veng_assets` (the loaders expose only engine types, never these). Operates on welded position
+ * indices so any loader (STL today; OBJ/PLY/3MF later) can route its raw triangles through the same
+ * cleanup before attribute synthesis. Kept here (rather than in an anonymous namespace) purely so it
+ * can be unit-tested directly.
+ *
+ * @ingroup assets
+ */
+
+#ifndef VENG_ASSETS_MESHPROCESSING_HPP
+#define VENG_ASSETS_MESHPROCESSING_HPP
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <glm/glm.hpp>
+#include <vector>
+
+namespace veng::assets::detail
+{
+/// A triangle as three indices into a shared welded-position array.
+using Face = std::array<std::uint32_t, 3>;
+
+/// What @ref repair_orientation changed, for logging / tests.
+struct RepairStats
+{
+	std::size_t duplicate_faces_removed = 0; ///< Exact-duplicate or topologically-degenerate triangles dropped.
+	std::size_t faces_reoriented		= 0; ///< Triangles whose winding was flipped to make the mesh consistent.
+};
+
+/**
+ * @brief Clean a welded triangle set in place: drop duplicate/degenerate faces, make winding
+ *        consistent within each connected component, and orient each closed shell outward.
+ *
+ * Winding is unified by flooding a consistent orientation across shared edges; each component is
+ * then flipped as a whole if its signed volume is negative (i.e. it faced inward). This is what lets
+ * a downstream pass trust face normals and use backface culling. Open or non-manifold input is
+ * handled best-effort — the function never throws and leaves ambiguous cases as flooded.
+ *
+ * @param positions Welded vertex positions the face indices reference.
+ * @param faces     Triangle index triples; reordered in place (winding may be flipped, duplicates removed).
+ * @return Counts of what was changed.
+ */
+RepairStats repair_orientation(const std::vector<glm::vec3>& positions, std::vector<Face>& faces);
+} // namespace veng::assets::detail
+
+#endif // VENG_ASSETS_MESHPROCESSING_HPP

@@ -107,7 +107,7 @@ target_link_libraries(veng_passes PUBLIC veng_nodes veng_culling glm::glm)
 find_package(Stb REQUIRED)
 find_package(fastgltf CONFIG REQUIRED)
 target_add_library(veng_assets)
-target_sources(veng_assets PRIVATE assets/Texture.cpp assets/StbImpl.cpp assets/GltfLoader.cpp assets/StlLoader.cpp)
+target_sources(veng_assets PRIVATE assets/Texture.cpp assets/StbImpl.cpp assets/GltfLoader.cpp assets/StlLoader.cpp assets/MeshProcessing.cpp)
 target_link_libraries(veng_assets PUBLIC veng_resources veng_managers veng_nodes glm::glm PRIVATE fastgltf::fastgltf)
 target_include_directories(veng_assets PRIVATE ${Stb_INCLUDE_DIR})
 # stb_image is third-party and not -Wall/-Werror clean; silence warnings for its one impl TU.

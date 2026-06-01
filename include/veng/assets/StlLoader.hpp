@@ -69,15 +69,26 @@ enum class StlError : std::uint8_t
  */
 struct StlOptions
 {
-	/// Texture-coordinate density: UV units per world unit for the box projection. Larger ⇒ the
-	/// material tiles more often across the surface (finer apparent detail). Tune to the mesh's
-	/// units — e.g. ~0.15 reads well on a part measured in millimetres.
-	float uv_scale = 0.15F;
+	/// Texture density, unit-agnostic by default: the material tiles this many times across the
+	/// mesh's longest bounding-box dimension. Because it scales to the mesh's own size, it gives
+	/// sane texturing whatever units the file was authored in (mm, m, inches) — the loader never
+	/// assumes a unit. Larger ⇒ more repeats / finer apparent features.
+	float texture_tiles = 1.5F;
+
+	/// Absolute density override: real-world surface units per texture tile. When > 0 this takes
+	/// precedence over @ref texture_tiles — set it when you *know* the mesh's units and want a fixed
+	/// texel density (e.g. 20.0 ⇒ one tile every 20 units). 0 keeps the bounds-relative behaviour.
+	float world_units_per_tile = 0.0F;
 
 	/// Crease threshold in degrees. Adjacent faces whose normals differ by less than this are
 	/// smoothed together; sharper transitions become hard edges. ~40° keeps machined edges crisp
 	/// while smoothing curved/threaded surfaces.
 	float crease_angle_deg = 40.0F;
+
+	/// Run the automatic mesh-repair pass on load: drop duplicate/degenerate triangles, unify
+	/// winding across the mesh, and orient each closed shell outward (so normals are trustworthy and
+	/// backface culling works). On by default; disable only to inspect a file's raw topology.
+	bool repair = true;
 };
 
 /**

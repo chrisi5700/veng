@@ -17,12 +17,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <string>
-#include <vector>
-
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
+#include <string>
+#include <vector>
 #include <veng/assets/StlLoader.hpp>
 #include <veng/assets/Texture.hpp>
 #include <veng/culling/Clusters.hpp>
@@ -63,15 +61,14 @@ int main(int argc, char** argv)
 	veng::Context&		ctx	  = app.context();
 
 	const std::string mesh_path = argc > 1 ? std::string(argv[1]) : std::string(VENG_STL_MESH);
-	// uv_scale is UV units per model unit; 1/uv_scale is the real-world size one texture tile covers.
-	// The screw is ~25 mm long, so 0.06 ⇒ a tile every ~16.7 mm (~1.5 repeats along the shaft): the
-	// brushed-steel scan reads near its native feature size instead of collapsing into high-frequency
-	// noise from over-tiling. (Metal032 has no physical size recorded upstream, so this is eyeballed.)
-	auto loaded = veng::assets::load_stl(graph, mesh_path, veng::assets::StlOptions{.uv_scale = 0.06F});
+	// UV density is unit-agnostic: StlOptions::texture_tiles defaults to ~1.5 repeats across the
+	// mesh's longest dimension, which reads well on the screw (brushed-steel features at a plausible
+	// size, little obvious tiling) whatever units the STL was authored in. Pass world_units_per_tile
+	// instead when you know the real-world units and want a fixed texel density.
+	auto loaded = veng::assets::load_stl(graph, mesh_path);
 	if (!loaded.has_value())
 	{
-		veng::Logger::instance().error("could not load '{}': {}", mesh_path,
-									   veng::assets::to_string(loaded.error()));
+		veng::Logger::instance().error("could not load '{}': {}", mesh_path, veng::assets::to_string(loaded.error()));
 		veng::Logger::instance().error("usage: stl_viewer <path/to/mesh.stl>");
 		return 1;
 	}
@@ -119,7 +116,7 @@ int main(int argc, char** argv)
 			textures.push_back(std::move(norm.value()));
 			material.normal = graph.add_source<veng::gpu::ImageRef>(textures.back().ref());
 			textures.push_back(std::move(mr.value()));
-			material.metal_rough	 = graph.add_source<veng::gpu::ImageRef>(textures.back().ref());
+			material.metal_rough	  = graph.add_source<veng::gpu::ImageRef>(textures.back().ref());
 			material.metallic_factor  = 1.0F; // metalness comes from the texture's B channel
 			material.roughness_factor = 1.0F; // roughness comes from the texture's G channel
 			textured_applied		  = true;
@@ -138,12 +135,12 @@ int main(int argc, char** argv)
 									  "(run cmake configure online with Pillow to fetch it)",
 									  dir.string());
 		constexpr std::array<std::byte, 4> flat{std::byte{128}, std::byte{128}, std::byte{255}, std::byte{255}};
-		material.base_color		  = solid_source(ctx, graph, textures, white, veng::assets::ColorSpace::Srgb, ok);
-		material.normal			  = solid_source(ctx, graph, textures, flat, veng::assets::ColorSpace::Linear, ok);
-		material.metal_rough	  = white_linear;
+		material.base_color		   = solid_source(ctx, graph, textures, white, veng::assets::ColorSpace::Srgb, ok);
+		material.normal			   = solid_source(ctx, graph, textures, flat, veng::assets::ColorSpace::Linear, ok);
+		material.metal_rough	   = white_linear;
 		material.base_color_factor = glm::vec4(0.62F, 0.64F, 0.68F, 1.0F);
-		material.metallic_factor  = 1.0F;
-		material.roughness_factor = 0.4F;
+		material.metallic_factor   = 1.0F;
+		material.roughness_factor  = 0.4F;
 	}
 
 	if (!ok)
@@ -154,12 +151,14 @@ int main(int argc, char** argv)
 
 	// --- Pass + object ------------------------------------------------------------------------
 	veng::passes::PbrConfig config;
-	config.cull_mode	   = vk::CullModeFlagBits::eNone; // closed solid; tolerate any STL winding
+	// load_stl's repair pass unifies winding and orients the shell outward, so backface culling is
+	// safe (and the normals are trustworthy) — no need to fall back to eNone for unknown STL winding.
+	config.cull_mode	   = vk::CullModeFlagBits::eBack;
 	config.light_intensity = 2.0F;
 	config.ambient		   = glm::vec3(0.06F, 0.06F, 0.07F);
 	veng::passes::PbrPass pass(graph, app.scene_color_format(), app.depth_format(), app.screen(), app.scene_image(),
 							   app.view_proj(), app.camera().eye_pos(), config);
-	const std::uint32_t mat_index = pass.add_material(material);
+	const std::uint32_t	  mat_index = pass.add_material(material);
 	pass.add_object(stl.mesh, model_src, mat_index);
 
 	// --- Studio point lights ------------------------------------------------------------------
@@ -170,10 +169,10 @@ int main(int argc, char** argv)
 		{.position = glm::vec4(-5.0F, 1.5F, 3.0F, 14.0F), .color = glm::vec4(0.7F, 0.8F, 1.0F, 22.0F)},	  // cool fill
 		{.position = glm::vec4(0.0F, 3.0F, -5.0F, 14.0F), .color = glm::vec4(1.0F, 1.0F, 1.0F, 35.0F)},	  // rim
 		{.position = glm::vec4(2.0F, -4.0F, 2.0F, 14.0F), .color = glm::vec4(1.0F, 0.85F, 0.6F, 18.0F)}}; // warm kicker
-	const auto lights_src = graph.add_source<std::vector<veng::culling::GpuLight>>(lights);
+	const auto						 lights_src = graph.add_source<std::vector<veng::culling::GpuLight>>(lights);
 	const veng::culling::ClusterGrid grid{.dims = {12, 8, 24}, .z_near = 0.5F, .z_far = 30.0F};
-	const auto edges = veng::passes::wire_clustered_lights(graph, lights_src, app.camera().view(),
-														   app.camera().proj(), grid);
+	const auto						 edges =
+		veng::passes::wire_clustered_lights(graph, lights_src, app.camera().view(), app.camera().proj(), grid);
 	pass.set_clustered_lights(app.camera().view(), edges.lights, edges.light_grid, edges.light_index, grid);
 
 	// Frame on the normalised bounds (centre at origin, radius == target_radius).

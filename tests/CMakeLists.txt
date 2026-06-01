@@ -139,6 +139,11 @@ target_compile_definitions(GltfLoaderTests PRIVATE VENG_MODELS_DIR="${VENG_MODEL
 add_executable(StlLoaderTests assets/StlLoaderTests.cpp)
 target_link_libraries(StlLoaderTests PRIVATE veng_assets Catch2::Catch2WithMain)
 
+# Mesh-repair unit tests — drive the internal detail:: helper directly (src/ on the include path).
+add_executable(MeshProcessingTests assets/MeshProcessingTests.cpp)
+target_link_libraries(MeshProcessingTests PRIVATE veng_assets Catch2::Catch2WithMain)
+target_include_directories(MeshProcessingTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
 # Descriptor-set uniforms: a UniformNode feeds a GraphicsNode descriptor by reflected name,
 # and a new value re-invalidates the upload + draw (a reactive uniform).
 add_executable(UniformNodeTests nodes/UniformNodeTests.cpp)
@@ -198,7 +203,7 @@ foreach(test_target
         ContextTests ShaderLoadingTests ShaderValidationTests GraphTests SchedulerTests TemporalTests
         ComputePipelineTests GraphicsPipelineTests DescriptorAllocatorTests ResourceTests ResourcePoolTests
         GpuBridgeTests ManagerTests RasterTriangleTests SliceDriverTests GraphicsNodeTests MeshNodeTests
-        MeshStrideTests TextureTests PbrPassTests PickingOutlineTests GltfLoaderTests StlLoaderTests UniformNodeTests StorageBufferNodeTests
+        MeshStrideTests TextureTests PbrPassTests PickingOutlineTests GltfLoaderTests StlLoaderTests MeshProcessingTests UniformNodeTests StorageBufferNodeTests
         InstancedDrawTests DebugLineTests DynamicMeshTests SampledImageTests MultiDrawTests NBufferingTests
         ScreenshotNodeTests PhongPassTests)
     catch_discover_tests(${test_target})
