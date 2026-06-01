@@ -26,7 +26,15 @@ AppLoop::AppLoop(const AppConfig& config)
 	, m_window(config.title, config.width, config.height)
 	, m_depth_format(config.depth_format)
 {
-	veng::Logger::instance().set_level(spdlog::level::warn);
+	// Examples default to info-level logging so their startup/setup lines are visible. set_level only
+	// moves the logger level; the console sink is independently pinned (warn in release builds), so lift
+	// it too — it's the first sink (the file sink keeps its own level).
+	auto& log = veng::Logger::instance();
+	log.set_level(spdlog::level::info);
+	if (!log.sinks().empty())
+	{
+		log.sinks().front()->set_level(spdlog::level::info);
+	}
 
 	auto ctx_result = veng::Context::create("veng reactive renderer", m_window.required_extensions(),
 											[this](VkInstance instance) { return m_window.create_surface(instance); });
@@ -68,12 +76,13 @@ AppLoop::AppLoop(const AppConfig& config)
 	DataHandle blit_source = m_scene_image;
 	if (m_config.hdr)
 	{
-		m_tonemapped_image			= m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
+		m_tonemapped_image = m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 		const TypedHandle<float> exposure = m_graph.add_source<float>(m_config.exposure);
-		auto					 tonemap  = std::make_unique<veng::nodes::GraphicsNode>(
-			 "passes/fullscreen.vert", "passes/tonemap.frag", m_swap->format(), vk::Format::eUndefined, 3, m_screen,
-			 m_tonemapped_image);
-		tonemap->add_sampled_image(m_scene_image, "hdr").push_constant<float>(exposure, vk::ShaderStageFlagBits::eFragment);
+		auto tonemap = std::make_unique<veng::nodes::GraphicsNode>("passes/fullscreen.vert", "passes/tonemap.frag",
+																   m_swap->format(), vk::Format::eUndefined, 3,
+																   m_screen, m_tonemapped_image);
+		tonemap->add_sampled_image(m_scene_image, "hdr")
+			.push_constant<float>(exposure, vk::ShaderStageFlagBits::eFragment);
 		m_graph.set_producer(m_tonemapped_image, m_graph.add(std::move(tonemap)));
 		blit_source = m_tonemapped_image;
 	}
@@ -188,8 +197,8 @@ void AppLoop::run(std::function<void(const veng::graph::FramePlan&)> on_frame, s
 		// when the graph is otherwise idle — its result is delivered on frame retirement, which
 		// only happens as more frames render. Force Continuous for those frames so the pipeline
 		// keeps pumping (and presenting, so we never acquire a swapchain image without releasing it).
-		const bool keep_alive =
-			std::ranges::any_of(m_keep_alive, [](const std::function<bool()>& predicate) { return predicate && predicate(); });
+		const bool keep_alive = std::ranges::any_of(m_keep_alive, [](const std::function<bool()>& predicate)
+													{ return predicate && predicate(); });
 		const veng::FrameExecutor::Pacing effective_pacing =
 			keep_alive ? veng::FrameExecutor::Pacing::Continuous : pacing;
 

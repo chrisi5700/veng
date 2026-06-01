@@ -115,3 +115,82 @@ TEST_CASE("repair_orientation drops duplicate and degenerate triangles", "[asset
 	CHECK(faces.size() == 12);
 	CHECK(signed_volume(faces) > 0.0);
 }
+
+namespace
+{
+struct Grid
+{
+	std::vector<glm::vec3>	   positions;
+	std::vector<glm::vec3>	   normals;
+	std::vector<std::uint32_t> indices;
+};
+
+// An n×n quad grid on z=0 (flat, all normals +Z): dense, and collapsible to almost nothing at zero
+// geometric error — ideal for asserting decimation hits its target and stays valid.
+Grid make_grid(int n)
+{
+	Grid grid;
+	for (int y = 0; y <= n; ++y)
+	{
+		for (int x = 0; x <= n; ++x)
+		{
+			grid.positions.emplace_back(static_cast<float>(x), static_cast<float>(y), 0.0F);
+			grid.normals.emplace_back(0.0F, 0.0F, 1.0F);
+		}
+	}
+	const auto vid = [n](int x, int y) { return static_cast<std::uint32_t>((y * (n + 1)) + x); };
+	for (int y = 0; y < n; ++y)
+	{
+		for (int x = 0; x < n; ++x)
+		{
+			grid.indices.insert(grid.indices.end(), {vid(x, y), vid(x + 1, y), vid(x + 1, y + 1), vid(x, y),
+													 vid(x + 1, y + 1), vid(x, y + 1)});
+		}
+	}
+	return grid;
+}
+
+bool indices_in_range(const std::vector<std::uint32_t>& indices, std::uint32_t vertex_count)
+{
+	for (const std::uint32_t i : indices)
+	{
+		if (i >= vertex_count)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+} // namespace
+
+TEST_CASE("decimate reduces triangle count and keeps the index buffer valid", "[assets][mesh]")
+{
+	const Grid grid = make_grid(20); // 800 triangles
+
+	const auto result = veng::assets::detail::decimate(grid.positions, grid.normals, grid.indices,
+													   veng::assets::detail::DecimateOptions{.target_ratio = 0.25F});
+
+	CHECK(result.triangle_count < grid.indices.size() / 3); // actually fewer triangles
+	CHECK(result.triangle_count <= 200);					// reached ~the 25% target...
+	CHECK(result.error < 0.001F);							// ...at near-zero error (the sheet is flat)
+	CHECK(result.vertex_count < grid.positions.size());		// unused vertices dropped
+	CHECK(result.indices.size() == result.triangle_count * 3);
+	CHECK(indices_in_range(result.indices, result.vertex_count));
+
+	// The remap compacts a per-vertex array down to exactly the surviving vertices.
+	const auto slim = veng::assets::detail::apply_vertex_remap(grid.positions, result.remap, result.vertex_count);
+	CHECK(slim.size() == result.vertex_count);
+}
+
+TEST_CASE("decimate aggressive path also reduces and stays valid", "[assets][mesh]")
+{
+	const Grid grid = make_grid(16);
+
+	const auto result = veng::assets::detail::decimate(
+		grid.positions, grid.normals, grid.indices,
+		veng::assets::detail::DecimateOptions{.target_ratio = 0.2F, .max_error = 0.1F, .aggressive = true});
+
+	CHECK(result.triangle_count < grid.indices.size() / 3);
+	CHECK(result.vertex_count < grid.positions.size());
+	CHECK(indices_in_range(result.indices, result.vertex_count));
+}

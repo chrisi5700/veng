@@ -9,8 +9,9 @@
 // is fetched at configure (steel.cmake) into a gitignored assets/ dir; if it's absent (offline /
 // no Pillow) the viewer falls back to a flat factor-only steel so it still runs.
 //
-// The mesh is normalised to a ~2-unit radius by the model matrix so the studio lighting below lives
-// in a predictable regime regardless of the model's authored units. Drag to orbit, scroll to zoom.
+// It renders a vertical column of the same screw at increasing decimation (full detail at top down to
+// an aggressive LOD at the bottom), each normalised to a ~2-unit size so the studio lighting sits in a
+// known regime. The texturing is identical down the column — only the geometry slims. Drag to orbit.
 //
 
 #include <array>
@@ -53,34 +54,54 @@ veng::graph::DataHandle solid_source(veng::Context& ctx, veng::graph::Graph& gra
 
 int main(int argc, char** argv)
 {
-	veng::Logger::instance().set_level(spdlog::level::info);
-
 	example::AppLoop app(
 		example::AppConfig{.title = "veng — STL viewer (galvanized steel)", .camera_distance = 6.0F, .hdr = true});
 	veng::graph::Graph& graph = app.graph();
 	veng::Context&		ctx	  = app.context();
 
 	const std::string mesh_path = argc > 1 ? std::string(argv[1]) : std::string(VENG_STL_MESH);
-	// UV density is unit-agnostic: StlOptions::texture_tiles defaults to ~1.5 repeats across the
-	// mesh's longest dimension, which reads well on the screw (brushed-steel features at a plausible
-	// size, little obvious tiling) whatever units the STL was authored in. Pass world_units_per_tile
-	// instead when you know the real-world units and want a fixed texel density.
-	auto loaded = veng::assets::load_stl(graph, mesh_path);
-	if (!loaded.has_value())
-	{
-		veng::Logger::instance().error("could not load '{}': {}", mesh_path, veng::assets::to_string(loaded.error()));
-		veng::Logger::instance().error("usage: stl_viewer <path/to/mesh.stl>");
-		return 1;
-	}
-	const veng::assets::StlMesh stl = loaded.value();
 
-	// Normalise the (arbitrary-unit) mesh to a ~2-unit radius centred at the origin, so the studio
-	// lights below sit in a known regime. p' = scale · (p − center).
+	// A column of the same screw at increasing decimation, to eyeball the pass: top = full detail,
+	// then a widening error budget (max_error) lets the simplifier collapse progressively more —
+	// including the high-curvature threads, which a tight budget protects. The UVs are synthesised
+	// *after* decimation, so the steel texturing is identical across the column; only geometry changes.
+	// (UV density itself is unit-agnostic — StlOptions::texture_tiles is relative to the mesh extent —
+	// so it reads the same whatever units the STL used.)
+	struct Variant
+	{
+		float		ratio;
+		float		max_error;
+		bool		aggressive;
+		const char* label;
+	};
+	constexpr std::array<Variant, 5> variants{{{1.00F, 0.00F, false, "full detail"},
+											   {0.50F, 0.01F, false, "light"},
+											   {0.30F, 0.04F, false, "moderate"},
+											   {0.20F, 0.10F, false, "heavy"},
+											   {0.10F, 0.30F, true, "aggressive (sloppy)"}}};
+
+	std::vector<veng::assets::StlMesh> meshes;
+	for (const Variant& v : variants)
+	{
+		auto loaded = veng::assets::load_stl(graph, mesh_path,
+											 veng::assets::StlOptions{.decimate_ratio	   = v.ratio,
+																	  .decimate_max_error  = v.max_error,
+																	  .decimate_aggressive = v.aggressive});
+		if (!loaded.has_value())
+		{
+			veng::Logger::instance().error("could not load '{}': {}", mesh_path,
+										   veng::assets::to_string(loaded.error()));
+			veng::Logger::instance().error("usage: stl_viewer <path/to/mesh.stl>");
+			return 1;
+		}
+		meshes.push_back(loaded.value());
+	}
+
+	// Every variant reports the source file's bounds (decimation doesn't change them), so one
+	// scale/centre normalises the whole column to a consistent ~2-unit size. p' = scale · (p − centre).
 	constexpr float target_radius = 2.0F;
-	const float		scale		  = stl.radius() > 1e-6F ? target_radius / stl.radius() : 1.0F;
-	const glm::mat4 model =
-		glm::scale(glm::mat4(1.0F), glm::vec3(scale)) * glm::translate(glm::mat4(1.0F), -stl.center());
-	const auto model_src = graph.add_source<glm::mat4>(model);
+	const float		scale		  = meshes.front().radius() > 1e-6F ? target_radius / meshes.front().radius() : 1.0F;
+	const glm::vec3 center		  = meshes.front().center();
 
 	// --- Steel material -----------------------------------------------------------------------
 	// Channels we always need a 1×1 for: occlusion (white = none) and emissive (white × factor 0).
@@ -159,7 +180,20 @@ int main(int argc, char** argv)
 	veng::passes::PbrPass pass(graph, app.scene_color_format(), app.depth_format(), app.screen(), app.scene_image(),
 							   app.view_proj(), app.camera().eye_pos(), config);
 	const std::uint32_t	  mat_index = pass.add_material(material);
-	pass.add_object(stl.mesh, model_src, mat_index);
+
+	// Stack the variants vertically (full detail on top), each normalised then offset in Y. The screws
+	// are thin across Y, so the spacing leaves clean gaps between rows.
+	constexpr float spacing = 1.7F;
+	const float		top		= (static_cast<float>(meshes.size()) - 1.0F) * 0.5F * spacing;
+	for (std::size_t i = 0; i < meshes.size(); ++i)
+	{
+		const float		yoff  = top - (static_cast<float>(i) * spacing);
+		const glm::mat4 model = glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, yoff, 0.0F)) *
+								glm::scale(glm::mat4(1.0F), glm::vec3(scale)) *
+								glm::translate(glm::mat4(1.0F), -center);
+		pass.add_object(meshes[i].mesh, graph.add_source<glm::mat4>(model), mat_index);
+		veng::Logger::instance().info("  {:<20} {} triangles", variants[i].label, meshes[i].index_count / 3);
+	}
 
 	// --- Studio point lights ------------------------------------------------------------------
 	// Key / fill / rim plus a warm kicker — metals read mostly through their speculars, and with no
@@ -175,12 +209,11 @@ int main(int argc, char** argv)
 		veng::passes::wire_clustered_lights(graph, lights_src, app.camera().view(), app.camera().proj(), grid);
 	pass.set_clustered_lights(app.camera().view(), edges.lights, edges.light_grid, edges.light_index, grid);
 
-	// Frame on the normalised bounds (centre at origin, radius == target_radius).
-	app.camera().frame(glm::vec3(0.0F), target_radius, vk::Extent2D{1280, 720});
+	// Frame the whole column: half its height plus a screw's radius of margin.
+	app.camera().frame(glm::vec3(0.0F), top + target_radius, vk::Extent2D{1280, 720});
 
-	veng::Logger::instance().info("STL viewer: '{}' — {} vertices, {} triangles, {}; {} point lights", mesh_path,
-								  stl.vertex_count, stl.index_count / 3, textured ? "textured steel" : "flat steel",
-								  lights.size());
+	veng::Logger::instance().info("STL viewer: '{}' — {} decimation variants ({}), {} point lights", mesh_path,
+								  meshes.size(), textured ? "textured steel" : "flat steel", lights.size());
 	app.run();
 	return 0;
 }

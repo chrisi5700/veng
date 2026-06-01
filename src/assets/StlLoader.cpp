@@ -362,6 +362,21 @@ BuiltMesh build(const std::vector<Triangle>& tris, const StlOptions& opts)
 		indices.push_back(tri[2]);
 	}
 
+	// 6b) Optional decimation — slim an over-tessellated mesh *before* UVs exist, so the box UVs and
+	//     tangents below are synthesised on the final slimmed geometry (texturing unaffected). Normals
+	//     feed the collapse metric to keep the crease edges. Identity ratio (1.0) is a no-op.
+	if (opts.decimate_ratio < 1.0F && !indices.empty())
+	{
+		const detail::DecimateResult dec =
+			detail::decimate(out_pos, out_nrm, indices,
+							 detail::DecimateOptions{.target_ratio = opts.decimate_ratio,
+													 .max_error	   = opts.decimate_max_error,
+													 .aggressive   = opts.decimate_aggressive});
+		out_pos = detail::apply_vertex_remap(out_pos, dec.remap, dec.vertex_count);
+		out_nrm = detail::apply_vertex_remap(out_nrm, dec.remap, dec.vertex_count);
+		indices = dec.indices;
+	}
+
 	// 7) Box UVs + tangents. UV density is resolved here so it stays unit-agnostic: an absolute
 	//    world-units-per-tile if the caller set one, otherwise `texture_tiles` repeats across the
 	//    mesh's longest extent (so the result is sane whatever units the file used).

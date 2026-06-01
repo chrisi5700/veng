@@ -89,6 +89,20 @@ struct StlOptions
 	/// winding across the mesh, and orient each closed shell outward (so normals are trustworthy and
 	/// backface culling works). On by default; disable only to inspect a file's raw topology.
 	bool repair = true;
+
+	/// Fraction of triangles to keep when slimming an over-tessellated mesh (0..1]. 1.0 (default)
+	/// disables decimation. Decimation runs after repair and before UV synthesis, so the generated
+	/// UVs/tangents land on the slimmed mesh — texturing is unaffected. Pair a modest ratio with a
+	/// small @ref decimate_max_error to "clean up" dense scans; LODs use a larger error budget.
+	float decimate_ratio = 1.0F;
+
+	/// Quality cap for decimation: maximum deviation allowed, as a fraction of the mesh's size
+	/// (e.g. 0.01 ≈ 1%). Simplification stops early rather than exceed it.
+	float decimate_max_error = 0.01F;
+
+	/// Use the faster, lower-fidelity "sloppy" simplifier, which ignores topology. For aggressive
+	/// LODs where speed matters more than fidelity; leave off for quality-preserving slimming.
+	bool decimate_aggressive = false;
 };
 
 /**

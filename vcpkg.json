@@ -12,6 +12,7 @@
     "vulkan-memory-allocator-hpp",
     "stb",
     "fastgltf",
+    "meshoptimizer",
     {
       "name": "imgui",
       "features": ["vulkan-binding", "glfw-binding"]

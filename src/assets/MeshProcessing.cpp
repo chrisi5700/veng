@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <meshoptimizer.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -188,5 +189,58 @@ RepairStats repair_orientation(const std::vector<glm::vec3>& positions, std::vec
 		}
 	}
 	return stats;
+}
+
+DecimateResult decimate(const std::vector<glm::vec3>& positions, const std::vector<glm::vec3>& normals,
+						const std::vector<std::uint32_t>& indices, const DecimateOptions& opts)
+{
+	const std::size_t vertex_count = positions.size();
+	const float		  ratio		   = std::clamp(opts.target_ratio, 0.0F, 1.0F);
+
+	// Target index count, kept a multiple of 3 and at least one triangle.
+	std::size_t target = static_cast<std::size_t>(static_cast<float>(indices.size()) * ratio);
+	target			   = (target / 3) * 3;
+	target			   = std::max<std::size_t>(target, 3);
+
+	// Simplify into a scratch buffer; both algorithms write indices that reference the *original*
+	// vertices (a subset). Normals feed the metric (precise path) so creases survive; "aggressive"
+	// trades that for the faster topology-agnostic simplifier.
+	std::vector<std::uint32_t> simplified(indices.size());
+	float					   error = 0.0F;
+	std::size_t				   count = 0;
+	if (opts.aggressive)
+	{
+		count = meshopt_simplifySloppy(simplified.data(), indices.data(), indices.size(), &positions[0].x, vertex_count,
+									   sizeof(glm::vec3), target, opts.max_error, &error);
+	}
+	else
+	{
+		const std::array<float, 3> normal_weights{1.0F, 1.0F, 1.0F};
+		unsigned int			   options = 0;
+		if (opts.lock_boundary)
+		{
+			options |= meshopt_SimplifyLockBorder;
+		}
+		count = meshopt_simplifyWithAttributes(simplified.data(), indices.data(), indices.size(), &positions[0].x,
+											   vertex_count, sizeof(glm::vec3), &normals[0].x, sizeof(glm::vec3),
+											   normal_weights.data(), normal_weights.size(), nullptr, target,
+											   opts.max_error, options, &error);
+	}
+	simplified.resize(count);
+
+	// Compact: build an input→output vertex remap (drops now-unused vertices, improves fetch order)
+	// and rewrite the indices over the compacted set. The caller applies the remap to its attribute
+	// arrays — meshoptimizer's types never escape this function.
+	DecimateResult result;
+	result.remap.assign(vertex_count, 0);
+	const std::size_t unique =
+		meshopt_optimizeVertexFetchRemap(result.remap.data(), simplified.data(), simplified.size(), vertex_count);
+	result.indices.resize(simplified.size());
+	meshopt_remapIndexBuffer(result.indices.data(), simplified.data(), simplified.size(), result.remap.data());
+
+	result.vertex_count	  = static_cast<std::uint32_t>(unique);
+	result.triangle_count = static_cast<std::uint32_t>(simplified.size() / 3);
+	result.error		  = error;
+	return result;
 }
 } // namespace veng::assets::detail
