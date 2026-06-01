@@ -148,6 +148,17 @@ add_executable(MeshProcessingTests assets/MeshProcessingTests.cpp)
 target_link_libraries(MeshProcessingTests PRIVATE veng_assets Catch2::Catch2WithMain)
 target_include_directories(MeshProcessingTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+# OBJ / PLY / 3MF loader tests — inline fixtures, no GPU. The 3MF test writes its fixture with lib3mf.
+add_executable(ObjLoaderTests assets/ObjLoaderTests.cpp)
+target_link_libraries(ObjLoaderTests PRIVATE veng_assets Catch2::Catch2WithMain)
+
+add_executable(PlyLoaderTests assets/PlyLoaderTests.cpp)
+target_link_libraries(PlyLoaderTests PRIVATE veng_assets Catch2::Catch2WithMain)
+
+find_package(lib3mf CONFIG REQUIRED)
+add_executable(ThreemfLoaderTests assets/ThreemfLoaderTests.cpp)
+target_link_libraries(ThreemfLoaderTests PRIVATE veng_assets lib3mf::lib3mf Catch2::Catch2WithMain)
+
 # Descriptor-set uniforms: a UniformNode feeds a GraphicsNode descriptor by reflected name,
 # and a new value re-invalidates the upload + draw (a reactive uniform).
 add_executable(UniformNodeTests nodes/UniformNodeTests.cpp)
@@ -208,6 +219,7 @@ foreach(test_target
         ComputePipelineTests GraphicsPipelineTests DescriptorAllocatorTests ResourceTests ResourcePoolTests
         GpuBridgeTests ManagerTests RasterTriangleTests SliceDriverTests GraphicsNodeTests MeshNodeTests LodNodesTests
         MeshStrideTests TextureTests PbrPassTests PickingOutlineTests GltfLoaderTests StlLoaderTests MeshProcessingTests UniformNodeTests StorageBufferNodeTests
+        ObjLoaderTests PlyLoaderTests ThreemfLoaderTests
         InstancedDrawTests DebugLineTests DynamicMeshTests SampledImageTests MultiDrawTests NBufferingTests
         ScreenshotNodeTests PhongPassTests)
     catch_discover_tests(${test_target})

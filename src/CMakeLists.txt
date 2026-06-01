@@ -107,11 +107,14 @@ target_link_libraries(veng_passes PUBLIC veng_nodes veng_culling glm::glm)
 find_package(Stb REQUIRED)
 find_package(fastgltf CONFIG REQUIRED)
 find_package(meshoptimizer CONFIG REQUIRED)
+find_package(tinyobjloader CONFIG REQUIRED)
+find_package(tinyply CONFIG REQUIRED)
+find_package(lib3mf CONFIG REQUIRED)
 target_add_library(veng_assets)
-target_sources(veng_assets PRIVATE assets/Texture.cpp assets/StbImpl.cpp assets/GltfLoader.cpp assets/StlLoader.cpp assets/MeshProcessing.cpp assets/MeshData.cpp)
-# meshoptimizer (decimation) is an implementation detail of the loaders — PRIVATE so it never leaks
-# into a public header, exactly like fastgltf.
-target_link_libraries(veng_assets PUBLIC veng_resources veng_managers veng_nodes glm::glm PRIVATE fastgltf::fastgltf meshoptimizer::meshoptimizer)
+target_sources(veng_assets PRIVATE assets/Texture.cpp assets/StbImpl.cpp assets/GltfLoader.cpp assets/StlLoader.cpp assets/MeshProcessing.cpp assets/MeshData.cpp assets/ObjLoader.cpp assets/PlyLoader.cpp assets/ThreemfLoader.cpp)
+# Format parsers (fastgltf/tinyobjloader/tinyply/lib3mf) and meshoptimizer (decimation) are loader
+# implementation details — PRIVATE so they never leak into a public header.
+target_link_libraries(veng_assets PUBLIC veng_resources veng_managers veng_nodes glm::glm PRIVATE fastgltf::fastgltf meshoptimizer::meshoptimizer tinyobjloader::tinyobjloader tinyply lib3mf::lib3mf)
 target_include_directories(veng_assets PRIVATE ${Stb_INCLUDE_DIR})
 # stb_image is third-party and not -Wall/-Werror clean; silence warnings for its one impl TU.
 set_source_files_properties(assets/StbImpl.cpp PROPERTIES COMPILE_OPTIONS "-w")

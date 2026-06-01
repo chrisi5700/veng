@@ -13,6 +13,9 @@
     "stb",
     "fastgltf",
     "meshoptimizer",
+    "tinyobjloader",
+    "tinyply",
+    "lib3mf",
     {
       "name": "imgui",
       "features": ["vulkan-binding", "glfw-binding"]
