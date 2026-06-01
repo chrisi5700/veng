@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <glm/glm.hpp>
+#include <span>
 #include <vector>
 
 namespace veng::assets::detail
@@ -78,10 +79,14 @@ struct DecimateResult
  * @param normals   Per-vertex normals, factored into the collapse metric to preserve creases/seams.
  * @param indices   Triangle index buffer to simplify.
  * @param opts       Target ratio, error budget, and algorithm options.
+ * @param uvs        Optional per-vertex UVs; when non-empty they are added to the collapse metric so
+ *                   *authored* texture seams survive (glTF/OBJ). Leave empty when UVs are synthesised
+ *                   after decimation (STL), where there is nothing yet to preserve.
  * @return The remap, simplified indices, and achieved counts/error.
  */
 DecimateResult decimate(const std::vector<glm::vec3>& positions, const std::vector<glm::vec3>& normals,
-						const std::vector<std::uint32_t>& indices, const DecimateOptions& opts);
+						const std::vector<std::uint32_t>& indices, const DecimateOptions& opts,
+						std::span<const glm::vec2> uvs = {});
 
 /// Compact a per-vertex array with a @ref DecimateResult::remap (entries with `0xFFFFFFFF` are dropped).
 template <class T>

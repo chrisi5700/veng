@@ -115,6 +115,10 @@ target_link_libraries(GraphicsNodeTests PRIVATE veng_nodes veng_resources Catch2
 add_executable(MeshNodeTests nodes/MeshNodeTests.cpp)
 target_link_libraries(MeshNodeTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
 
+# Discrete-LOD nodes (MeshSelectorNode + CoverageLodNode) — pure CPU graph nodes, no GPU needed.
+add_executable(LodNodesTests nodes/LodNodesTests.cpp)
+target_link_libraries(LodNodesTests PRIVATE veng_nodes Catch2::Catch2WithMain)
+
 # MeshRef vertex-stride validation — a layout mismatch fails the frame, a match still renders.
 add_executable(MeshStrideTests nodes/MeshStrideTests.cpp)
 target_link_libraries(MeshStrideTests PRIVATE veng_nodes veng_resources Catch2::Catch2WithMain)
@@ -202,7 +206,7 @@ target_link_libraries(FrameExecutorTests PRIVATE veng_managers veng_nodes veng_r
 foreach(test_target
         ContextTests ShaderLoadingTests ShaderValidationTests GraphTests SchedulerTests TemporalTests
         ComputePipelineTests GraphicsPipelineTests DescriptorAllocatorTests ResourceTests ResourcePoolTests
-        GpuBridgeTests ManagerTests RasterTriangleTests SliceDriverTests GraphicsNodeTests MeshNodeTests
+        GpuBridgeTests ManagerTests RasterTriangleTests SliceDriverTests GraphicsNodeTests MeshNodeTests LodNodesTests
         MeshStrideTests TextureTests PbrPassTests PickingOutlineTests GltfLoaderTests StlLoaderTests MeshProcessingTests UniformNodeTests StorageBufferNodeTests
         InstancedDrawTests DebugLineTests DynamicMeshTests SampledImageTests MultiDrawTests NBufferingTests
         ScreenshotNodeTests PhongPassTests)

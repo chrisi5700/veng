@@ -81,7 +81,7 @@ target_link_libraries(veng_managers PUBLIC veng_context veng_gpu PRIVATE vk-boot
 
 # L4 nodes — concrete GPU graph nodes for the rendering slice.
 target_add_library(veng_nodes)
-target_sources(veng_nodes PRIVATE nodes/BlitNode.cpp nodes/PresentNode.cpp nodes/GraphicsNode.cpp nodes/MeshNode.cpp nodes/DynamicMeshNode.cpp nodes/UniformNode.cpp nodes/StorageBufferNode.cpp nodes/ScreenshotNode.cpp)
+target_sources(veng_nodes PRIVATE nodes/BlitNode.cpp nodes/PresentNode.cpp nodes/GraphicsNode.cpp nodes/MeshNode.cpp nodes/DynamicMeshNode.cpp nodes/UniformNode.cpp nodes/StorageBufferNode.cpp nodes/ScreenshotNode.cpp nodes/MeshSelectorNode.cpp nodes/CoverageLodNode.cpp)
 target_link_libraries(veng_nodes PUBLIC veng_gpu veng_pipelines veng_managers veng_descriptors)
 
 # Clustered-shading culling math — pure glm, no Vulkan (unit-tests on the CPU without a device, the

@@ -447,4 +447,34 @@ std::expected<StlMesh, StlError> load_stl(graph::Graph& graph, const std::string
 				   .bounds_min	 = built.bounds_min,
 				   .bounds_max	 = built.bounds_max};
 }
+
+std::expected<StlLodSet, StlError> load_stl_lods(graph::Graph& graph, const std::string& path,
+												 std::span<const StlLodLevel> levels, const StlOptions& base)
+{
+	// No levels requested ⇒ a single full-detail mesh.
+	const StlLodLevel				   full{};
+	const std::span<const StlLodLevel> effective = levels.empty() ? std::span<const StlLodLevel>(&full, 1) : levels;
+
+	StlLodSet set;
+	set.meshes.reserve(effective.size());
+	for (const StlLodLevel& level : effective)
+	{
+		StlOptions opts						  = base;
+		opts.decimate_ratio					  = level.target_ratio;
+		opts.decimate_max_error				  = level.max_error;
+		opts.decimate_aggressive			  = level.aggressive;
+		std::expected<StlMesh, StlError> mesh = load_stl(graph, path, opts);
+		if (!mesh.has_value())
+		{
+			return std::unexpected(mesh.error());
+		}
+		if (set.meshes.empty())
+		{
+			set.bounds_min = mesh->bounds_min;
+			set.bounds_max = mesh->bounds_max;
+		}
+		set.meshes.push_back(mesh->mesh);
+	}
+	return set;
+}
 } // namespace veng::assets

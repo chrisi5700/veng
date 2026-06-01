@@ -28,6 +28,8 @@
 #include <veng/nodes/MeshNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 
+#include "MeshProcessing.hpp"
+
 namespace veng::assets
 {
 namespace
@@ -335,18 +337,23 @@ class Loader
 				continue;
 			}
 
-			const graph::DataHandle mesh_handle =
-				m_graph->add(std::make_unique<graph::ValueData<veng::gpu::MeshRef>>(veng::gpu::MeshRef{}));
-			const graph::NodeHandle node_handle = m_graph->add(std::make_unique<veng::nodes::MeshNode>(
-				std::span<const veng::gpu::PbrVertex>(geometry->vertices),
-				std::span<const std::uint32_t>(geometry->indices), mesh_handle));
-			m_graph->set_producer(mesh_handle, node_handle);
-
 			const graph::DataHandle model_handle = m_graph->add_source<glm::mat4>(world).handle;
 			const std::uint32_t		material =
 				prim.materialIndex.has_value() ? static_cast<std::uint32_t>(*prim.materialIndex) : m_default_material;
-			m_model.primitives.push_back(
-				GltfPrimitive{.mesh = mesh_handle, .model = model_handle, .material = material});
+
+			// Normal mode emits one mesh per primitive; LOD mode (m_lods set) emits a decimated chain.
+			if (m_lods.empty())
+			{
+				m_model.primitives.push_back(
+					GltfPrimitive{.mesh		= make_mesh_node(geometry->vertices, geometry->indices),
+								  .model	= model_handle,
+								  .material = material});
+			}
+			else
+			{
+				m_lod_model.primitives.push_back(
+					GltfLodPrimitive{.lods = build_lods(*geometry), .model = model_handle, .material = material});
+			}
 
 			for (const veng::gpu::PbrVertex& vertex : geometry->vertices)
 			{
@@ -359,6 +366,102 @@ class Loader
 		return {};
 	}
 
+	// Create a MeshNode for one mesh and return its published MeshRef edge.
+	graph::DataHandle make_mesh_node(std::span<const veng::gpu::PbrVertex> vertices,
+									 std::span<const std::uint32_t>		   indices)
+	{
+		const graph::DataHandle mesh_handle =
+			m_graph->add(std::make_unique<graph::ValueData<veng::gpu::MeshRef>>(veng::gpu::MeshRef{}));
+		const graph::NodeHandle node_handle =
+			m_graph->add(std::make_unique<veng::nodes::MeshNode>(vertices, indices, mesh_handle));
+		m_graph->set_producer(mesh_handle, node_handle);
+		return mesh_handle;
+	}
+
+	// Decimate one primitive into the configured LOD chain. Decimation is attribute-aware (authored
+	// normals + UVs feed the metric); surviving vertices keep their exact attributes, so the texturing
+	// is identical across levels. A full-detail level (ratio ≥ 1) uploads the geometry unchanged.
+	std::vector<graph::DataHandle> build_lods(const Geometry& geometry)
+	{
+		std::vector<glm::vec3> positions;
+		std::vector<glm::vec3> normals;
+		std::vector<glm::vec2> uvs;
+		positions.reserve(geometry.vertices.size());
+		normals.reserve(geometry.vertices.size());
+		uvs.reserve(geometry.vertices.size());
+		for (const veng::gpu::PbrVertex& vertex : geometry.vertices)
+		{
+			positions.push_back(vertex.position);
+			normals.push_back(vertex.normal);
+			uvs.push_back(vertex.uv);
+		}
+
+		std::vector<graph::DataHandle> result;
+		result.reserve(m_lods.size());
+		for (const LodLevel& level : m_lods)
+		{
+			if (level.target_ratio >= 1.0F)
+			{
+				result.push_back(make_mesh_node(geometry.vertices, geometry.indices));
+				continue;
+			}
+			const detail::DecimateResult dec = detail::decimate(
+				positions, normals, geometry.indices,
+				detail::DecimateOptions{
+					.target_ratio = level.target_ratio, .max_error = level.max_error, .aggressive = level.aggressive},
+				uvs);
+			const std::vector<veng::gpu::PbrVertex> slim =
+				detail::apply_vertex_remap(geometry.vertices, dec.remap, dec.vertex_count);
+			result.push_back(make_mesh_node(slim, dec.indices));
+		}
+		return result;
+	}
+
+	 public:
+	// Like run(), but every primitive becomes a decimated LOD chain (see @ref load_gltf_lods).
+	std::expected<GltfLodModel, GltfError> run_lods(std::span<const LodLevel> levels)
+	{
+		m_lod_storage.assign(levels.begin(), levels.end());
+		if (m_lod_storage.empty())
+		{
+			m_lod_storage.push_back(LodLevel{}); // no levels ⇒ a single full-detail mesh
+		}
+		m_lods = m_lod_storage;
+
+		if (auto defaults = make_defaults(); !defaults.has_value())
+		{
+			return std::unexpected(defaults.error());
+		}
+		if (auto materials = build_materials(); !materials.has_value())
+		{
+			return std::unexpected(materials.error());
+		}
+		const std::size_t scene = m_asset->defaultScene.value_or(0);
+		if (scene < m_asset->scenes.size())
+		{
+			for (const std::size_t root : m_asset->scenes[scene].nodeIndices)
+			{
+				if (auto visited = visit_node(root, glm::mat4(1.0F)); !visited.has_value())
+				{
+					return std::unexpected(visited.error());
+				}
+			}
+		}
+		if (m_lod_model.primitives.empty())
+		{
+			return std::unexpected(GltfError::NoGeometry);
+		}
+		m_lod_model.textures  = std::move(m_model.textures);
+		m_lod_model.materials = std::move(m_model.materials);
+		if (m_has_bounds)
+		{
+			m_lod_model.bounds_min = m_bounds_min;
+			m_lod_model.bounds_max = m_bounds_max;
+		}
+		return std::move(m_lod_model);
+	}
+
+	 private:
 	std::expected<Geometry, GltfError> build_geometry(const fastgltf::Primitive& prim)
 	{
 		const auto* position = prim.findAttribute("POSITION");
@@ -455,6 +558,10 @@ class Loader
 	glm::vec3														m_bounds_min{0.0F};
 	glm::vec3														m_bounds_max{0.0F};
 	bool															m_has_bounds = false;
+
+	std::vector<LodLevel>	  m_lod_storage; ///< Owns the levels for LOD mode (run_lods).
+	std::span<const LodLevel> m_lods{};		 ///< Non-empty ⇒ LOD mode (add_mesh emits chains).
+	GltfLodModel			  m_lod_model;	 ///< Assembled by run_lods.
 };
 } // namespace
 
@@ -477,5 +584,27 @@ std::expected<GltfModel, GltfError> load_gltf(const Context& ctx, graph::Graph& 
 
 	Loader loader(ctx, graph, loaded.get());
 	return loader.run();
+}
+
+std::expected<GltfLodModel, GltfError> load_gltf_lods(const Context& ctx, graph::Graph& graph, const std::string& path,
+													  std::span<const LodLevel> levels)
+{
+	auto data = fastgltf::GltfDataBuffer::FromPath(path);
+	if (data.error() != fastgltf::Error::None)
+	{
+		return std::unexpected(GltfError::FileUnreadable);
+	}
+
+	fastgltf::Parser parser;
+	const auto		 options = fastgltf::Options::LoadExternalBuffers | fastgltf::Options::LoadExternalImages |
+							   fastgltf::Options::GenerateMeshIndices | fastgltf::Options::DecomposeNodeMatrices;
+	auto			 loaded	 = parser.loadGltf(data.get(), std::filesystem::path(path).parent_path(), options);
+	if (loaded.error() != fastgltf::Error::None)
+	{
+		return std::unexpected(GltfError::ParseFailed);
+	}
+
+	Loader loader(ctx, graph, loaded.get());
+	return loader.run_lods(levels);
 }
 } // namespace veng::assets

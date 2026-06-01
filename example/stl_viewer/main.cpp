@@ -9,9 +9,10 @@
 // is fetched at configure (steel.cmake) into a gitignored assets/ dir; if it's absent (offline /
 // no Pillow) the viewer falls back to a flat factor-only steel so it still runs.
 //
-// It renders a vertical column of the same screw at increasing decimation (full detail at top down to
-// an aggressive LOD at the bottom), each normalised to a ~2-unit size so the studio lighting sits in a
-// known regime. The texturing is identical down the column — only the geometry slims. Drag to orbit.
+// It builds a discrete LOD chain of the screw (load_stl_lods) and selects between the levels at
+// runtime from the object's screen coverage: a CoverageLodNode emits a level index that a
+// MeshSelectorNode uses to forward the matching (eagerly-uploaded) mesh to PbrPass. Scroll to zoom —
+// as the screw shrinks on screen the LOD drops; the texturing is identical across levels. Drag to orbit.
 //
 
 #include <array>
@@ -20,15 +21,21 @@
 #include <filesystem>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 #include <veng/assets/StlLoader.hpp>
 #include <veng/assets/Texture.hpp>
 #include <veng/culling/Clusters.hpp>
 #include <veng/gpu/ImageRef.hpp>
+#include <veng/gpu/MeshRef.hpp>
 #include <veng/logging/Logger.hpp>
+#include <veng/nodes/CoverageLodNode.hpp>
+#include <veng/nodes/MeshSelectorNode.hpp>
 #include <veng/passes/ClusteredLights.hpp>
 #include <veng/passes/PbrPass.hpp>
+#include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/Graph.hpp>
 
 #include "AppLoop.hpp"
@@ -61,47 +68,31 @@ int main(int argc, char** argv)
 
 	const std::string mesh_path = argc > 1 ? std::string(argv[1]) : std::string(VENG_STL_MESH);
 
-	// A column of the same screw at increasing decimation, to eyeball the pass: top = full detail,
-	// then a widening error budget (max_error) lets the simplifier collapse progressively more —
-	// including the high-curvature threads, which a tight budget protects. The UVs are synthesised
-	// *after* decimation, so the steel texturing is identical across the column; only geometry changes.
-	// (UV density itself is unit-agnostic — StlOptions::texture_tiles is relative to the mesh extent —
-	// so it reads the same whatever units the STL used.)
-	struct Variant
+	// Build a discrete LOD chain of the screw — each level decimated harder (the coarsest via the
+	// sloppy simplifier), all uploaded eagerly so switching is a free edge swap. A widening error
+	// budget protects the high-curvature threads on the finer levels. UVs are synthesised *after*
+	// decimation, so the steel texturing is identical across levels; only the geometry slims.
+	constexpr std::array<veng::assets::StlLodLevel, 4> levels{
+		{{.target_ratio = 1.00F},
+		 {.target_ratio = 0.50F, .max_error = 0.02F},
+		 {.target_ratio = 0.25F, .max_error = 0.06F},
+		 {.target_ratio = 0.10F, .max_error = 0.30F, .aggressive = true}}};
+	auto loaded = veng::assets::load_stl_lods(graph, mesh_path, levels);
+	if (!loaded.has_value())
 	{
-		float		ratio;
-		float		max_error;
-		bool		aggressive;
-		const char* label;
-	};
-	constexpr std::array<Variant, 5> variants{{{1.00F, 0.00F, false, "full detail"},
-											   {0.50F, 0.01F, false, "light"},
-											   {0.30F, 0.04F, false, "moderate"},
-											   {0.20F, 0.10F, false, "heavy"},
-											   {0.10F, 0.30F, true, "aggressive (sloppy)"}}};
-
-	std::vector<veng::assets::StlMesh> meshes;
-	for (const Variant& v : variants)
-	{
-		auto loaded = veng::assets::load_stl(graph, mesh_path,
-											 veng::assets::StlOptions{.decimate_ratio	   = v.ratio,
-																	  .decimate_max_error  = v.max_error,
-																	  .decimate_aggressive = v.aggressive});
-		if (!loaded.has_value())
-		{
-			veng::Logger::instance().error("could not load '{}': {}", mesh_path,
-										   veng::assets::to_string(loaded.error()));
-			veng::Logger::instance().error("usage: stl_viewer <path/to/mesh.stl>");
-			return 1;
-		}
-		meshes.push_back(loaded.value());
+		veng::Logger::instance().error("could not load '{}': {}", mesh_path, veng::assets::to_string(loaded.error()));
+		veng::Logger::instance().error("usage: stl_viewer <path/to/mesh.stl>");
+		return 1;
 	}
+	const veng::assets::StlLodSet lods = std::move(loaded.value());
 
-	// Every variant reports the source file's bounds (decimation doesn't change them), so one
-	// scale/centre normalises the whole column to a consistent ~2-unit size. p' = scale · (p − centre).
+	// Normalise to a ~2-unit radius centred at the origin so the studio lights + LOD thresholds sit in
+	// a known regime. p' = scale · (p − centre).
 	constexpr float target_radius = 2.0F;
-	const float		scale		  = meshes.front().radius() > 1e-6F ? target_radius / meshes.front().radius() : 1.0F;
-	const glm::vec3 center		  = meshes.front().center();
+	const float		scale		  = lods.radius() > 1e-6F ? target_radius / lods.radius() : 1.0F;
+	const glm::vec3 center		  = lods.center();
+	const auto		model_src	  = graph.add_source<glm::mat4>(glm::scale(glm::mat4(1.0F), glm::vec3(scale)) *
+																glm::translate(glm::mat4(1.0F), -center));
 
 	// --- Steel material -----------------------------------------------------------------------
 	// Channels we always need a 1×1 for: occlusion (white = none) and emissive (white × factor 0).
@@ -181,19 +172,25 @@ int main(int argc, char** argv)
 							   app.view_proj(), app.camera().eye_pos(), config);
 	const std::uint32_t	  mat_index = pass.add_material(material);
 
-	// Stack the variants vertically (full detail on top), each normalised then offset in Y. The screws
-	// are thin across Y, so the spacing leaves clean gaps between rows.
-	constexpr float spacing = 1.7F;
-	const float		top		= (static_cast<float>(meshes.size()) - 1.0F) * 0.5F * spacing;
-	for (std::size_t i = 0; i < meshes.size(); ++i)
-	{
-		const float		yoff  = top - (static_cast<float>(i) * spacing);
-		const glm::mat4 model = glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, yoff, 0.0F)) *
-								glm::scale(glm::mat4(1.0F), glm::vec3(scale)) *
-								glm::translate(glm::mat4(1.0F), -center);
-		pass.add_object(meshes[i].mesh, graph.add_source<glm::mat4>(model), mat_index);
-		veng::Logger::instance().info("  {:<20} {} triangles", variants[i].label, meshes[i].index_count / 3);
-	}
+	// --- Dynamic LOD wiring -------------------------------------------------------------------
+	// The object's world-space bounding sphere (centre origin, radius target_radius) feeds the
+	// coverage metric → a uint level → the mesh selector, which forwards the chosen LOD. Thresholds
+	// are the screw's projected diameter as a fraction of viewport height (descending); the hysteresis
+	// margin keeps it from flickering at a boundary. All of this is pipeline-agnostic — PbrPass just
+	// consumes the selector's MeshRef edge like any other mesh.
+	const auto					  sphere = graph.add_source<glm::vec4>(glm::vec4(0.0F, 0.0F, 0.0F, target_radius));
+	const veng::graph::DataHandle level	 = graph.add(std::make_unique<veng::graph::ValueData<std::uint32_t>>(0U));
+	const veng::graph::NodeHandle metric = graph.add(std::make_unique<veng::nodes::CoverageLodNode>(
+		app.camera().view(), app.camera().proj(), sphere, level, std::vector<float>{0.55F, 0.30F, 0.15F}, 0.1F));
+	graph.set_producer(level, metric);
+
+	const veng::graph::DataHandle selected =
+		graph.add(std::make_unique<veng::graph::ValueData<veng::gpu::MeshRef>>(veng::gpu::MeshRef{}));
+	const veng::graph::NodeHandle selector =
+		graph.add(std::make_unique<veng::nodes::MeshSelectorNode>(lods.meshes, level, selected));
+	graph.set_producer(selected, selector);
+
+	pass.add_object(selected, model_src, mat_index);
 
 	// --- Studio point lights ------------------------------------------------------------------
 	// Key / fill / rim plus a warm kicker — metals read mostly through their speculars, and with no
@@ -209,11 +206,12 @@ int main(int argc, char** argv)
 		veng::passes::wire_clustered_lights(graph, lights_src, app.camera().view(), app.camera().proj(), grid);
 	pass.set_clustered_lights(app.camera().view(), edges.lights, edges.light_grid, edges.light_index, grid);
 
-	// Frame the whole column: half its height plus a screw's radius of margin.
-	app.camera().frame(glm::vec3(0.0F), top + target_radius, vk::Extent2D{1280, 720});
+	app.camera().frame(glm::vec3(0.0F), target_radius, vk::Extent2D{1280, 720});
 
-	veng::Logger::instance().info("STL viewer: '{}' — {} decimation variants ({}), {} point lights", mesh_path,
-								  meshes.size(), textured ? "textured steel" : "flat steel", lights.size());
+	veng::Logger::instance().info("STL viewer: '{}' — {} LOD levels ({}), coverage-driven; scroll to zoom "
+								  "out and watch the LOD drop; {} point lights",
+								  mesh_path, lods.meshes.size(), textured ? "textured steel" : "flat steel",
+								  lights.size());
 	app.run();
 	return 0;
 }

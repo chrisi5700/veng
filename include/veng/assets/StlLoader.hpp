@@ -29,8 +29,11 @@
 #include <cstdint>
 #include <expected>
 #include <glm/glm.hpp>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
+#include <veng/assets/Lod.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 
@@ -141,6 +144,47 @@ struct StlMesh
  */
 [[nodiscard]] std::expected<StlMesh, StlError> load_stl(graph::Graph& graph, const std::string& path,
 														const StlOptions& opts = {});
+
+/// Backwards-compatible alias; STL and glTF share the same LOD level descriptor (see @ref LodLevel).
+using StlLodLevel = LodLevel;
+
+/**
+ * @brief A loaded STL LOD chain: one GPU-resident `MeshNode` edge per level, finest first.
+ *
+ * Every level is built and uploaded eagerly, so a @ref veng::nodes::MeshSelectorNode can switch
+ * between them with no re-upload. Hand @ref meshes to the selector and frame a metric node on the
+ * shared @ref bounds. Keep the graph alive while rendering.
+ *
+ * @ingroup assets
+ */
+struct StlLodSet
+{
+	std::vector<graph::DataHandle> meshes; ///< One `MeshRef` edge per LOD level (index 0 = finest).
+	glm::vec3					   bounds_min = glm::vec3(0.0F); ///< Object-space AABB minimum (shared by all levels).
+	glm::vec3					   bounds_max = glm::vec3(0.0F); ///< Object-space AABB maximum.
+
+	/** @brief Geometric centre of the object-space bounding box. */
+	[[nodiscard]] glm::vec3 center() const noexcept { return (bounds_min + bounds_max) * 0.5F; }
+	/** @brief Half the diagonal length of the object-space bounding box. */
+	[[nodiscard]] float radius() const noexcept { return glm::length(bounds_max - bounds_min) * 0.5F; }
+};
+
+/**
+ * @brief Load an STL once per level and decimate each to build a GPU-resident LOD chain.
+ *
+ * A convenience over @ref load_stl: each entry in @p levels becomes one eagerly-uploaded mesh edge
+ * (its decimation settings override @p base's). All levels share the source bounds. With no levels
+ * given, returns a single full-detail mesh.
+ *
+ * @param graph  The render graph mesh nodes and edges are added to.
+ * @param path   Filesystem path to the `.stl` file.
+ * @param levels LOD levels to generate (finest first); empty ⇒ one full-detail level.
+ * @param base   Shared options (UV scale, crease, repair); per-level decimation overrides its fields.
+ * @return A @ref StlLodSet, or an @ref StlError on the first level that fails to load.
+ */
+[[nodiscard]] std::expected<StlLodSet, StlError> load_stl_lods(graph::Graph& graph, const std::string& path,
+															   std::span<const StlLodLevel> levels,
+															   const StlOptions&			base = {});
 } // namespace veng::assets
 
 #endif // VENG_STLLOADER_HPP

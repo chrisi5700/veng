@@ -247,3 +247,35 @@ TEST_CASE("glTF loader renders DamagedHelmet (acceptance)", "[assets][gltf][inte
 	REQUIRE(model->textures.size() >= 5);				 // baseColor, normal, MR, emissive, occlusion (+ defaults)
 	REQUIRE(render_and_count(ctx, graph, *model) > 200); // the full PBR helmet renders, no validation errors
 }
+
+TEST_CASE("load_gltf_lods builds a LOD chain per primitive", "[assets][gltf][integration]")
+{
+	if (!model_present("DamagedHelmet"))
+	{
+		SKIP("DamagedHelmet.glb not fetched (offline build)");
+	}
+	veng::Logger::instance().set_level(spdlog::level::warn);
+	auto  ctx = make_context();
+	Graph graph;
+
+	const std::array<veng::assets::LodLevel, 3> levels{{{.target_ratio = 1.0F},
+														{.target_ratio = 0.5F, .max_error = 0.05F},
+														{.target_ratio = 0.2F, .max_error = 0.2F, .aggressive = true}}};
+	auto model = veng::assets::load_gltf_lods(ctx, graph, model_path("DamagedHelmet"), levels);
+	REQUIRE(model.has_value());
+	REQUIRE(model->primitives.size() == 1);
+	for (const veng::assets::GltfLodPrimitive& prim : model->primitives)
+	{
+		CHECK(prim.lods.size() == 3); // one eagerly-uploaded mesh edge per level
+	}
+	CHECK(model->materials.size() >= 1);
+	CHECK(model->radius() > 0.0F);
+
+	// No levels ⇒ one full-detail mesh per primitive.
+	auto full = veng::assets::load_gltf_lods(ctx, graph, model_path("DamagedHelmet"), {});
+	REQUIRE(full.has_value());
+	for (const veng::assets::GltfLodPrimitive& prim : full->primitives)
+	{
+		CHECK(prim.lods.size() == 1);
+	}
+}

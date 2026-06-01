@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <glm/glm.hpp>
+#include <span>
 #include <string>
 #include <vector>
 #include <veng/assets/StlLoader.hpp>
@@ -168,6 +169,30 @@ TEST_CASE("load_stl crease angle controls smoothing", "[assets][stl]")
 	REQUIRE(mesh.has_value());
 	CHECK(mesh->vertex_count == 8);
 	CHECK(mesh->index_count == 36);
+
+	std::filesystem::remove(path);
+}
+
+TEST_CASE("load_stl_lods builds one GPU-resident mesh edge per level", "[assets][stl]")
+{
+	const auto path = temp_path("veng_cube_lods.stl");
+	write_ascii(path, box_triangles(glm::vec3(0.0F), glm::vec3(1.0F)));
+
+	veng::graph::Graph							   graph;
+	const std::array<veng::assets::StlLodLevel, 3> levels{
+		{{.target_ratio = 1.0F},
+		 {.target_ratio = 0.5F, .max_error = 0.1F},
+		 {.target_ratio = 0.25F, .max_error = 0.3F, .aggressive = true}}};
+	const auto set = veng::assets::load_stl_lods(graph, path.string(), levels);
+	REQUIRE(set.has_value());
+	CHECK(set->meshes.size() == 3);					 // one edge per level
+	CHECK(set->bounds_max.x == Catch::Approx(1.0F)); // shared source bounds
+	CHECK(set->radius() > 0.0F);
+
+	// No levels ⇒ a single full-detail mesh.
+	const auto one = veng::assets::load_stl_lods(graph, path.string(), {});
+	REQUIRE(one.has_value());
+	CHECK(one->meshes.size() == 1);
 
 	std::filesystem::remove(path);
 }

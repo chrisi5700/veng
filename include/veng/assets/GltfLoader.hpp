@@ -26,9 +26,11 @@
 #include <cstdint>
 #include <expected>
 #include <glm/glm.hpp>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <veng/assets/Lod.hpp>
 #include <veng/assets/Texture.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
@@ -171,6 +173,60 @@ struct GltfModel
  */
 [[nodiscard]] std::expected<GltfModel, GltfError> load_gltf(const Context& ctx, graph::Graph& graph,
 															const std::string& path);
+
+/**
+ * @brief One drawable primitive as a LOD chain: N GPU-resident mesh edges (finest first) plus the
+ *        per-primitive transform and material index.
+ * @ingroup assets
+ */
+struct GltfLodPrimitive
+{
+	std::vector<graph::DataHandle> lods;		 ///< One `MeshRef` edge per LOD level (index 0 = finest).
+	graph::DataHandle			   model;		 ///< Source edge for the per-primitive world transform.
+	std::uint32_t				   material = 0; ///< Index into @ref GltfLodModel::materials.
+};
+
+/**
+ * @brief A glTF model whose every primitive is a decimated LOD chain (see @ref load_gltf_lods).
+ *
+ * Mirrors @ref GltfModel but with @ref GltfLodPrimitive in place of single-mesh primitives. Owns the
+ * uploaded textures — keep it alive while rendering. A single screen-coverage metric on @ref center /
+ * @ref radius can drive one @ref veng::nodes::MeshSelectorNode per primitive (all switching together).
+ *
+ * @ingroup assets
+ */
+struct GltfLodModel
+{
+	std::vector<Texture>		  textures;	  ///< Owns every uploaded texture including shared defaults.
+	std::vector<GltfMaterialDesc> materials;  ///< One entry per glTF material.
+	std::vector<GltfLodPrimitive> primitives; ///< One LOD chain per renderable triangle primitive.
+
+	glm::vec3 bounds_min = glm::vec3(0.0F); ///< World-space AABB minimum of all geometry.
+	glm::vec3 bounds_max = glm::vec3(0.0F); ///< @copydoc bounds_min
+
+	/** @brief Geometric centre of the world-space bounding box. */
+	[[nodiscard]] glm::vec3 center() const noexcept { return (bounds_min + bounds_max) * 0.5F; }
+	/** @brief Half the diagonal length of the world-space bounding box. */
+	[[nodiscard]] float radius() const noexcept { return glm::length(bounds_max - bounds_min) * 0.5F; }
+};
+
+/**
+ * @brief Load a glTF and decimate every primitive into a GPU-resident LOD chain.
+ *
+ * Like @ref load_gltf but each primitive becomes @p levels eagerly-uploaded meshes. Decimation is
+ * attribute-aware (authored normals *and* UVs feed the metric), and surviving vertices keep their
+ * exact attributes — so the texturing is identical across levels. With no levels given, each
+ * primitive gets a single full-detail mesh.
+ *
+ * @param ctx    The engine context providing the Vulkan device and allocator.
+ * @param graph  The render graph mesh nodes and source edges are added to.
+ * @param path   Filesystem path to the `.gltf`/`.glb` file.
+ * @param levels LOD levels to generate per primitive (finest first); empty ⇒ one full-detail level.
+ * @return A @ref GltfLodModel, or a @ref GltfError on failure.
+ */
+[[nodiscard]] std::expected<GltfLodModel, GltfError> load_gltf_lods(const Context& ctx, graph::Graph& graph,
+																	const std::string&		  path,
+																	std::span<const LodLevel> levels);
 } // namespace veng::assets
 
 #endif // VENG_GLTFLOADER_HPP

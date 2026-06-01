@@ -192,7 +192,8 @@ RepairStats repair_orientation(const std::vector<glm::vec3>& positions, std::vec
 }
 
 DecimateResult decimate(const std::vector<glm::vec3>& positions, const std::vector<glm::vec3>& normals,
-						const std::vector<std::uint32_t>& indices, const DecimateOptions& opts)
+						const std::vector<std::uint32_t>& indices, const DecimateOptions& opts,
+						std::span<const glm::vec2> uvs)
 {
 	const std::size_t vertex_count = positions.size();
 	const float		  ratio		   = std::clamp(opts.target_ratio, 0.0F, 1.0F);
@@ -203,8 +204,8 @@ DecimateResult decimate(const std::vector<glm::vec3>& positions, const std::vect
 	target			   = std::max<std::size_t>(target, 3);
 
 	// Simplify into a scratch buffer; both algorithms write indices that reference the *original*
-	// vertices (a subset). Normals feed the metric (precise path) so creases survive; "aggressive"
-	// trades that for the faster topology-agnostic simplifier.
+	// vertices (a subset). The precise path feeds normals (and authored UVs, if given) into the metric
+	// so creases/seams survive; "aggressive" trades that for the faster topology-agnostic simplifier.
 	std::vector<std::uint32_t> simplified(indices.size());
 	float					   error = 0.0F;
 	std::size_t				   count = 0;
@@ -215,15 +216,31 @@ DecimateResult decimate(const std::vector<glm::vec3>& positions, const std::vect
 	}
 	else
 	{
-		const std::array<float, 3> normal_weights{1.0F, 1.0F, 1.0F};
+		// Interleave the attributes meshopt scores: normal.xyz, then uv.xy when UVs are supplied.
+		const bool		   have_uv	  = !uvs.empty();
+		const std::size_t  attr_count = have_uv ? 5 : 3;
+		std::vector<float> attribs(vertex_count * attr_count);
+		for (std::size_t v = 0; v < vertex_count; ++v)
+		{
+			float* a = &attribs[v * attr_count];
+			a[0]	 = normals[v].x;
+			a[1]	 = normals[v].y;
+			a[2]	 = normals[v].z;
+			if (have_uv)
+			{
+				a[3] = uvs[v].x;
+				a[4] = uvs[v].y;
+			}
+		}
+		const std::array<float, 5> weights{1.0F, 1.0F, 1.0F, 1.0F, 1.0F}; // normal ×3, uv ×2
 		unsigned int			   options = 0;
 		if (opts.lock_boundary)
 		{
 			options |= meshopt_SimplifyLockBorder;
 		}
 		count = meshopt_simplifyWithAttributes(simplified.data(), indices.data(), indices.size(), &positions[0].x,
-											   vertex_count, sizeof(glm::vec3), &normals[0].x, sizeof(glm::vec3),
-											   normal_weights.data(), normal_weights.size(), nullptr, target,
+											   vertex_count, sizeof(glm::vec3), attribs.data(),
+											   attr_count * sizeof(float), weights.data(), attr_count, nullptr, target,
 											   opts.max_error, options, &error);
 	}
 	simplified.resize(count);
