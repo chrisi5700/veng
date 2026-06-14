@@ -83,6 +83,13 @@ class SwapchainManager
 		return m_texture_handles[index];
 	}
 
+	/// @brief The RHI handle for the render-finished semaphore of the swapchain image at @p index — the
+	///        present-signal token the frame hands a present sink (no raw `vk::Semaphore` crosses out).
+	[[nodiscard]] rhi::SemaphoreHandle render_finished_handle(std::uint32_t index) const noexcept
+	{
+		return m_render_finished_handles[index];
+	}
+
 	/**
 	 * @brief Acquire the next swapchain image for @p frame_slot.
 	 *
@@ -106,7 +113,7 @@ class SwapchainManager
 	 *         rebuild); `false` on clean success; unexpected `vk::Result` on hard failure.
 	 */
 	[[nodiscard]] std::expected<bool, vk::Result> present(vk::Queue queue, std::uint32_t image_index,
-														  vk::Semaphore wait);
+														  rhi::SemaphoreHandle wait);
 
 	/**
 	 * @brief Recreate the swapchain at @p extent.
@@ -134,7 +141,9 @@ class SwapchainManager
 	vk::Extent2D					m_extent{};
 	std::vector<vk::Semaphore>		m_image_available; ///< One per frame-in-flight slot.
 	std::vector<vk::Semaphore>		m_render_finished; ///< One per swapchain image.
-	std::vector<vk::Fence>			m_in_flight;	   ///< One per frame-in-flight slot; created signalled.
+	std::vector<rhi::SemaphoreHandle>
+						   m_render_finished_handles; ///< RHI handles for m_render_finished; rebuilt on resize.
+	std::vector<vk::Fence> m_in_flight;				  ///< One per frame-in-flight slot; created signalled.
 };
 } // namespace veng
 

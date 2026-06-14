@@ -125,6 +125,33 @@ vk::Buffer Device::buffer(BufferHandle handle) const noexcept
 	return handle.id < m_buffers.size() ? m_buffers[handle.id] : vk::Buffer{};
 }
 
+SemaphoreHandle Device::register_semaphore(vk::Semaphore semaphore)
+{
+	if (!m_free_semaphores.empty())
+	{
+		const std::uint32_t id = m_free_semaphores.back();
+		m_free_semaphores.pop_back();
+		m_semaphores[id] = semaphore;
+		return SemaphoreHandle{.id = id};
+	}
+	m_semaphores.push_back(semaphore);
+	return SemaphoreHandle{.id = static_cast<std::uint32_t>(m_semaphores.size() - 1)};
+}
+
+void Device::release_semaphore(SemaphoreHandle handle) noexcept
+{
+	if (handle.id < m_semaphores.size())
+	{
+		m_semaphores[handle.id] = vk::Semaphore{};
+		m_free_semaphores.push_back(handle.id);
+	}
+}
+
+vk::Semaphore Device::semaphore(SemaphoreHandle handle) const noexcept
+{
+	return handle.id < m_semaphores.size() ? m_semaphores[handle.id] : vk::Semaphore{};
+}
+
 PipelineHandle Device::register_pipeline(vk::Pipeline pipeline, vk::PipelineLayout layout)
 {
 	if (!m_free_pipelines.empty())

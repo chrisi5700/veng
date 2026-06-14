@@ -141,9 +141,9 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 	// Dispatch on_submitted with the present info attached. Only nodes that opted into the
 	// gpu::Sink interface (PresentNode, screenshot, picking readback, future video) participate;
 	// the cross-cast resolves to nullptr for every non-sink node in the plan.
-	gpu::SubmitContext sub_ctx(
-		graph, *m_context, slot,
-		gpu::PresentFrame{.image_index = frame.image_index, .present_signal = frame.render_finished});
+	gpu::SubmitContext sub_ctx(graph, *m_context, slot,
+							   gpu::PresentFrame{.image_index	 = frame.image_index,
+												 .present_signal = m_swap->render_finished_handle(frame.image_index)});
 	for (const graph::NodeHandle handle : plan.nodes())
 	{
 		if (auto* sink = dynamic_cast<gpu::Sink*>(graph.get_node(handle)); sink != nullptr)

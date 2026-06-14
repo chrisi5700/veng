@@ -120,13 +120,14 @@ TEST_CASE("SwapchainManager::present maps out-of-date and hard errors", "[manage
 	const vk::Queue queue = ctx.graphics_queue();
 	const auto		sem	  = ctx.device().createSemaphore({});
 	REQUIRE(sem.result == vk::Result::eSuccess);
+	const veng::rhi::SemaphoreHandle sem_handle = ctx.rhi().register_semaphore(sem.value);
 
 	SECTION("out-of-date / suboptimal -> rebuild requested (true)")
 	{
 		const veng::test::ScopedDispatchFault fault{VULKAN_HPP_DEFAULT_DISPATCHER.vkQueuePresentKHR,
 													+[](VkQueue, const VkPresentInfoKHR*) -> VkResult
 													{ return VK_ERROR_OUT_OF_DATE_KHR; }};
-		const auto							  out = swap->present(queue, 0, sem.value);
+		const auto							  out = swap->present(queue, 0, sem_handle);
 		REQUIRE(out.has_value());
 		REQUIRE(out.value()); // true == swapchain needs rebuilding
 	}
@@ -135,7 +136,7 @@ TEST_CASE("SwapchainManager::present maps out-of-date and hard errors", "[manage
 		const veng::test::ScopedDispatchFault fault{VULKAN_HPP_DEFAULT_DISPATCHER.vkQueuePresentKHR,
 													+[](VkQueue, const VkPresentInfoKHR*) -> VkResult
 													{ return VK_ERROR_DEVICE_LOST; }};
-		const auto							  out = swap->present(queue, 0, sem.value);
+		const auto							  out = swap->present(queue, 0, sem_handle);
 		REQUIRE_FALSE(out.has_value());
 		REQUIRE(out.error() == vk::Result::eErrorDeviceLost);
 	}

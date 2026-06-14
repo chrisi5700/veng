@@ -54,6 +54,15 @@ struct PipelineHandle
 	[[nodiscard]] bool valid() const noexcept { return id != INVALID_HANDLE; }
 	friend bool		   operator==(const PipelineHandle&, const PipelineHandle&) noexcept = default;
 };
+
+/// @brief Opaque handle to a registered semaphore — the present-signal token a frame hands a present
+///        sink without naming `vk::Semaphore`. @see Device::register_semaphore
+struct SemaphoreHandle
+{
+	std::uint32_t	   id = INVALID_HANDLE;
+	[[nodiscard]] bool valid() const noexcept { return id != INVALID_HANDLE; }
+	friend bool		   operator==(const SemaphoreHandle&, const SemaphoreHandle&) noexcept = default;
+};
 } // namespace veng::rhi
 
 #endif // VENG_RHI_HANDLES_HPP

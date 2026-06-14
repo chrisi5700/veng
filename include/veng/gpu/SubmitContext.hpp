@@ -29,6 +29,7 @@
 #include <veng/context/Context.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/Graph.hpp>
+#include <veng/rhi/Handles.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
@@ -47,8 +48,8 @@ namespace veng::gpu
  */
 struct PresentFrame
 {
-	std::uint32_t image_index	 = 0;  ///< Index of the acquired swapchain image to present.
-	vk::Semaphore present_signal = {}; ///< Render-finished semaphore: submit signals it, present waits on it.
+	std::uint32_t		 image_index	= 0;  ///< Index of the acquired swapchain image to present.
+	rhi::SemaphoreHandle present_signal = {}; ///< Render-finished handle: submit signals it, present waits on it.
 };
 
 /**

@@ -95,6 +95,11 @@ std::expected<void, vk::Result> SwapchainManager::build_swapchain(vk::Extent2D e
 		m_device.destroySemaphore(semaphore);
 	}
 	m_render_finished.clear();
+	for (const rhi::SemaphoreHandle handle : m_render_finished_handles)
+	{
+		m_rhi->release_semaphore(handle);
+	}
+	m_render_finished_handles.clear();
 
 	m_swapchain = vk::SwapchainKHR(swapchain.swapchain);
 	m_format	= vk::Format(swapchain.image_format);
@@ -125,6 +130,7 @@ std::expected<void, vk::Result> SwapchainManager::build_swapchain(vk::Extent2D e
 			return std::unexpected(semaphore.result);
 		}
 		m_render_finished.push_back(semaphore.value);
+		m_render_finished_handles.push_back(m_rhi->register_semaphore(semaphore.value));
 	}
 	return {};
 }
@@ -161,10 +167,11 @@ std::expected<std::optional<SwapchainManager::Frame>, vk::Result> SwapchainManag
 }
 
 std::expected<bool, vk::Result> SwapchainManager::present(vk::Queue queue, std::uint32_t image_index,
-														  vk::Semaphore wait)
+														  rhi::SemaphoreHandle wait)
 {
-	const auto info =
-		vk::PresentInfoKHR().setWaitSemaphores(wait).setSwapchains(m_swapchain).setImageIndices(image_index);
+	const vk::Semaphore wait_sem = m_rhi->semaphore(wait);
+	const auto			info =
+		vk::PresentInfoKHR().setWaitSemaphores(wait_sem).setSwapchains(m_swapchain).setImageIndices(image_index);
 	const vk::Result result = queue.presentKHR(info);
 	if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR)
 	{
@@ -199,6 +206,11 @@ void SwapchainManager::destroy() noexcept
 		m_rhi->release_texture(handle);
 	}
 	m_texture_handles.clear();
+	for (const rhi::SemaphoreHandle handle : m_render_finished_handles)
+	{
+		m_rhi->release_semaphore(handle);
+	}
+	m_render_finished_handles.clear();
 	for (const vk::Semaphore semaphore : m_render_finished)
 	{
 		if (semaphore)
@@ -245,12 +257,14 @@ SwapchainManager::SwapchainManager(SwapchainManager&& other) noexcept
 	, m_extent(other.m_extent)
 	, m_image_available(std::move(other.m_image_available))
 	, m_render_finished(std::move(other.m_render_finished))
+	, m_render_finished_handles(std::move(other.m_render_finished_handles))
 	, m_in_flight(std::move(other.m_in_flight))
 {
 	other.m_images.clear();
 	other.m_texture_handles.clear();
 	other.m_image_available.clear();
 	other.m_render_finished.clear();
+	other.m_render_finished_handles.clear();
 	other.m_in_flight.clear();
 }
 
@@ -259,24 +273,26 @@ SwapchainManager& SwapchainManager::operator=(SwapchainManager&& other) noexcept
 	if (this != &other)
 	{
 		destroy();
-		m_device		   = std::exchange(other.m_device, nullptr);
-		m_rhi			   = other.m_rhi;
-		m_physical		   = other.m_physical;
-		m_surface		   = other.m_surface;
-		m_graphics_family  = other.m_graphics_family;
-		m_frames_in_flight = other.m_frames_in_flight;
-		m_swapchain		   = std::exchange(other.m_swapchain, nullptr);
-		m_images		   = std::move(other.m_images);
-		m_texture_handles  = std::move(other.m_texture_handles);
-		m_format		   = other.m_format;
-		m_extent		   = other.m_extent;
-		m_image_available  = std::move(other.m_image_available);
-		m_render_finished  = std::move(other.m_render_finished);
-		m_in_flight		   = std::move(other.m_in_flight);
+		m_device				  = std::exchange(other.m_device, nullptr);
+		m_rhi					  = other.m_rhi;
+		m_physical				  = other.m_physical;
+		m_surface				  = other.m_surface;
+		m_graphics_family		  = other.m_graphics_family;
+		m_frames_in_flight		  = other.m_frames_in_flight;
+		m_swapchain				  = std::exchange(other.m_swapchain, nullptr);
+		m_images				  = std::move(other.m_images);
+		m_texture_handles		  = std::move(other.m_texture_handles);
+		m_format				  = other.m_format;
+		m_extent				  = other.m_extent;
+		m_image_available		  = std::move(other.m_image_available);
+		m_render_finished		  = std::move(other.m_render_finished);
+		m_render_finished_handles = std::move(other.m_render_finished_handles);
+		m_in_flight				  = std::move(other.m_in_flight);
 		other.m_images.clear();
 		other.m_texture_handles.clear();
 		other.m_image_available.clear();
 		other.m_render_finished.clear();
+		other.m_render_finished_handles.clear();
 		other.m_in_flight.clear();
 	}
 	return *this;

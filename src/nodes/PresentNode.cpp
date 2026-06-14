@@ -35,7 +35,7 @@ void PresentNode::on_submitted(gpu::SubmitContext& ctx) noexcept
 	// longer rides on the input ImageRef edge (image refs don't leak queue plumbing anymore).
 	// The input edge stays purely for ordering: it makes the planner schedule us after the blit.
 	const auto& present = ctx.present_frame();
-	if (!present.has_value() || !present->present_signal)
+	if (!present.has_value() || !present->present_signal.valid())
 	{
 		return;
 	}

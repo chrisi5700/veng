@@ -76,6 +76,13 @@ class Device
 	/// @brief Resolve a buffer handle to its `vk::Buffer`, or a null handle if invalid/released.
 	[[nodiscard]] vk::Buffer buffer(BufferHandle handle) const noexcept;
 
+	/// @brief Register a semaphore (non-owning — the swapchain owns it), returning a stable handle.
+	[[nodiscard]] SemaphoreHandle register_semaphore(vk::Semaphore semaphore);
+	/// @brief Free a semaphore slot for reuse (called by the owning swapchain on rebuild/destroy).
+	void release_semaphore(SemaphoreHandle handle) noexcept;
+	/// @brief Resolve a semaphore handle to its `vk::Semaphore`, or a null handle if invalid/released.
+	[[nodiscard]] vk::Semaphore semaphore(SemaphoreHandle handle) const noexcept;
+
 	/// @brief Create a device-owned sampler from @p info, returning a handle (or the `vk::Result` on failure).
 	[[nodiscard]] std::expected<SamplerHandle, vk::Result> create_sampler(const vk::SamplerCreateInfo& info);
 	/// @brief Destroy a sampler and free its slot (optional — all owned samplers are freed on device destroy).
@@ -112,6 +119,8 @@ class Device
 	std::vector<std::uint32_t> m_free_textures;
 	std::vector<vk::Buffer>	   m_buffers;
 	std::vector<std::uint32_t> m_free_buffers;
+	std::vector<vk::Semaphore> m_semaphores; ///< Non-owning; the swapchain owns the vk objects.
+	std::vector<std::uint32_t> m_free_semaphores;
 	std::vector<vk::Sampler>   m_samplers; ///< Device-owned; destroyed in the destructor.
 	std::vector<std::uint32_t> m_free_samplers;
 	std::vector<Pipeline>	   m_pipelines; ///< Non-owning; `GraphicsPipeline` owns the vk objects.
