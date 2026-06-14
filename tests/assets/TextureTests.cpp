@@ -25,7 +25,7 @@
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/ResourcePool.hpp>
-#include <veng/resources/SamplerConfig.hpp>
+#include <veng/rhi/SamplerDesc.hpp>
 
 using namespace veng::graph;
 using veng::assets::ColorSpace;
@@ -51,7 +51,7 @@ std::byte byte_of(int v)
 // Render a fullscreen pass sampling `tex` with `sampler` into a SIDE x SIDE linear target and
 // return the centre pixel's RGBA8. Mirrors the readback boilerplate in MeshNodeTests.
 std::array<std::uint8_t, 4> sample_center(veng::Context& ctx, const Texture& tex,
-										  const veng::gpu::SamplerConfig& sampler)
+										  const veng::rhi::SamplerDesc& sampler)
 {
 	const vk::Device device = ctx.device();
 
@@ -145,7 +145,7 @@ TEST_CASE("a loaded texture samples back its pixels", "[assets][texture]")
 	auto tex = Texture::from_pixels(ctx, pixels, 8, 8, ColorSpace::Linear);
 	REQUIRE(tex.has_value());
 
-	const auto rgba = sample_center(ctx, *tex, veng::gpu::SamplerConfig::render_target());
+	const auto rgba = sample_center(ctx, *tex, veng::rhi::SamplerDesc::render_target());
 	REQUIRE(near(rgba[0], 255));
 	REQUIRE(near(rgba[1], 128));
 	REQUIRE(near(rgba[2], 0));
@@ -169,7 +169,7 @@ TEST_CASE("generated mips average the source texels", "[assets][texture][mips]")
 	REQUIRE(tex->mip_levels() == 2); // 2x2 -> levels {2x2, 1x1}
 
 	// Force the sampler to mip level 1 (the 1x1 average) regardless of screen-space derivatives.
-	auto forced_lod	   = veng::gpu::SamplerConfig::texture();
+	auto forced_lod	   = veng::rhi::SamplerDesc::texture();
 	forced_lod.min_lod = 1.0F;
 	forced_lod.max_lod = 1.0F;
 
@@ -197,8 +197,8 @@ TEST_CASE("an sRGB texture decodes to linear on sample", "[assets][texture][srgb
 	REQUIRE(linear_tex.has_value());
 	REQUIRE(srgb_tex.has_value());
 
-	const auto linear = sample_center(ctx, *linear_tex, veng::gpu::SamplerConfig::render_target());
-	const auto srgb	  = sample_center(ctx, *srgb_tex, veng::gpu::SamplerConfig::render_target());
+	const auto linear = sample_center(ctx, *linear_tex, veng::rhi::SamplerDesc::render_target());
+	const auto srgb	  = sample_center(ctx, *srgb_tex, veng::rhi::SamplerDesc::render_target());
 
 	REQUIRE(near(linear[0], 188));	   // linear data passes straight through
 	REQUIRE(near(srgb[0], 129, 4));	   // sRGB decoded to linear on read

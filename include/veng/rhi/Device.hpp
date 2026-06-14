@@ -34,6 +34,7 @@
 #include <veng/rhi/Enums.hpp>
 #include <veng/rhi/Error.hpp>
 #include <veng/rhi/Handles.hpp>
+#include <veng/rhi/SamplerDesc.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -135,8 +136,8 @@ class Device
 	/// @brief Resolve a semaphore handle to its `vk::Semaphore`, or a null handle if invalid/released.
 	[[nodiscard]] vk::Semaphore semaphore(SemaphoreHandle handle) const noexcept;
 
-	/// @brief Create a device-owned sampler from @p info, returning a handle (or an @ref Error on failure).
-	[[nodiscard]] std::expected<SamplerHandle, Error> create_sampler(const vk::SamplerCreateInfo& info);
+	/// @brief Create a device-owned sampler from @p desc, returning a handle (or an @ref Error on failure).
+	[[nodiscard]] std::expected<SamplerHandle, Error> create_sampler(const SamplerDesc& desc);
 	/// @brief Destroy a sampler and free its slot (optional — all owned samplers are freed on device destroy).
 	void release_sampler(SamplerHandle handle) noexcept;
 	/// @brief Resolve a sampler handle to its `vk::Sampler`, or a null handle if invalid/released.

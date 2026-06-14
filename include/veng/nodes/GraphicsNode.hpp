@@ -61,7 +61,7 @@
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Image.hpp>
 #include <veng/resources/RenderTargetSet.hpp>
-#include <veng/resources/SamplerConfig.hpp>
+#include <veng/rhi/SamplerDesc.hpp>
 #include <veng/rhi/Enums.hpp>
 #include <veng/shader/Shader.hpp>
 #include <vulkan/vulkan.hpp>
@@ -365,15 +365,15 @@ class GraphicsNode final : public gpu::GpuNode
 	/**
 	 * @brief Configure the sampler bound to the shader's `SamplerState`.
 	 *
-	 * Default is `SamplerConfig::render_target()` — linear, clamp-to-edge, no mips — the
+	 * Default is `rhi::SamplerDesc::render_target()` — linear, clamp-to-edge, no mips — the
 	 * correct default for sampling a full-screen render target. Material textures want
-	 * `SamplerConfig::texture()` (repeat, trilinear, anisotropic). Call before the first record
+	 * `rhi::SamplerDesc::texture()` (repeat, trilinear, anisotropic). Call before the first record
 	 * — the sampler is created lazily on first record.
 	 *
-	 * @param config Sampler configuration to use.
+	 * @param config Sampler description to use.
 	 * @return `*this` for chaining.
 	 */
-	GraphicsNode& set_sampler(const gpu::SamplerConfig& config) noexcept
+	GraphicsNode& set_sampler(const rhi::SamplerDesc& config) noexcept
 	{
 		m_sampler_config = config;
 		mark_dirty();
@@ -573,7 +573,7 @@ class GraphicsNode final : public gpu::GpuNode
 	std::vector<rhi::BindGroup>		   m_bind_groups; ///< One per frame slot, allocated lazily.
 	std::vector<std::vector<rhi::BindGroupEntry>>
 					   m_cached_entries; ///< Last-written entries per slot; a rewrite happens only when these change.
-	gpu::SamplerConfig m_sampler_config; ///< How the lazy sampler is configured (default: render target).
+	rhi::SamplerDesc m_sampler_config; ///< How the lazy sampler is configured (default: render target).
 	rhi::SamplerHandle m_sampler_handle; ///< Device-owned sampler; created lazily when there are sampled images.
 
 	/// Targets live in the engine's @ref veng::ResourcePool (N-buffered) via @ref veng::RenderTargetSet,

@@ -17,7 +17,6 @@
 #include <veng/gpu/UniformRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/nodes/GraphicsNode.hpp>
-#include <veng/resources/SamplerConvert.hpp>
 #include <veng/rhi/Convert.hpp>
 #include <veng/shader/Shader.hpp>
 
@@ -132,7 +131,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// freed in the destructor; m_device is captured for that.
 	if (!m_sampled_images.empty() && !m_sampler_handle.valid())
 	{
-		auto sampler = ctx.rhi().create_sampler(gpu::to_create_info(m_sampler_config));
+		auto sampler = ctx.rhi().create_sampler(m_sampler_config);
 		if (!sampler.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);

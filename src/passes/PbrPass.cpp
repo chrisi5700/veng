@@ -34,9 +34,8 @@
 #include <veng/resources/Image.hpp>
 #include <veng/resources/RenderTargetSet.hpp>
 #include <veng/resources/ResourcePool.hpp>
-#include <veng/resources/SamplerConfig.hpp>
-#include <veng/resources/SamplerConvert.hpp>
 #include <veng/rhi/Convert.hpp>
+#include <veng/rhi/SamplerDesc.hpp>
 #include <veng/shader/Shader.hpp>
 
 namespace veng::passes
@@ -483,7 +482,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		// enabled, but maxSamplerAnisotropy varies by GPU and exceeding it is a validation error.
 		const float max_aniso =
 			std::min(8.0F, ctx.context().physical_device().getProperties().limits.maxSamplerAnisotropy);
-		auto sampler = ctx.rhi().create_sampler(gpu::to_create_info(gpu::SamplerConfig::texture(max_aniso)));
+		auto sampler = ctx.rhi().create_sampler(rhi::SamplerDesc::texture(max_aniso));
 		if (!sampler.has_value())
 		{
 			return false;

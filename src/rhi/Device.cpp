@@ -256,8 +256,20 @@ std::expected<void, Error> Device::submit(CommandEncoder& enc)
 	return {};
 }
 
-std::expected<SamplerHandle, Error> Device::create_sampler(const vk::SamplerCreateInfo& info)
+std::expected<SamplerHandle, Error> Device::create_sampler(const SamplerDesc& desc)
 {
+	// The one place a SamplerDesc becomes Vulkan: one address mode applied to U/V/W.
+	const auto info = vk::SamplerCreateInfo()
+						  .setMagFilter(to_vk(desc.mag_filter))
+						  .setMinFilter(to_vk(desc.min_filter))
+						  .setMipmapMode(to_vk(desc.mipmap_mode))
+						  .setAddressModeU(to_vk(desc.address_mode))
+						  .setAddressModeV(to_vk(desc.address_mode))
+						  .setAddressModeW(to_vk(desc.address_mode))
+						  .setAnisotropyEnable(static_cast<vk::Bool32>(desc.anisotropy))
+						  .setMaxAnisotropy(desc.max_anisotropy)
+						  .setMinLod(desc.min_lod)
+						  .setMaxLod(desc.max_lod);
 	const auto created = m_device.createSampler(info);
 	if (created.result != vk::Result::eSuccess)
 	{
