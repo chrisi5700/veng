@@ -102,7 +102,7 @@ class PhongPass
 	 * @param config       Shininess and clear-color tunables.
 	 */
 	PhongPass(graph::Graph& graph, rhi::Format color_format, rhi::Format depth_format,
-			  graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
+			  graph::TypedHandle<rhi::Extent2D> screen, graph::DataHandle output,
 			  graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye,
 			  const PhongConfig& config = {});
 

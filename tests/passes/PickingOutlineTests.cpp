@@ -94,7 +94,7 @@ TEST_CASE("PickingPass decodes the object under a pixel and reports no-hit on th
 	const vk::Device device = ctx.device();
 
 	Graph			 graph;
-	auto			 screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 mvp	= graph.add_source<glm::mat4>(glm::mat4(1.0F)); // identity -> positions are NDC
 	const DataHandle mesh	= upload_centre_triangle(graph);
 
@@ -179,7 +179,7 @@ TEST_CASE("OutlinePass renders the silhouette->blur->ring chain and re-runs only
 	auto ctx = make_context();
 
 	Graph			 graph;
-	auto			 screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 mvp	= graph.add_source<glm::mat4>(glm::mat4(1.0F));
 	const DataHandle mesh	= upload_centre_triangle(graph);
 	const DataHandle glow	= graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));

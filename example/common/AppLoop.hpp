@@ -91,7 +91,7 @@ class AppLoop
 	[[nodiscard]] OrbitCamera&		  camera() noexcept { return *m_camera; }
 	[[nodiscard]] veng::Context&	  context() noexcept { return *m_ctx; }
 
-	[[nodiscard]] veng::graph::TypedHandle<vk::Extent2D> screen() const noexcept { return m_screen; }
+	[[nodiscard]] veng::graph::TypedHandle<veng::rhi::Extent2D> screen() const noexcept { return m_screen; }
 	[[nodiscard]] veng::graph::TypedHandle<glm::mat4>	 view_proj() const noexcept { return m_camera->view_proj(); }
 	[[nodiscard]] veng::graph::DataHandle				 scene_image() const noexcept { return m_scene_image; }
 	[[nodiscard]] veng::rhi::Format scene_color_format() const noexcept { return m_scene_color_format; }
@@ -148,7 +148,7 @@ class AppLoop
 	std::unique_ptr<veng::CommandManager>		  m_commands;
 	veng::graph::InlineScheduler				  m_scheduler;
 	veng::graph::Graph							  m_graph;
-	veng::graph::TypedHandle<vk::Extent2D>		  m_screen;
+	veng::graph::TypedHandle<veng::rhi::Extent2D> m_screen;
 	veng::graph::TypedHandle<veng::gpu::ImageRef> m_swapchain_image;
 	veng::graph::DataHandle						  m_scene_image;
 	veng::graph::DataHandle						  m_tonemapped_image; // hdr only: ACES resolve of m_scene_image

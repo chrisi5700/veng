@@ -134,8 +134,7 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::blend(bool enabled)
 	return *this;
 }
 
-std::expected<GraphicsPipeline, PipelineError> GraphicsPipelineBuilder::build(const Context&	context,
-																			  vk::PipelineCache cache) const
+std::expected<GraphicsPipeline, PipelineError> GraphicsPipelineBuilder::build(const Context& context) const
 {
 	if (m_vertex->get_details().stage() != vk::ShaderStageFlagBits::eVertex ||
 		m_fragment->get_details().stage() != vk::ShaderStageFlagBits::eFragment)
@@ -301,7 +300,7 @@ std::expected<GraphicsPipeline, PipelineError> GraphicsPipelineBuilder::build(co
 						  .setPDynamicState(&dynamic_state)
 						  .setLayout(pipeline_layout.value);
 
-	const auto pipeline = device.createGraphicsPipeline(cache, info);
+	const auto pipeline = device.createGraphicsPipeline(nullptr, info);
 	if (pipeline.result != vk::Result::eSuccess)
 	{
 		device.destroyPipelineLayout(pipeline_layout.value);

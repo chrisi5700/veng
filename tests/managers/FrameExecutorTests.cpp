@@ -53,7 +53,7 @@ TEST_CASE("FrameExecutor drives the headless frame loop", "[managers][frameexecu
 	// Frame tail: screen-sized triangle -> scene image -> blit into the acquired swapchain image
 	// (left in PRESENT_SRC) -> present. The swapchain source is fed by the executor each frame.
 	Graph			 graph;
-	auto			 screen			 = graph.add_source<vk::Extent2D>(swap.extent());
+	auto			 screen			 = graph.add_source<veng::rhi::Extent2D>(veng::rhi::to_rhi(swap.extent()));
 	auto			 swapchain_image = graph.add_source<veng::gpu::ImageRef>(veng::gpu::ImageRef{});
 	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	const DataHandle presented_image =

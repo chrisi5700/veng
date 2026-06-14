@@ -58,7 +58,7 @@ std::size_t render_and_count(veng::Context& ctx, Graph& graph, const veng::asset
 {
 	const vk::Device device = ctx.device();
 
-	auto			 screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	const DataHandle token	= graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 
 	// Frame the camera on the model's bounding sphere from a 3/4 angle.

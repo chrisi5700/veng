@@ -102,7 +102,7 @@ class PickingPass
 	 * @param screen       Reactive extent edge; sizes the id image and depth buffer.
 	 * @param depth_format Format of the owned depth buffer used for id-render depth testing.
 	 */
-	PickingPass(graph::Graph& graph, graph::TypedHandle<vk::Extent2D> screen,
+	PickingPass(graph::Graph& graph, graph::TypedHandle<rhi::Extent2D> screen,
 				rhi::Format depth_format = rhi::Format::D32_SFLOAT);
 
 	PickingPass(const PickingPass&)			   = delete;

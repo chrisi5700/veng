@@ -51,7 +51,7 @@ bool plan_contains(const FramePlan& plan, NodeHandle node)
 	return false;
 }
 
-glm::mat4 cube_mvp(const float& spin, const vk::Extent2D& size)
+glm::mat4 cube_mvp(const float& spin, const veng::rhi::Extent2D& size)
 {
 	const float aspect = static_cast<float>(size.width) / static_cast<float>(size.height);
 	glm::mat4	proj   = glm::perspective(glm::radians(55.0F), aspect, 0.1F, 20.0F);
@@ -76,7 +76,7 @@ TEST_CASE("a generic GraphicsNode draws a centered cube from an MVP edge and cac
 	// Graph: (screen, angle) -> mvp transform -> GraphicsNode -> scene image. The cube is
 	// just the shaders + this matrix edge — no cube node, no pre-built pipeline.
 	Graph			 graph;
-	auto			 screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 angle	= graph.add_source<float>(0.0F);
 	auto			 mvp	= graph.add_transform(cube_mvp, angle, screen);
 	const DataHandle token	= graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));

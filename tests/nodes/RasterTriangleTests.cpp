@@ -44,7 +44,7 @@ TEST_CASE("a color-only GraphicsNode renders a triangle into a scene target", "[
 
 	// Graph: ScreenSize source -> GraphicsNode (triangle shaders, no depth) -> scene image.
 	Graph			 graph;
-	auto			 screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	const DataHandle token	= graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	auto  node = std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
 															 COLOR, veng::rhi::Format::UNDEFINED, 3, screen, token);

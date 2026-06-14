@@ -28,7 +28,6 @@
 #include <cstdint>
 #include <string>
 #include <veng/rhi/Handles.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
 {
@@ -47,7 +46,7 @@ namespace veng::gpu
 struct BufferRef
 {
 	rhi::BufferHandle buffer{};	  ///< Opaque handle to the storage buffer (resolve via rhi::Device).
-	vk::DeviceSize	  size	 = 0; ///< Allocated byte range to bind (>= one stride; never 0, see `StorageBufferNode`).
+	std::uint64_t	  size	 = 0; ///< Allocated byte range to bind (>= one stride; never 0, see `StorageBufferNode`).
 	std::uint32_t	  stride = 0; ///< Bytes per element.
 	std::uint32_t	  count	 = 0; ///< Number of elements; drives `instanceCount` of consuming draws.
 	std::string		  name;		  ///< The reflected descriptor binding this fills.

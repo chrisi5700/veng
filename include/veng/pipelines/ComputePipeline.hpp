@@ -70,8 +70,7 @@ class ComputePipeline
  *        compute @ref veng::Shader.
  *
  * The descriptor-set layout and push-constant ranges are derived from the shader's SPIR-V
- * reflection, removing all create-info boilerplate. An optional `vk::PipelineCache` may
- * be passed to reuse compilation work across rebuilds.
+ * reflection, removing all create-info boilerplate.
  *
  * @ingroup pipelines
  * @see ComputePipeline
@@ -93,15 +92,13 @@ class ComputePipelineBuilder
 	 * @brief Build the compute pipeline, creating the descriptor-set layout, pipeline
 	 *        layout, and pipeline from reflection data.
 	 * @param context The engine context that owns the `vk::Device`.
-	 * @param cache   An optional pipeline cache for reusing compiled shaders.
 	 * @return The fully constructed @ref veng::ComputePipeline, or a @ref veng::PipelineError on failure.
 	 * @retval PipelineError::WRONG_STAGE The shader is not a compute stage.
 	 * @retval PipelineError::DESCRIPTOR_SET_LAYOUT_CREATION_FAILED `vkCreateDescriptorSetLayout` failed.
 	 * @retval PipelineError::PIPELINE_LAYOUT_CREATION_FAILED `vkCreatePipelineLayout` failed.
 	 * @retval PipelineError::PIPELINE_CREATION_FAILED `vkCreateComputePipelines` failed.
 	 */
-	[[nodiscard]] std::expected<ComputePipeline, PipelineError> build(const Context&	context,
-																	  vk::PipelineCache cache = {}) const;
+	[[nodiscard]] std::expected<ComputePipeline, PipelineError> build(const Context& context) const;
 
 	 private:
 	const Shader* m_shader;

@@ -55,7 +55,7 @@ TEST_CASE("ScreenshotNode captures a rendered image via on_retired (peer sink, n
 	// Graph: a solid red fullscreen pass leaves an image in TRANSFER_SRC; a ScreenshotNode sink
 	// reads it and writes a PPM file on retire. No PresentNode — this graph is headless.
 	Graph			 graph;
-	auto			 screen		 = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen		 = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 color		 = graph.add_source<glm::vec4>(glm::vec4{1.0F, 0.0F, 0.0F, 1.0F});
 	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	const DataHandle shot_done	 = graph.add(std::make_unique<ValueData<int>>(0));

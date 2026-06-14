@@ -78,15 +78,14 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		}
 		// Clamp the requested MSAA level to the device once, then configure both the pipeline and the
 		// render targets with the same sample count (Vulkan requires the pipeline match its attachments).
-		const vk::SampleCountFlagBits samples = clamp_sample_count(ctx.context(), rhi::to_vk(m_samples));
-		m_targets.configure(rhi::to_vk(m_color_format), has_depth ? rhi::to_vk(m_depth_format) : vk::Format::eUndefined,
-							samples);
+		const rhi::SampleCount samples = clamp_sample_count(ctx.context(), m_samples);
+		m_targets.configure(m_color_format, has_depth ? m_depth_format : rhi::Format::UNDEFINED, samples);
 
 		const std::array		color_formats{m_color_format};
 		GraphicsPipelineBuilder builder(vert.value(), frag.value());
 		builder.color_formats(color_formats)
 			.topology(m_topology)
-			.sample_count(rhi::to_rhi(samples))
+			.sample_count(samples)
 			.rasterization(rhi::PolygonMode::FILL, rhi::CullMode::NONE, rhi::FrontFace::COUNTER_CLOCKWISE);
 		if (has_depth)
 		{
@@ -141,12 +140,12 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		m_sampler_handle = sampler.value();
 	}
 
-	const auto* size = dynamic_cast<graph::ValueData<vk::Extent2D>*>(ctx.data(m_inputs[0]));
+	const auto* size = dynamic_cast<graph::ValueData<rhi::Extent2D>*>(ctx.data(m_inputs[0]));
 	if (size == nullptr)
 	{
 		return std::unexpected(graph::ExecError::MISSING_INPUT);
 	}
-	const vk::Extent2D extent = size->value();
+	const rhi::Extent2D extent = size->value();
 	if (extent.width == 0 || extent.height == 0)
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -196,7 +195,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	m_targets.begin(ctx.pool(), enc, extent, m_clear_color);
 
 	enc.bind_pipeline(m_pipeline->handle());
-	enc.set_viewport_scissor(rhi::to_rhi(extent));
+	enc.set_viewport_scissor(extent);
 
 	// Descriptors: write the uniform-buffer + sampled-image edges into a set at their name-matched
 	// bindings (plus the node's sampler at every reflected SamplerState), then bind it. The set is
@@ -413,7 +412,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// re-evaluates whenever we re-render, and caches when we do not.
 	m_versioned.publish(ctx, m_output,
 						gpu::ImageRef{.texture		= color_image->handle(),
-									  .extent		= rhi::to_rhi(extent),
+									  .extent		= extent,
 									  .format		= m_color_format,
 									  .sample_count = rhi::to_rhi(color_image->sample_count()),
 									  .pool_id		= m_targets.color_id()});

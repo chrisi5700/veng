@@ -72,7 +72,7 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	// Graph: ScreenSize -> raster -> scene image; blit depends on the scene image + a
 	// destination image fed in (and re-dirtied) every frame.
 	Graph			 graph;
-	auto			 screen		 = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen		 = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 dst		 = graph.add_source<veng::gpu::ImageRef>(target_ref); // re-fed each frame
 	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	const DataHandle presented_image =
@@ -149,7 +149,7 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	// A scene-source change (resize) re-invalidates the raster node: it returns to the
 	// plan. (Resolve-only — executing would need a matching-size target.)
 	graph.set(dst, target_ref);
-	graph.set(screen, vk::Extent2D{SIDE * 2, SIDE * 2});
+	graph.set(screen, veng::rhi::Extent2D{SIDE * 2, SIDE * 2});
 	const auto after_resize = graph.resolve(std::array{presented_image});
 	REQUIRE(after_resize.has_value());
 	REQUIRE(plan_contains(*after_resize, raster_node)); // resize re-runs the raster node
@@ -175,7 +175,7 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 	REQUIRE(staging.has_value());
 
 	Graph			 graph;
-	auto			 screen		 = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen		 = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 dst		 = graph.add_source<veng::gpu::ImageRef>(target_ref);
 	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	const DataHandle presented_image =

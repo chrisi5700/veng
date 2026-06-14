@@ -49,7 +49,7 @@ TEST_CASE("frames in flight render into distinct N-buffered target copies", "[no
 	// A fullscreen solid pass whose color is a push constant: changing the color each frame forces
 	// the node to re-render (so the producer is never cached), exercising the per-frame copies.
 	Graph			 graph;
-	auto			 screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 color	= graph.add_source<glm::vec4>(glm::vec4{0.0F, 0.0F, 0.0F, 1.0F});
 	const DataHandle token	= graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 
@@ -160,7 +160,7 @@ TEST_CASE("ResourcePool defers buffer-resize frees past the in-flight window", "
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto				 ctx = make_context();
 	veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), 2); // two frames in flight
-	const veng::BufferId id = pool.declare_buffer(vk::BufferUsageFlagBits::eStorageBuffer);
+	const veng::BufferId id = pool.declare_buffer(veng::rhi::BufferUsageFlags::STORAGE);
 
 	// Frame 0: acquire size A and mark it read by an in-flight consumer this frame.
 	pool.begin_frame(0);

@@ -116,13 +116,12 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 		}
 
 		constexpr std::uint32_t bytes_per_pixel = 4; // R8G8B8A8
-		const vk::DeviceSize	size =
-			static_cast<vk::DeviceSize>(image.extent.width) * image.extent.height * bytes_per_pixel;
+		const std::uint64_t		size =
+			static_cast<std::uint64_t>(image.extent.width) * image.extent.height * bytes_per_pixel;
 		if (!s.staging.has_value() || s.staging->size() < size)
 		{
-			auto buf = Buffer::create(
-				ctx.allocator(), ctx.rhi(), size, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
-				vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
+			auto buf = Buffer::create(ctx.allocator(), ctx.rhi(), size, rhi::BufferUsageFlags::TRANSFER_DST,
+									  rhi::MemoryAccess::HOST_VISIBLE);
 			if (!buf.has_value() || buf->mapped() == nullptr)
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -205,7 +204,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 	std::atomic<int> m_outstanding{0};			  // queued-but-not-yet-delivered picks; drives PickingPass::pending
 };
 
-PickingPass::PickingPass(graph::Graph& graph, graph::TypedHandle<vk::Extent2D> screen, rhi::Format depth_format)
+PickingPass::PickingPass(graph::Graph& graph, graph::TypedHandle<rhi::Extent2D> screen, rhi::Format depth_format)
 	: m_graph(&graph)
 {
 	using graph::ValueData;

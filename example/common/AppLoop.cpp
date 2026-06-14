@@ -63,7 +63,7 @@ AppLoop::AppLoop(const AppConfig& config)
 	// --- Sources + frame closer (tonemap? + BlitNode + PresentNode) -------------------
 	using namespace veng::graph;
 
-	m_screen		  = m_graph.add_source<vk::Extent2D>(m_swap->extent());
+	m_screen		  = m_graph.add_source<veng::rhi::Extent2D>(veng::rhi::to_rhi(m_swap->extent()));
 	m_swapchain_image = m_graph.add_source<veng::gpu::ImageRef>(veng::gpu::ImageRef{});
 	m_scene_image	  = m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	m_presented_image = m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
@@ -120,7 +120,7 @@ void AppLoop::rebuild_swapchain(vk::Extent2D extent)
 		return;
 	}
 	const std::scoped_lock lock(m_graph_mutex);
-	m_graph.set(m_screen, m_swap->extent());
+	m_graph.set(m_screen, veng::rhi::to_rhi(m_swap->extent()));
 	m_camera->publish(m_swap->extent());
 }
 

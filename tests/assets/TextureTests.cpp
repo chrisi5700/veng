@@ -56,7 +56,7 @@ std::array<std::uint8_t, 4> sample_center(veng::Context& ctx, const Texture& tex
 	const vk::Device device = ctx.device();
 
 	Graph			 graph;
-	auto			 screen	 = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen	 = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 tex_src = graph.add_source<veng::gpu::ImageRef>(tex.ref());
 	const DataHandle token	 = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 

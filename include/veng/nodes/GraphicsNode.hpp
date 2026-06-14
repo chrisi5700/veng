@@ -85,7 +85,7 @@ class GraphicsNode final : public gpu::GpuNode
 	 * `vertex_shader` and `fragment_shader` are shader names resolved from `SHADER_DIR`; the
 	 * node loads them and builds its pipeline for (`color_format`[, `depth_format`]) on first
 	 * record. Pass `eUndefined` for `depth_format` to render without a depth attachment.
-	 * `screen_size` is a `ValueData<vk::Extent2D>` source that sizes the owned render target.
+	 * `screen_size` is a `ValueData<rhi::Extent2D>` source that sizes the owned render target.
 	 * `output` is the scene `ImageData` edge the rendered color target is published on.
 	 * `vertex_count` is used for `SV_VertexID` draws when no mesh is bound.
 	 *
@@ -94,7 +94,7 @@ class GraphicsNode final : public gpu::GpuNode
 	 * @param color_format    Format of the owned color render target.
 	 * @param depth_format    Format of the owned depth target; pass `eUndefined` for no depth.
 	 * @param vertex_count    Fallback vertex count for `SV_VertexID` draws (no mesh bound).
-	 * @param screen_size     `ValueData<vk::Extent2D>` edge that sizes the render target.
+	 * @param screen_size     `ValueData<rhi::Extent2D>` edge that sizes the render target.
 	 * @param output          `ImageData` edge this node publishes its color target on.
 	 */
 	GraphicsNode(std::string vertex_shader, std::string fragment_shader, rhi::Format color_format,

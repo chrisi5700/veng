@@ -8,37 +8,39 @@
 #include <array>
 #include <veng/context/Context.hpp>
 #include <veng/resources/RenderTargetSet.hpp>
+#include <veng/rhi/Convert.hpp>
 
 namespace veng
 {
-vk::SampleCountFlagBits clamp_sample_count(const Context& ctx, vk::SampleCountFlagBits requested) noexcept
+rhi::SampleCount clamp_sample_count(const Context& ctx, rhi::SampleCount requested) noexcept
 {
-	const vk::PhysicalDeviceLimits limits = ctx.physical_device().getProperties().limits;
-	const vk::SampleCountFlags supported  = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts;
+	const vk::SampleCountFlagBits   req		= rhi::to_vk(requested);
+	const vk::PhysicalDeviceLimits limits	= ctx.physical_device().getProperties().limits;
+	const vk::SampleCountFlags	   supported = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts;
 	// Walk down from the request to the first power-of-two count the device offers for both
 	// color and depth framebuffers; e1 is always supported, so the loop terminates.
 	for (const vk::SampleCountFlagBits bit :
 		 {vk::SampleCountFlagBits::e64, vk::SampleCountFlagBits::e32, vk::SampleCountFlagBits::e16,
 		  vk::SampleCountFlagBits::e8, vk::SampleCountFlagBits::e4, vk::SampleCountFlagBits::e2})
 	{
-		if (static_cast<unsigned>(requested) >= static_cast<unsigned>(bit) && (supported & bit))
+		if (static_cast<unsigned>(req) >= static_cast<unsigned>(bit) && (supported & bit))
 		{
-			return bit;
+			return rhi::to_rhi(bit);
 		}
 	}
-	return vk::SampleCountFlagBits::e1;
+	return rhi::SampleCount::X1;
 }
 
-void RenderTargetSet::configure(vk::Format color_format, vk::Format depth_format,
-								vk::SampleCountFlagBits samples) noexcept
+void RenderTargetSet::configure(rhi::Format color_format, rhi::Format depth_format, rhi::SampleCount samples) noexcept
 {
-	m_color_format = color_format;
-	m_depth_format = depth_format;
-	m_samples	   = samples;
+	m_color_format = rhi::to_vk(color_format);
+	m_depth_format = rhi::to_vk(depth_format);
+	m_samples	   = rhi::to_vk(samples);
 }
 
-std::expected<void, vk::Result> RenderTargetSet::acquire(ResourcePool& pool, vk::Extent2D extent)
+std::expected<void, vk::Result> RenderTargetSet::acquire(ResourcePool& pool, rhi::Extent2D extent)
 {
+	const vk::Extent2D vk_extent = rhi::to_vk(extent);
 	// Declare the logical resources once. The single-sample color image is always the one a
 	// consumer reads (sampled / transfer-src); under MSAA it is the resolve target, and a separate
 	// multisampled attachment is what the pass actually renders into. Depth matches the color
@@ -62,7 +64,7 @@ std::expected<void, vk::Result> RenderTargetSet::acquire(ResourcePool& pool, vk:
 		m_declared = true;
 	}
 
-	auto color = pool.acquire_image(m_color_id, extent);
+	auto color = pool.acquire_image(m_color_id, vk_extent);
 	if (!color.has_value())
 	{
 		return std::unexpected(color.error());
@@ -71,7 +73,7 @@ std::expected<void, vk::Result> RenderTargetSet::acquire(ResourcePool& pool, vk:
 
 	if (multisampled())
 	{
-		auto msaa = pool.acquire_image(m_msaa_id, extent);
+		auto msaa = pool.acquire_image(m_msaa_id, vk_extent);
 		if (!msaa.has_value())
 		{
 			return std::unexpected(msaa.error());
@@ -81,7 +83,7 @@ std::expected<void, vk::Result> RenderTargetSet::acquire(ResourcePool& pool, vk:
 
 	if (has_depth())
 	{
-		auto depth = pool.acquire_image(m_depth_id, extent);
+		auto depth = pool.acquire_image(m_depth_id, vk_extent);
 		if (!depth.has_value())
 		{
 			return std::unexpected(depth.error());
@@ -91,7 +93,7 @@ std::expected<void, vk::Result> RenderTargetSet::acquire(ResourcePool& pool, vk:
 	return {};
 }
 
-void RenderTargetSet::begin(ResourcePool& pool, rhi::CommandEncoder& enc, vk::Extent2D extent,
+void RenderTargetSet::begin(ResourcePool& pool, rhi::CommandEncoder& enc, rhi::Extent2D extent,
 							std::array<float, 4> clear_color)
 {
 	// RenderTargetSet is the engine's MSAA/attachment plumbing — legitimately Vulkan-aware. It records
@@ -143,7 +145,7 @@ void RenderTargetSet::begin(ResourcePool& pool, rhi::CommandEncoder& enc, vk::Ex
 								  .setClearValue(depth_clear);
 
 	auto rendering = vk::RenderingInfo()
-						 .setRenderArea(vk::Rect2D({0, 0}, extent))
+						 .setRenderArea(vk::Rect2D({0, 0}, rhi::to_vk(extent)))
 						 .setLayerCount(1)
 						 .setColorAttachments(color_attach);
 	if (has_depth())

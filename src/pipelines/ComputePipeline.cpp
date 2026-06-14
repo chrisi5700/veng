@@ -74,8 +74,7 @@ ComputePipeline::~ComputePipeline()
 	destroy();
 }
 
-std::expected<ComputePipeline, PipelineError> ComputePipelineBuilder::build(const Context&	  context,
-																			vk::PipelineCache cache) const
+std::expected<ComputePipeline, PipelineError> ComputePipelineBuilder::build(const Context& context) const
 {
 	if (m_shader->get_details().stage() != vk::ShaderStageFlagBits::eCompute)
 	{
@@ -125,7 +124,7 @@ std::expected<ComputePipeline, PipelineError> ComputePipelineBuilder::build(cons
 
 	const auto stage_info = m_shader->create_pipeline_shader_stage_create_info();
 	const auto pipeline	  = device.createComputePipeline(
-		cache, vk::ComputePipelineCreateInfo().setStage(stage_info).setLayout(pipeline_layout.value));
+		nullptr, vk::ComputePipelineCreateInfo().setStage(stage_info).setLayout(pipeline_layout.value));
 	if (pipeline.result != vk::Result::eSuccess)
 	{
 		device.destroyPipelineLayout(pipeline_layout.value);

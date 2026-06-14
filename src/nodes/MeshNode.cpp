@@ -6,6 +6,8 @@
  */
 
 #include <cstring>
+#include <optional>
+#include <span>
 #include <utility>
 #include <veng/gpu/MeshRef.hpp>
 #include <veng/nodes/MeshNode.hpp>
@@ -16,22 +18,17 @@ namespace
 {
 // Host-visible, persistently-mapped buffer of `bytes`, uploaded by memcpy. Host writes made
 // before the frame's submit are visible to the device, so no staging copy/barrier is needed.
-std::expected<Buffer, vk::Result> upload_buffer(vma::Allocator allocator, rhi::Device& rhi,
-												std::span<const std::byte> bytes, vk::BufferUsageFlags usage)
+// Speaks only RHI vocabulary — no `vk::`/`vma::` reaches the node. `nullopt` on allocation/map failure.
+std::optional<Buffer> upload_buffer(gpu::GpuExecContext& ctx, std::span<const std::byte> bytes,
+									rhi::BufferUsageFlags usage)
 {
-	auto buffer = Buffer::create(allocator, rhi, bytes.size(), usage, vma::MemoryUsage::eAuto,
-								 vma::AllocationCreateFlagBits::eMapped |
-									 vma::AllocationCreateFlagBits::eHostAccessSequentialWrite);
-	if (!buffer.has_value())
+	auto buffer = Buffer::create(ctx.allocator(), ctx.rhi(), bytes.size(), usage, rhi::MemoryAccess::HOST_VISIBLE);
+	if (!buffer.has_value() || buffer->mapped() == nullptr)
 	{
-		return std::unexpected(buffer.error());
-	}
-	if (buffer->mapped() == nullptr)
-	{
-		return std::unexpected(vk::Result::eErrorMemoryMapFailed);
+		return std::nullopt;
 	}
 	std::memcpy(buffer->mapped(), bytes.data(), bytes.size());
-	return buffer;
+	return std::move(*buffer);
 }
 } // namespace
 
@@ -41,7 +38,7 @@ std::expected<bool, graph::ExecError> MeshNode::record(gpu::GpuExecContext& ctx)
 	// re-enter the plan after this (no inputs), so this runs exactly once.
 	if (!m_vertex_buffer.has_value())
 	{
-		auto vertex = upload_buffer(ctx.allocator(), ctx.rhi(), m_vertex_bytes, vk::BufferUsageFlagBits::eVertexBuffer);
+		auto vertex = upload_buffer(ctx, m_vertex_bytes, rhi::BufferUsageFlags::VERTEX);
 		if (!vertex.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -50,8 +47,7 @@ std::expected<bool, graph::ExecError> MeshNode::record(gpu::GpuExecContext& ctx)
 
 		if (!m_index_bytes.empty())
 		{
-			auto index =
-				upload_buffer(ctx.allocator(), ctx.rhi(), m_index_bytes, vk::BufferUsageFlagBits::eIndexBuffer);
+			auto index = upload_buffer(ctx, m_index_bytes, rhi::BufferUsageFlags::INDEX);
 			if (!index.has_value())
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED);

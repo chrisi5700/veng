@@ -171,7 +171,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, Graph& graph, Data
 DataHandle make_phong(Graph& graph, veng::passes::PhongPass*& out_pass,
 					  std::vector<std::unique_ptr<veng::passes::PhongPass>>& owner)
 {
-	const auto screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	const auto screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	const auto vp	  = graph.add_source<glm::mat4>(yflip_view_proj());
 	const auto eye	  = graph.add_source<glm::vec4>(glm::vec4(0.0F, 0.0F, 3.0F, 1.0F));
 	const auto scene  = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));

@@ -23,18 +23,18 @@ std::expected<bool, graph::ExecError> DynamicMeshNode::record(gpu::GpuExecContex
 	// the second input edge was provided at construction.
 	if (!m_declared)
 	{
-		m_vertex_buffer_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eVertexBuffer);
+		m_vertex_buffer_id = ctx.pool().declare_buffer(rhi::BufferUsageFlags::VERTEX);
 		if (m_index_input.valid())
 		{
-			m_index_buffer_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eIndexBuffer);
+			m_index_buffer_id = ctx.pool().declare_buffer(rhi::BufferUsageFlags::INDEX);
 		}
 		m_declared = true;
 	}
 
 	// A zero-vertex publish is legal (the consuming draw uses the published count of 0 to
 	// emit no work) but VMA rejects a zero-size allocation, so we round up to one stride.
-	const vk::DeviceSize vertex_bytes = static_cast<vk::DeviceSize>(vertices.count) * m_vertex_stride;
-	const vk::DeviceSize vertex_alloc = vertex_bytes == 0 ? m_vertex_stride : vertex_bytes;
+	const std::uint64_t vertex_bytes = static_cast<std::uint64_t>(vertices.count) * m_vertex_stride;
+	const std::uint64_t vertex_alloc = vertex_bytes == 0 ? m_vertex_stride : vertex_bytes;
 	auto				 vbuf		  = ctx.pool().acquire_buffer(m_vertex_buffer_id, vertex_alloc);
 	if (!vbuf.has_value())
 	{
@@ -54,8 +54,8 @@ std::expected<bool, graph::ExecError> DynamicMeshNode::record(gpu::GpuExecContex
 		{
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
 		}
-		const vk::DeviceSize index_bytes = static_cast<vk::DeviceSize>(indices.count) * sizeof(std::uint32_t);
-		const vk::DeviceSize index_alloc = index_bytes == 0 ? sizeof(std::uint32_t) : index_bytes;
+		const std::uint64_t index_bytes = static_cast<std::uint64_t>(indices.count) * sizeof(std::uint32_t);
+		const std::uint64_t index_alloc = index_bytes == 0 ? sizeof(std::uint32_t) : index_bytes;
 		auto				 ibuf		 = ctx.pool().acquire_buffer(m_index_buffer_id, index_alloc);
 		if (!ibuf.has_value())
 		{

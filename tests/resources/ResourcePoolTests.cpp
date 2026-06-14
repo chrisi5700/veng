@@ -138,7 +138,7 @@ TEST_CASE("ResourcePool buffers reuse a copy once retired", "[resources][pool]")
 {
 	auto				 ctx = make_context();
 	veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
-	const veng::BufferId id = pool.declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
+	const veng::BufferId id = pool.declare_buffer(veng::rhi::BufferUsageFlags::UNIFORM);
 
 	pool.begin_frame(0);
 	auto b0 = pool.acquire_buffer(id, 64);

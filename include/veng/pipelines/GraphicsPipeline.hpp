@@ -163,7 +163,6 @@ class GraphicsPipelineBuilder
 	/**
 	 * @brief Build the graphics pipeline from the configured state.
 	 * @param context The engine context that owns the `vk::Device`.
-	 * @param cache   An optional pipeline cache for reusing compiled shaders.
 	 * @return The fully constructed @ref veng::GraphicsPipeline, or a @ref veng::PipelineError on failure.
 	 * @retval PipelineError::WRONG_STAGE    Either shader is not the expected stage.
 	 * @retval PipelineError::STAGE_INCOMPATIBLE Vertex outputs and fragment inputs do not match.
@@ -172,8 +171,7 @@ class GraphicsPipelineBuilder
 	 * @retval PipelineError::PIPELINE_LAYOUT_CREATION_FAILED `vkCreatePipelineLayout` failed.
 	 * @retval PipelineError::PIPELINE_CREATION_FAILED `vkCreateGraphicsPipelines` failed.
 	 */
-	[[nodiscard]] std::expected<GraphicsPipeline, PipelineError> build(const Context&	 context,
-																	   vk::PipelineCache cache = {}) const;
+	[[nodiscard]] std::expected<GraphicsPipeline, PipelineError> build(const Context& context) const;
 
 	 private:
 	const Shader*			 m_vertex;

@@ -50,8 +50,7 @@ class Context;
  * @param requested The desired sample count.
  * @return The clamped, device-supported sample count.
  */
-[[nodiscard]] vk::SampleCountFlagBits clamp_sample_count(const Context&			 ctx,
-														 vk::SampleCountFlagBits requested) noexcept;
+[[nodiscard]] rhi::SampleCount clamp_sample_count(const Context& ctx, rhi::SampleCount requested) noexcept;
 
 /**
  * @brief A pool-backed color (+ optional depth) render target, optionally multisampled.
@@ -77,7 +76,7 @@ class RenderTargetSet
 	 * @param depth_format Depth attachment format, or `eUndefined` for none.
 	 * @param samples      Sample count; `e1` disables MSAA.
 	 */
-	void configure(vk::Format color_format, vk::Format depth_format, vk::SampleCountFlagBits samples) noexcept;
+	void configure(rhi::Format color_format, rhi::Format depth_format, rhi::SampleCount samples) noexcept;
 
 	/// @return The configured sample count.
 	[[nodiscard]] vk::SampleCountFlagBits sample_count() const noexcept { return m_samples; }
@@ -95,7 +94,7 @@ class RenderTargetSet
 	 * @param extent This frame's render extent (a change reallocates the copies).
 	 * @return Nothing on success, or the `vk::Result` of the first failed image acquire.
 	 */
-	[[nodiscard]] std::expected<void, vk::Result> acquire(ResourcePool& pool, vk::Extent2D extent);
+	[[nodiscard]] std::expected<void, vk::Result> acquire(ResourcePool& pool, rhi::Extent2D extent);
 
 	/**
 	 * @brief Transition the attachments to their attachment-optimal layouts and begin rendering.
@@ -109,7 +108,7 @@ class RenderTargetSet
 	 * @param extent      This frame's render extent (the render area).
 	 * @param clear_color RGBA color the attachment is cleared to this frame.
 	 */
-	void begin(ResourcePool& pool, rhi::CommandEncoder& enc, vk::Extent2D extent, std::array<float, 4> clear_color);
+	void begin(ResourcePool& pool, rhi::CommandEncoder& enc, rhi::Extent2D extent, std::array<float, 4> clear_color);
 
 	/// @return The single-sample image a consumer samples/blits — the resolve target under MSAA,
 	///         the color attachment otherwise. Valid after @ref acquire; null before.

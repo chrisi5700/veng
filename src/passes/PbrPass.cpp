@@ -153,12 +153,12 @@ class PbrRenderNode final : public gpu::GpuNode
 			return std::unexpected(built.error());
 		}
 
-		const auto* size = dynamic_cast<graph::ValueData<vk::Extent2D>*>(ctx.data(m_inputs[0]));
+		const auto* size = dynamic_cast<graph::ValueData<rhi::Extent2D>*>(ctx.data(m_inputs[0]));
 		if (size == nullptr)
 		{
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
 		}
-		const vk::Extent2D extent = size->value();
+		const rhi::Extent2D extent = size->value();
 		if (extent.width == 0 || extent.height == 0)
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -175,8 +175,8 @@ class PbrRenderNode final : public gpu::GpuNode
 		// live in the RenderTargetSet configured by ensure_pipelines. Acquire this frame's copies.
 		if (!m_declared)
 		{
-			m_frame_id		  = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
-			m_default_ssbo_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eStorageBuffer);
+			m_frame_id		  = ctx.pool().declare_buffer(rhi::BufferUsageFlags::UNIFORM);
+			m_default_ssbo_id = ctx.pool().declare_buffer(rhi::BufferUsageFlags::STORAGE);
 			m_declared		  = true;
 		}
 		if (auto acquired = m_targets.acquire(ctx.pool(), extent); !acquired.has_value())
@@ -257,7 +257,7 @@ class PbrRenderNode final : public gpu::GpuNode
 
 		rhi::CommandEncoder& enc = ctx.encoder();
 		m_targets.begin(ctx.pool(), enc, extent, m_config.clear_color);
-		enc.set_viewport_scissor(rhi::to_rhi(extent));
+		enc.set_viewport_scissor(extent);
 		const std::size_t					  slot		  = ctx.frame_slot();
 		std::expected<void, graph::ExecError> draw_result = {};
 
@@ -346,7 +346,7 @@ class PbrRenderNode final : public gpu::GpuNode
 
 		m_versioned.publish(ctx, m_output,
 							gpu::ImageRef{.texture		= color_image->handle(),
-										  .extent		= rhi::to_rhi(extent),
+										  .extent		= extent,
 										  .format		= m_color_format,
 										  .sample_count = rhi::to_rhi(color_image->sample_count()),
 										  .pool_id		= m_targets.color_id()});
@@ -375,7 +375,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		rhi::BufferHandle			  lights;
 		rhi::BufferHandle			  grid;
 		rhi::BufferHandle			  index;
-		std::array<vk::DeviceSize, 3> sizes; // lights, grid, index
+		std::array<std::uint64_t, 3> sizes; // lights, grid, index
 	};
 
 	// Resolve the clustered-light BufferRef edges to their buffers + ranges (set_clustered_lights path).
@@ -415,8 +415,8 @@ class PbrRenderNode final : public gpu::GpuNode
 		}
 		// Clamp the requested MSAA to the device and configure the targets + every pipeline with the
 		// same sample count (Vulkan requires the pipeline match its multisampled attachments).
-		const vk::SampleCountFlagBits samples = clamp_sample_count(ctx.context(), rhi::to_vk(m_config.samples));
-		m_targets.configure(rhi::to_vk(m_color_format), rhi::to_vk(m_depth_format), samples);
+		const rhi::SampleCount samples = clamp_sample_count(ctx.context(), m_config.samples);
+		m_targets.configure(m_color_format, m_depth_format, samples);
 
 		const std::array color_formats{m_color_format};
 		struct PipeState
@@ -439,7 +439,7 @@ class PbrRenderNode final : public gpu::GpuNode
 			builder.color_formats(color_formats)
 				.depth_format(m_depth_format)
 				.depth_write(state.depth_write)
-				.sample_count(rhi::to_rhi(samples))
+				.sample_count(samples)
 				.rasterization(rhi::PolygonMode::FILL, state.cull, rhi::FrontFace::COUNTER_CLOCKWISE)
 				.blend(state.blend);
 			return builder.build(ctx.context());
@@ -624,7 +624,7 @@ class PbrRenderNode final : public gpu::GpuNode
 };
 
 PbrPass::PbrPass(graph::Graph& graph, rhi::Format color_format, rhi::Format depth_format,
-				 graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
+				 graph::TypedHandle<rhi::Extent2D> screen, graph::DataHandle output,
 				 graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye, const PbrConfig& config)
 	: m_output(output)
 {

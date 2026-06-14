@@ -29,16 +29,15 @@ std::expected<bool, graph::ExecError> StorageBufferNode::record(gpu::GpuExecCont
 		// `eVertexBuffer` is included so the same buffer can also feed a vertex-rate binding (a
 		// future zero-copy instance-attribute path); for the descriptor-bound `StructuredBuffer`
 		// path the `eStorageBuffer` usage is what matters.
-		m_buffer_id =
-			ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer);
+		m_buffer_id = ctx.pool().declare_buffer(rhi::BufferUsageFlags::STORAGE | rhi::BufferUsageFlags::VERTEX);
 		m_declared = true;
 	}
 
 	// An empty array still requires a non-zero allocation (VMA rejects size==0). One stride's
 	// worth is fine and unused — the consuming draw uses `count` from the published ref as its
 	// `instanceCount`, so a 0-count ref produces zero draws regardless of the underlying size.
-	const vk::DeviceSize element_bytes = static_cast<vk::DeviceSize>(reading.count) * m_stride;
-	const vk::DeviceSize alloc_bytes   = element_bytes == 0 ? m_stride : element_bytes;
+	const std::uint64_t element_bytes = static_cast<std::uint64_t>(reading.count) * m_stride;
+	const std::uint64_t alloc_bytes	  = element_bytes == 0 ? m_stride : element_bytes;
 	auto				 buffer		   = ctx.pool().acquire_buffer(m_buffer_id, alloc_bytes);
 	if (!buffer.has_value())
 	{

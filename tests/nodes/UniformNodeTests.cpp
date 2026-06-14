@@ -79,7 +79,7 @@ TEST_CASE("a UniformNode feeds a GraphicsNode descriptor by reflected name", "[n
 	// Graph: MeshNode -> mesh; tint source -> UniformNode -> uniform; GraphicsNode draws the
 	// mesh with the tint uniform -> scene.
 	Graph			 graph;
-	auto			 screen	 = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen	 = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 tint	 = graph.add_source<glm::vec4>(glm::vec4{0.0F, 1.0F, 0.0F, 1.0F}); // green
 	const DataHandle mesh	 = graph.add(std::make_unique<ValueData<veng::gpu::MeshRef>>(veng::gpu::MeshRef{}));
 	const DataHandle uniform = graph.add(std::make_unique<ValueData<veng::gpu::UniformRef>>(veng::gpu::UniformRef{}));

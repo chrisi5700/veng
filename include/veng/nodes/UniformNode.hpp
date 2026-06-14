@@ -89,7 +89,7 @@ class UniformNode final : public gpu::GpuNode
 	graph::DataHandle								m_value; ///< The reactive value edge.
 	graph::DataHandle								m_output;
 	std::string										m_name;
-	vk::DeviceSize									m_size;
+	std::uint64_t									m_size;
 	std::function<const void*(graph::ExecContext&)> m_read;
 	bool				 m_declared	 = false; ///< `true` once `m_buffer_id` has been declared in the pool.
 	BufferId			 m_buffer_id = 0;	  ///< Pool-owned, N-buffered uniform buffer.

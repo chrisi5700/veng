@@ -23,9 +23,9 @@ veng::Context make_context()
 	return std::move(result.value());
 }
 
-constexpr vk::Format   COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr vk::Format   DEPTH = vk::Format::eD32Sfloat;
-constexpr vk::Extent2D EXTENT{8, 8};
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr veng::rhi::Format DEPTH = veng::rhi::Format::D32_SFLOAT;
+constexpr vk::Extent2D		EXTENT{8, 8};
 
 // Whether `bits` is exactly one set bit (a valid single sample-count flag).
 bool is_single_bit(vk::SampleCountFlags bits)
@@ -43,17 +43,17 @@ TEST_CASE("clamp_sample_count never exceeds the request or device support", "[re
 	const vk::PhysicalDeviceLimits limits = ctx.physical_device().getProperties().limits;
 	const vk::SampleCountFlags supported  = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts;
 
-	// e1 is always valid and asking for it must stay e1 (never upgraded).
-	REQUIRE(veng::clamp_sample_count(ctx, vk::SampleCountFlagBits::e1) == vk::SampleCountFlagBits::e1);
+	// X1 is always valid and asking for it must stay X1 (never upgraded).
+	REQUIRE(veng::clamp_sample_count(ctx, veng::rhi::SampleCount::X1) == veng::rhi::SampleCount::X1);
 
 	// Asking for the maximum yields a single, device-supported bit that does not exceed the request.
-	for (const vk::SampleCountFlagBits req : {vk::SampleCountFlagBits::e2, vk::SampleCountFlagBits::e4,
-											  vk::SampleCountFlagBits::e8, vk::SampleCountFlagBits::e64})
+	for (const veng::rhi::SampleCount req : {veng::rhi::SampleCount::X2, veng::rhi::SampleCount::X4,
+											 veng::rhi::SampleCount::X8, veng::rhi::SampleCount::X64})
 	{
-		const vk::SampleCountFlagBits got = veng::clamp_sample_count(ctx, req);
-		REQUIRE(is_single_bit(got));
-		REQUIRE(static_cast<unsigned>(got) <= static_cast<unsigned>(req));	// never upgrades past the request
-		REQUIRE((got == vk::SampleCountFlagBits::e1 || (supported & got))); // and is a count the device offers
+		const veng::rhi::SampleCount got = veng::clamp_sample_count(ctx, req);
+		REQUIRE(is_single_bit(veng::rhi::to_vk(got)));
+		REQUIRE(static_cast<unsigned>(got) <= static_cast<unsigned>(req));			   // never upgrades past the request
+		REQUIRE((got == veng::rhi::SampleCount::X1 || (supported & veng::rhi::to_vk(got)))); // a count the device offers
 	}
 }
 
@@ -64,12 +64,12 @@ TEST_CASE("RenderTargetSet acquires a single-sample color target with depth", "[
 	veng::ResourcePool pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 
 	veng::RenderTargetSet targets;
-	targets.configure(COLOR, DEPTH, vk::SampleCountFlagBits::e1);
+	targets.configure(COLOR, DEPTH, veng::rhi::SampleCount::X1);
 	REQUIRE(targets.has_depth());
 	REQUIRE_FALSE(targets.multisampled());
 
 	pool.begin_frame(0);
-	REQUIRE(targets.acquire(pool, EXTENT).has_value());
+	REQUIRE(targets.acquire(pool, veng::rhi::to_rhi(EXTENT)).has_value());
 	REQUIRE(targets.color() != nullptr);
 	// The published/consumed image is always single-sample, MSAA or not.
 	REQUIRE(targets.color()->sample_count() == vk::SampleCountFlagBits::e1);
@@ -83,11 +83,11 @@ TEST_CASE("RenderTargetSet without depth reports none", "[resources][msaa]")
 	veng::ResourcePool pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 
 	veng::RenderTargetSet targets;
-	targets.configure(COLOR, vk::Format::eUndefined, vk::SampleCountFlagBits::e1);
+	targets.configure(COLOR, veng::rhi::Format::UNDEFINED, veng::rhi::SampleCount::X1);
 	REQUIRE_FALSE(targets.has_depth());
 
 	pool.begin_frame(0);
-	REQUIRE(targets.acquire(pool, EXTENT).has_value());
+	REQUIRE(targets.acquire(pool, veng::rhi::to_rhi(EXTENT)).has_value());
 	REQUIRE(targets.color() != nullptr);
 }
 
@@ -96,8 +96,8 @@ TEST_CASE("RenderTargetSet keeps a single-sample resolve target under MSAA", "[r
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx = make_context();
 
-	const vk::SampleCountFlagBits samples = veng::clamp_sample_count(ctx, vk::SampleCountFlagBits::e4);
-	if (samples == vk::SampleCountFlagBits::e1)
+	const veng::rhi::SampleCount samples = veng::clamp_sample_count(ctx, veng::rhi::SampleCount::X4);
+	if (samples == veng::rhi::SampleCount::X1)
 	{
 		SKIP("device does not support multisampled framebuffers");
 	}
@@ -106,10 +106,10 @@ TEST_CASE("RenderTargetSet keeps a single-sample resolve target under MSAA", "[r
 	veng::RenderTargetSet targets;
 	targets.configure(COLOR, DEPTH, samples);
 	REQUIRE(targets.multisampled());
-	REQUIRE(targets.sample_count() == samples);
+	REQUIRE(targets.sample_count() == veng::rhi::to_vk(samples));
 
 	pool.begin_frame(0);
-	REQUIRE(targets.acquire(pool, EXTENT).has_value());
+	REQUIRE(targets.acquire(pool, veng::rhi::to_rhi(EXTENT)).has_value());
 	// color() is the resolve target a consumer samples — single-sample even though the pass renders
 	// into a `samples`-count attachment internally.
 	REQUIRE(targets.color() != nullptr);

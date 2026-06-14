@@ -14,7 +14,7 @@
 
 namespace veng::passes
 {
-OutlinePass::OutlinePass(graph::Graph& graph, rhi::Format color_format, graph::TypedHandle<vk::Extent2D> screen,
+OutlinePass::OutlinePass(graph::Graph& graph, rhi::Format color_format, graph::TypedHandle<rhi::Extent2D> screen,
 						 graph::DataHandle output, const OutlineConfig& config)
 	: m_graph(&graph)
 {
@@ -33,7 +33,7 @@ OutlinePass::OutlinePass(graph::Graph& graph, rhi::Format color_format, graph::T
 	// 1 / extent, so the Gaussian taps are expressed in UV space and the glow is
 	// resolution-independent. A pure CPU transform: recomputed only when the window resizes.
 	const TypedHandle<glm::vec2> texel = graph.add_transform(
-		[](const vk::Extent2D& size) -> glm::vec2
+		[](const rhi::Extent2D& size) -> glm::vec2
 		{ return {1.0F / static_cast<float>(size.width), 1.0F / static_cast<float>(size.height)}; }, screen);
 
 	// Internal edges the caller never sees: the white mask and the horizontal-blur result.

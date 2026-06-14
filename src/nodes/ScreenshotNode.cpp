@@ -49,12 +49,11 @@ std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext
 	// RGBA8 staging: the demo formats are 4 bytes/pixel; on_retired writes RGB to the PPM and
 	// drops alpha. (A more general node would inspect the format and adapt the conversion.)
 	constexpr std::size_t bytes_per_pixel = 4;
-	const vk::DeviceSize size = static_cast<vk::DeviceSize>(image.extent.width) * image.extent.height * bytes_per_pixel;
+	const std::uint64_t	  size = static_cast<std::uint64_t>(image.extent.width) * image.extent.height * bytes_per_pixel;
 	if (!m_staging.has_value() || m_staging->size() < size)
 	{
-		auto buf = Buffer::create(
-			ctx.allocator(), ctx.rhi(), size, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
-			vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
+		auto buf = Buffer::create(ctx.allocator(), ctx.rhi(), size, rhi::BufferUsageFlags::TRANSFER_DST,
+								  rhi::MemoryAccess::HOST_VISIBLE);
 		if (!buf.has_value() || buf->mapped() == nullptr)
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);

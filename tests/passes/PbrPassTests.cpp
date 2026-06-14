@@ -96,7 +96,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, const PbrCase& c)
 	const std::vector<std::uint32_t> indices{0, 1, 2, 0, 2, 3};
 
 	Graph graph;
-	auto  screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto  screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 
 	// Camera at +Z looking at the origin; Vulkan Y-flip on the projection (engine convention).
 	const glm::mat4 view = glm::lookAt(glm::vec3(0, 0, 2.2F), glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
@@ -356,7 +356,7 @@ TEST_CASE("PbrPass caches a static multi-material scene", "[passes][pbr][caching
 	const std::vector<std::uint32_t> indices{0, 1, 2};
 
 	Graph			 graph;
-	auto			 screen	   = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen	   = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 view_proj = graph.add_source<glm::mat4>(glm::mat4(1.0F));
 	auto			 eye	   = graph.add_source<glm::vec4>(glm::vec4(0, 0, 2, 0));
 	auto			 base	   = graph.add_source<veng::gpu::ImageRef>(white.ref());

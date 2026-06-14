@@ -25,7 +25,7 @@ std::expected<bool, graph::ExecError> UniformNode::record(gpu::GpuExecContext& c
 	// frame is still reading (the previous single-buffered design was only safe at 1 in flight).
 	if (!m_declared)
 	{
-		m_buffer_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
+		m_buffer_id = ctx.pool().declare_buffer(rhi::BufferUsageFlags::UNIFORM);
 		m_declared	= true;
 	}
 	auto buffer = ctx.pool().acquire_buffer(m_buffer_id, m_size);

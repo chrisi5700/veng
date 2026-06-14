@@ -104,9 +104,9 @@ ImageId ResourcePool::declare_image(vk::Format format, vk::ImageUsageFlags usage
 	return static_cast<ImageId>(m_images.size() - 1);
 }
 
-BufferId ResourcePool::declare_buffer(vk::BufferUsageFlags usage)
+BufferId ResourcePool::declare_buffer(rhi::BufferUsageFlags usage)
 {
-	m_buffers.push_back(BufferResource{.usage = usage});
+	m_buffers.push_back(BufferResource{.usage = rhi::to_vk(usage)});
 	return static_cast<BufferId>(m_buffers.size() - 1);
 }
 

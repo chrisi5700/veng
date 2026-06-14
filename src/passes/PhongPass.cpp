@@ -83,12 +83,12 @@ class PhongRenderNode final : public gpu::GpuNode
 			return std::unexpected(built.error());
 		}
 
-		const auto* size = dynamic_cast<graph::ValueData<vk::Extent2D>*>(ctx.data(m_inputs[0]));
+		const auto* size = dynamic_cast<graph::ValueData<rhi::Extent2D>*>(ctx.data(m_inputs[0]));
 		if (size == nullptr)
 		{
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
 		}
-		const vk::Extent2D extent = size->value();
+		const rhi::Extent2D extent = size->value();
 		if (extent.width == 0 || extent.height == 0)
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -113,7 +113,7 @@ class PhongRenderNode final : public gpu::GpuNode
 
 		rhi::CommandEncoder& enc = ctx.encoder();
 		m_targets.begin(ctx.pool(), enc, extent, m_config.clear_color);
-		enc.set_viewport_scissor(rhi::to_rhi(extent));
+		enc.set_viewport_scissor(extent);
 
 		// Opaque first (writes depth), then each translucent object's far faces, then its near
 		// faces — both depth-tested against the opaque pass but not writing depth, alpha-blended.
@@ -185,7 +185,7 @@ class PhongRenderNode final : public gpu::GpuNode
 		// eColorAttachmentOptimal; the consumer's image_usages drives the transition it needs.
 		m_versioned.publish(ctx, m_output,
 							gpu::ImageRef{.texture		= color_image->handle(),
-										  .extent		= rhi::to_rhi(extent),
+										  .extent		= extent,
 										  .format		= m_color_format,
 										  .sample_count = rhi::to_rhi(color_image->sample_count()),
 										  .pool_id		= m_targets.color_id()});
@@ -216,8 +216,8 @@ class PhongRenderNode final : public gpu::GpuNode
 		}
 		// Clamp the requested MSAA to the device and configure the targets + every pipeline with the
 		// same sample count (Vulkan requires the pipeline match its multisampled attachments).
-		const vk::SampleCountFlagBits samples = clamp_sample_count(ctx.context(), rhi::to_vk(m_config.samples));
-		m_targets.configure(rhi::to_vk(m_color_format), rhi::to_vk(m_depth_format), samples);
+		const rhi::SampleCount samples = clamp_sample_count(ctx.context(), m_config.samples);
+		m_targets.configure(m_color_format, m_depth_format, samples);
 
 		const std::array color_formats{m_color_format};
 		// All three pipelines share the shader pair; only cull / depth-write / blend differ.
@@ -239,7 +239,7 @@ class PhongRenderNode final : public gpu::GpuNode
 			builder.color_formats(color_formats)
 				.depth_format(m_depth_format)
 				.depth_write(state.depth_write)
-				.sample_count(rhi::to_rhi(samples))
+				.sample_count(samples)
 				.rasterization(rhi::PolygonMode::FILL, state.cull, rhi::FrontFace::CLOCKWISE)
 				.blend(state.blend);
 			return builder.build(ctx.context());
@@ -276,7 +276,7 @@ class PhongRenderNode final : public gpu::GpuNode
 };
 
 PhongPass::PhongPass(graph::Graph& graph, rhi::Format color_format, rhi::Format depth_format,
-					 graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
+					 graph::TypedHandle<rhi::Extent2D> screen, graph::DataHandle output,
 					 graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye,
 					 const PhongConfig& config)
 	: m_output(output)

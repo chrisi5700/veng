@@ -88,7 +88,7 @@ TEST_CASE("one GraphicsNode draws two meshes with per-draw push constants", "[no
 	// GraphicsNode draws both meshes into one scene image — a draw per mesh, each pushing its
 	// own translation.
 	Graph			 graph;
-	auto			 screen = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 left  = graph.add_source<glm::mat4>(glm::translate(glm::mat4(1.0F), glm::vec3(-0.5F, 0.0F, 0.0F)));
 	auto			 right = graph.add_source<glm::mat4>(glm::translate(glm::mat4(1.0F), glm::vec3(0.5F, 0.0F, 0.0F)));
 	const DataHandle mesh_red  = graph.add(std::make_unique<ValueData<veng::gpu::MeshRef>>(veng::gpu::MeshRef{}));

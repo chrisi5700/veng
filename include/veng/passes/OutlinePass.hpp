@@ -91,7 +91,7 @@ class OutlinePass
 	 * @param output       `ValueData<gpu::ImageRef>` edge this pass writes its glow result into.
 	 * @param config       Initial color and width; both are live and adjustable after construction.
 	 */
-	OutlinePass(graph::Graph& graph, rhi::Format color_format, graph::TypedHandle<vk::Extent2D> screen,
+	OutlinePass(graph::Graph& graph, rhi::Format color_format, graph::TypedHandle<rhi::Extent2D> screen,
 				graph::DataHandle output, const OutlineConfig& config = {});
 
 	/**

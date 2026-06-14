@@ -137,7 +137,7 @@ class PbrPass
 	 * @param config       Directional light and pipeline tunables.
 	 */
 	PbrPass(graph::Graph& graph, rhi::Format color_format, rhi::Format depth_format,
-			graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output, graph::TypedHandle<glm::mat4> view_proj,
+			graph::TypedHandle<rhi::Extent2D> screen, graph::DataHandle output, graph::TypedHandle<glm::mat4> view_proj,
 			graph::TypedHandle<glm::vec4> eye, const PbrConfig& config = {});
 
 	PbrPass(const PbrPass&)			   = delete;

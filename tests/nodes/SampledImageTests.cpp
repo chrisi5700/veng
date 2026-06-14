@@ -60,7 +60,7 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 	// Graph: two solid-color fullscreen passes (green, blue) -> images left SHADER_READ_ONLY;
 	// a sampler pass samples one of them (start: green) and writes it out for readback.
 	Graph			 graph;
-	auto			 screen		 = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen		 = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 green		 = graph.add_source<glm::vec4>(glm::vec4{0.0F, 1.0F, 0.0F, 1.0F});
 	auto			 blue		 = graph.add_source<glm::vec4>(glm::vec4{0.0F, 0.0F, 1.0F, 1.0F});
 	const DataHandle green_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));

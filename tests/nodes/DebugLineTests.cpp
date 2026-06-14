@@ -62,7 +62,7 @@ TEST_CASE("a DynamicMeshNode + line-topology GraphicsNode renders dynamic line s
 								   DebugVertex{.position = {0.9F, 0.1F, 0.5F}, .color = {1.0F, 0.0F, 0.0F}}};
 
 	Graph			 graph;
-	auto			 screen	   = graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen	   = graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 verts_src = graph.add_source<std::vector<DebugVertex>>(lines);
 	const DataHandle mesh	   = graph.add(std::make_unique<ValueData<veng::gpu::MeshRef>>(veng::gpu::MeshRef{}));
 	const DataHandle token	   = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));

@@ -136,10 +136,10 @@ class ResourcePool
 	 *
 	 * The buffer is persistently mapped; size is supplied per @ref acquire_buffer call.
 	 *
-	 * @param usage Vulkan buffer-usage flags (e.g. uniform, storage).
+	 * @param usage RHI buffer-usage flags (e.g. `UNIFORM`, `STORAGE`).
 	 * @return A stable @ref BufferId valid for the lifetime of this pool.
 	 */
-	[[nodiscard]] BufferId declare_buffer(vk::BufferUsageFlags usage);
+	[[nodiscard]] BufferId declare_buffer(rhi::BufferUsageFlags usage);
 
 	/**
 	 * @brief Declare an immutable image initialized to a solid clear colour.

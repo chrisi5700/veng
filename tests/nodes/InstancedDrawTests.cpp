@@ -98,7 +98,7 @@ TEST_CASE("an instanced GraphicsNode reads its instance data + count from a Stor
 								   Body{.offset = {0.5F, -0.5F, 0.0F, 0.0F}}, Body{.offset = {0.0F, 0.5F, 0.0F, 0.0F}}};
 
 	Graph			 graph;
-	auto			 screen		= graph.add_source<vk::Extent2D>(vk::Extent2D{SIDE, SIDE});
+	auto			 screen		= graph.add_source<veng::rhi::Extent2D>(veng::rhi::Extent2D{SIDE, SIDE});
 	auto			 bodies_src = graph.add_source<std::vector<Body>>(bodies);
 	const DataHandle mesh		= graph.add(std::make_unique<ValueData<veng::gpu::MeshRef>>(veng::gpu::MeshRef{}));
 	const DataHandle ssbo		= graph.add(std::make_unique<ValueData<veng::gpu::BufferRef>>(veng::gpu::BufferRef{}));
