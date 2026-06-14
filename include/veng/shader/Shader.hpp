@@ -327,6 +327,11 @@ class Shader
 	static std::expected<Shader, std::string> create_shader(vk::Device device, std::string_view name,
 															std::string_view entry_point = "main");
 
+	/// @brief Convenience overload taking the engine @ref veng::Context (so a caller need not pull out a
+	///        `vk::Device`); delegates to the `vk::Device` overload with `context.device()`.
+	static std::expected<Shader, std::string> create_shader(const Context& context, std::string_view name,
+															std::string_view entry_point = "main");
+
 	/** @brief All descriptor bindings reflected from this shader's SPIR-V. */
 	[[nodiscard]] const std::vector<DescriptorInfo>& get_descriptor_infos() const;
 	/** @brief The push-constant block, if the shader declares one; `std::nullopt` otherwise. */

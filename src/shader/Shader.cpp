@@ -950,6 +950,12 @@ std::expected<Shader, std::string> Shader::create_shader(vk::Device device, std:
 	return Shader{device, *module, stage, details, descriptors, push_constants, std::string{entry_point}};
 }
 
+std::expected<Shader, std::string> Shader::create_shader(const Context& context, std::string_view name,
+														 std::string_view entry_point)
+{
+	return create_shader(context.device(), name, entry_point);
+}
+
 const std::vector<DescriptorInfo>& Shader::get_descriptor_infos() const
 {
 	return m_descriptor_infos;

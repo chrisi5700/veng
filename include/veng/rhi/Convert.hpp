@@ -224,6 +224,76 @@ namespace veng::rhi
 	return vk::Filter::eLinear; // unreachable
 }
 
+/// @brief Translate an @ref rhi::TextureUsageFlags capability mask to `vk::ImageUsageFlags`.
+[[nodiscard]] constexpr vk::ImageUsageFlags to_vk(TextureUsageFlags usage) noexcept
+{
+	vk::ImageUsageFlags flags{};
+	if ((usage & TextureUsageFlags::SAMPLED) != TextureUsageFlags::NONE)
+	{
+		flags |= vk::ImageUsageFlagBits::eSampled;
+	}
+	if ((usage & TextureUsageFlags::COLOR_ATTACHMENT) != TextureUsageFlags::NONE)
+	{
+		flags |= vk::ImageUsageFlagBits::eColorAttachment;
+	}
+	if ((usage & TextureUsageFlags::DEPTH_ATTACHMENT) != TextureUsageFlags::NONE)
+	{
+		flags |= vk::ImageUsageFlagBits::eDepthStencilAttachment;
+	}
+	if ((usage & TextureUsageFlags::TRANSFER_SRC) != TextureUsageFlags::NONE)
+	{
+		flags |= vk::ImageUsageFlagBits::eTransferSrc;
+	}
+	if ((usage & TextureUsageFlags::TRANSFER_DST) != TextureUsageFlags::NONE)
+	{
+		flags |= vk::ImageUsageFlagBits::eTransferDst;
+	}
+	return flags;
+}
+
+/// @brief Translate an @ref rhi::BufferUsageFlags capability mask to `vk::BufferUsageFlags`.
+[[nodiscard]] constexpr vk::BufferUsageFlags to_vk(BufferUsageFlags usage) noexcept
+{
+	vk::BufferUsageFlags flags{};
+	if ((usage & BufferUsageFlags::VERTEX) != BufferUsageFlags::NONE)
+	{
+		flags |= vk::BufferUsageFlagBits::eVertexBuffer;
+	}
+	if ((usage & BufferUsageFlags::INDEX) != BufferUsageFlags::NONE)
+	{
+		flags |= vk::BufferUsageFlagBits::eIndexBuffer;
+	}
+	if ((usage & BufferUsageFlags::UNIFORM) != BufferUsageFlags::NONE)
+	{
+		flags |= vk::BufferUsageFlagBits::eUniformBuffer;
+	}
+	if ((usage & BufferUsageFlags::STORAGE) != BufferUsageFlags::NONE)
+	{
+		flags |= vk::BufferUsageFlagBits::eStorageBuffer;
+	}
+	if ((usage & BufferUsageFlags::TRANSFER_SRC) != BufferUsageFlags::NONE)
+	{
+		flags |= vk::BufferUsageFlagBits::eTransferSrc;
+	}
+	if ((usage & BufferUsageFlags::TRANSFER_DST) != BufferUsageFlags::NONE)
+	{
+		flags |= vk::BufferUsageFlagBits::eTransferDst;
+	}
+	return flags;
+}
+
+/// @brief Translate an @ref rhi::LoadOp to its `vk::AttachmentLoadOp`.
+[[nodiscard]] constexpr vk::AttachmentLoadOp to_vk(LoadOp op) noexcept
+{
+	switch (op)
+	{
+		case LoadOp::CLEAR: return vk::AttachmentLoadOp::eClear;
+		case LoadOp::LOAD: return vk::AttachmentLoadOp::eLoad;
+		case LoadOp::DONT_CARE: return vk::AttachmentLoadOp::eDontCare;
+	}
+	return vk::AttachmentLoadOp::eClear; // unreachable
+}
+
 /// @brief Translate an @ref rhi::IndexType to its `vk::IndexType`.
 [[nodiscard]] constexpr vk::IndexType to_vk(IndexType type) noexcept
 {

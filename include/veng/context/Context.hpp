@@ -131,7 +131,7 @@ class Context
 		, m_allocator(m_allocator)
 		, m_surface(m_surface)
 	{
-		m_rhi = std::make_unique<rhi::Device>(m_device);
+		m_rhi = std::make_unique<rhi::Device>(m_device, m_allocator, m_graphics_queue, m_queue_indices.graphics);
 		Logger::instance().info("VulkanContext VK_HEADER_VERSION: {}", VK_HEADER_VERSION);
 		Logger::instance().info("VulkanContext initialized");
 	}
@@ -144,7 +144,9 @@ class Context
 	vk::Queue				   m_compute_queue;
 	vma::Allocator			   m_allocator;
 	vk::SurfaceKHR			   m_surface; ///< Null for headless; owned and destroyed before the instance.
-	/// RHI handle registry; pure slot-map (owns no vk objects), so teardown order vs the device is moot.
+	/// The RHI device (handle registry + resource/command factory). Declared last so it is destroyed
+	/// FIRST — its owned vk objects (created textures/buffers, sampler, command pool, fence) are freed
+	/// while the borrowed `vk::Device`/allocator above are still alive.
 	std::unique_ptr<rhi::Device> m_rhi;
 };
 } // namespace veng

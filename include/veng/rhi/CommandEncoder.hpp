@@ -20,8 +20,10 @@
 #ifndef VENG_RHI_COMMANDENCODER_HPP
 #define VENG_RHI_COMMANDENCODER_HPP
 
+#include <array>
 #include <cstdint>
 #include <span>
+#include <vector>
 #include <veng/rhi/Convert.hpp>
 #include <veng/rhi/Device.hpp>
 #include <veng/rhi/Enums.hpp>
@@ -30,6 +32,21 @@
 
 namespace veng::rhi
 {
+/// @brief One color target of a render pass, in RHI vocabulary. @see CommandEncoder::begin_rendering
+struct ColorAttachment
+{
+	TextureHandle		 texture;							  ///< The target to render into.
+	LoadOp				 load = LoadOp::CLEAR;				  ///< What to do with its existing contents.
+	std::array<float, 4> clear_color{0.0F, 0.0F, 0.0F, 1.0F}; ///< Clear value when `load == CLEAR`.
+};
+
+/// @brief A dynamic-rendering pass description. @see CommandEncoder::begin_rendering
+struct RenderPassDesc
+{
+	Extent2D						 area;				///< The render area (and viewport-sized region).
+	std::span<const ColorAttachment> color_attachments; ///< Color targets, in attachment order.
+};
+
 /**
  * @brief Records GPU commands for one frame in RHI vocabulary, resolving handles via the @ref Device.
  *
@@ -49,7 +66,33 @@ class CommandEncoder
 	{
 	}
 
-	// --- graphics: pipeline + dynamic state -------------------------------------------------
+	// --- graphics: render pass + pipeline + dynamic state -----------------------------------
+
+	/**
+	 * @brief Begin a dynamic-rendering pass into @p desc's color targets.
+	 *
+	 * Each target must already be in @ref TextureUsage::COLOR_ATTACHMENT (transition it first). The
+	 * encoder resolves each handle's view and builds the rendering info — no caller names a
+	 * `vk::RenderingInfo` or image layout. Pair with @ref end_rendering.
+	 */
+	void begin_rendering(const RenderPassDesc& desc) const
+	{
+		std::vector<vk::RenderingAttachmentInfo> color;
+		color.reserve(desc.color_attachments.size());
+		for (const ColorAttachment& attachment : desc.color_attachments)
+		{
+			color.push_back(vk::RenderingAttachmentInfo()
+								.setImageView(m_device->view(attachment.texture))
+								.setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+								.setLoadOp(to_vk(attachment.load))
+								.setStoreOp(vk::AttachmentStoreOp::eStore)
+								.setClearValue(vk::ClearValue().setColor(vk::ClearColorValue(attachment.clear_color))));
+		}
+		m_cmd.beginRendering(vk::RenderingInfo()
+								 .setRenderArea(vk::Rect2D({0, 0}, to_vk(desc.area)))
+								 .setLayerCount(1)
+								 .setColorAttachments(color));
+	}
 
 	/// @brief Bind a graphics pipeline for subsequent draws.
 	void bind_pipeline(PipelineHandle pipeline) const

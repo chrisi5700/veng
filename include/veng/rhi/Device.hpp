@@ -1,19 +1,24 @@
 /**
  * @file
  * @author chris
- * @brief The RHI resource registry: maps opaque @ref veng::rhi handles to their Vulkan objects.
+ * @brief The RHI device: an opaque-handle registry AND a resource/command factory.
  *
- * `Device` is the indirection that lets graph edges carry opaque handles instead of raw `vk::Image`
- * / `vk::Buffer`. A resource registers its vk objects here on creation and gets back a stable
- * handle; a consumer recording a command resolves the handle to the vk objects through the device.
- * The device does **not** own the textures/buffers — the `Image`/`Buffer` RAII wrappers (and the
- * swapchain) own them and register/release their slots over their own lifetime. It is therefore a
- * pure slot-map: registration hands out an id, release frees the slot for reuse, resolution is a
- * bounds-checked lookup that returns a null vk handle for an invalid/released id.
+ * Two roles in one type. As a **registry**, `Device` is the indirection that lets graph edges carry
+ * opaque handles instead of raw `vk::Image`/`vk::Buffer`: a resource registers its vk objects and
+ * gets a stable handle, and a consumer recording a command resolves the handle back to the vk
+ * objects through the device. The engine's `Image`/`Buffer` wrappers and the swapchain register here
+ * and own their own vk objects (the registry slot is non-owning for those).
  *
- * One `Device` lives inside the engine @ref veng::Context. Resolution is read-only and lock-free;
- * registration/release happen at resource create/destroy time (frame setup + teardown), not in the
- * record hot path.
+ * As a **factory/device**, it can also create the resources and run the commands itself, entirely in
+ * RHI vocabulary: @ref create_texture / @ref create_buffer allocate device-owned resources, @ref
+ * create_sampler owns samplers, and @ref begin_commands + @ref submit hand out a one-shot @ref
+ * CommandEncoder and execute it. This is what lets a caller render without ever naming Vulkan (see
+ * `example/rhi_triangle`). Device-created objects, the sampler pool, and the one-shot command pool +
+ * fence are freed in the destructor.
+ *
+ * One `Device` lives inside the engine @ref veng::Context, destroyed before the `vk::Device`/
+ * allocator it borrows. Handle resolution is read-only and lock-free; create/destroy happen at
+ * resource setup/teardown, not in the record hot path.
  *
  * @ingroup rhi
  */
@@ -26,37 +31,83 @@
 #include <span>
 #include <vector>
 #include <veng/rhi/BindGroup.hpp>
+#include <veng/rhi/Enums.hpp>
 #include <veng/rhi/Handles.hpp>
+#include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::rhi
 {
+class CommandEncoder;
+
+/// @brief Parameters for @ref Device::create_texture — a 2D image in RHI vocabulary.
+struct TextureDesc
+{
+	Extent2D		  extent;					 ///< Width/height in texels.
+	Format			  format;					 ///< Pixel format.
+	TextureUsageFlags usage;					 ///< What the texture may be used for.
+	SampleCount		  samples = SampleCount::X1; ///< MSAA sample count.
+};
+
+/// @brief Parameters for @ref Device::create_buffer — a GPU buffer in RHI vocabulary.
+struct BufferDesc
+{
+	std::uint64_t	 size;							  ///< Size in bytes.
+	BufferUsageFlags usage;							  ///< What the buffer may be bound as.
+	MemoryAccess	 memory = MemoryAccess::GPU_ONLY; ///< Where it lives / whether it is host-mapped.
+};
+
 /**
- * @brief Handle→Vulkan-object registry for textures and buffers, and the owner of RHI samplers.
+ * @brief The RHI device: a handle registry AND the factory that creates GPU resources and records +
+ *        submits commands — enough to render without naming Vulkan.
  *
- * Textures/buffers are non-owning: their vk objects are owned by the `Image`/`Buffer`/swapchain and
- * the device only maps handle ids to them. Samplers, by contrast, the device owns outright —
- * @ref create_sampler builds one and the device destroys all of them in its destructor, so a node
- * no longer captures a `vk::Device` to free its own sampler.
+ * Two roles. (1) Registry: a resource registers its vk objects and gets a stable opaque handle; a
+ * consumer resolves a handle back to its vk objects when it records. The engine's `Image`/`Buffer`/
+ * swapchain register here and own their own vk objects (non-owning slots). (2) Device: @ref
+ * create_texture / @ref create_buffer allocate RHI-owned resources (freed on @ref destroy_texture /
+ * @ref destroy_buffer or with the device); @ref create_sampler owns samplers; @ref begin_commands +
+ * @ref submit give a one-shot @ref CommandEncoder and run it. A caller can therefore create targets,
+ * record a pass, and submit entirely in RHI vocabulary.
  *
- * Non-copyable and non-movable: the engine @ref veng::Context holds exactly one via `unique_ptr`,
- * so only the pointer ever moves, never this object (which keeps owned-sampler teardown trivial).
+ * Non-copyable and non-movable: the engine @ref veng::Context holds exactly one via `unique_ptr`, so
+ * only the pointer ever moves. It is destroyed before the `vk::Device`/allocator it borrows.
  *
  * @ingroup rhi
  */
 class Device
 {
 	 public:
-	/// @param device The logical device used to create and destroy owned samplers.
-	explicit Device(vk::Device device) noexcept
-		: m_device(device)
-	{
-	}
+	/// @param device          The logical device used to create owned objects (samplers, views, commands).
+	/// @param allocator       The VMA allocator backing @ref create_texture / @ref create_buffer.
+	/// @param graphics_queue  The queue @ref submit submits to.
+	/// @param graphics_family The graphics queue family the one-shot command pool is created for.
+	Device(vk::Device device, vma::Allocator allocator, vk::Queue graphics_queue,
+		   std::uint32_t graphics_family) noexcept;
 	Device(const Device&)			 = delete;
 	Device& operator=(const Device&) = delete;
 	Device(Device&&)				 = delete;
 	Device& operator=(Device&&)		 = delete;
 	~Device();
+
+	// --- device-level resource creation (RHI-owned; freed on destroy_* or with the device) --------
+
+	/// @brief Allocate an RHI-owned texture (image + view, registered), returning its handle.
+	[[nodiscard]] std::expected<TextureHandle, vk::Result> create_texture(const TextureDesc& desc);
+	/// @brief Free a texture created by @ref create_texture (image, view, memory) and its slot.
+	void destroy_texture(TextureHandle handle) noexcept;
+	/// @brief Allocate an RHI-owned buffer, returning its handle. HOST_VISIBLE buffers are mapped.
+	[[nodiscard]] std::expected<BufferHandle, vk::Result> create_buffer(const BufferDesc& desc);
+	/// @brief Free a buffer created by @ref create_buffer and its slot.
+	void destroy_buffer(BufferHandle handle) noexcept;
+	/// @brief The persistently-mapped host pointer for a HOST_VISIBLE buffer (null otherwise).
+	[[nodiscard]] void* mapped(BufferHandle handle) const noexcept;
+
+	// --- commands ---------------------------------------------------------------------------------
+
+	/// @brief Begin recording a one-shot command encoder (the device owns the command buffer).
+	[[nodiscard]] CommandEncoder begin_commands();
+	/// @brief End @p enc, submit it on the graphics queue, and block until it completes.
+	[[nodiscard]] std::expected<void, vk::Result> submit(CommandEncoder& enc);
 
 	/// @brief Register an image + its default view, returning a stable handle to them.
 	[[nodiscard]] TextureHandle register_texture(vk::Image image, vk::ImageView view);
@@ -106,18 +157,30 @@ class Device
 	 private:
 	struct Texture
 	{
-		vk::Image	  image;
-		vk::ImageView view;
+		vk::Image		image;
+		vk::ImageView	view;
+		vma::Allocation allocation{}; ///< Non-null only for device-created textures (the device frees those).
+	};
+	struct Buffer
+	{
+		vk::Buffer		buffer;
+		vma::Allocation allocation{}; ///< Non-null only for device-created buffers.
+		void*			mapped{};	  ///< Host pointer for a HOST_VISIBLE device-created buffer.
 	};
 	struct Pipeline
 	{
 		vk::Pipeline	   pipeline;
 		vk::PipelineLayout layout;
 	};
-	vk::Device				   m_device; ///< For owned-sampler create/destroy.
+	vk::Device				   m_device;		   ///< For owned-sampler/view/command create + destroy.
+	vma::Allocator			   m_allocator{};	   ///< Backs create_texture / create_buffer.
+	vk::Queue				   m_graphics_queue{}; ///< submit() target.
+	vk::CommandPool			   m_command_pool{};   ///< One-shot pool for begin_commands().
+	vk::CommandBuffer		   m_command_buffer{}; ///< The reusable one-shot buffer begin_commands() hands out.
+	vk::Fence				   m_fence{};		   ///< submit() waits on this.
 	std::vector<Texture>	   m_textures;
 	std::vector<std::uint32_t> m_free_textures;
-	std::vector<vk::Buffer>	   m_buffers;
+	std::vector<Buffer>		   m_buffers;
 	std::vector<std::uint32_t> m_free_buffers;
 	std::vector<vk::Semaphore> m_semaphores; ///< Non-owning; the swapchain owns the vk objects.
 	std::vector<std::uint32_t> m_free_semaphores;

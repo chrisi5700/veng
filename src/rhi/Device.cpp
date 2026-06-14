@@ -7,13 +7,64 @@
 
 #include <expected>
 #include <vector>
+#include <veng/rhi/CommandEncoder.hpp>
 #include <veng/rhi/Convert.hpp>
 #include <veng/rhi/Device.hpp>
 
 namespace veng::rhi
 {
+Device::Device(vk::Device device, vma::Allocator allocator, vk::Queue graphics_queue,
+			   std::uint32_t graphics_family) noexcept
+	: m_device(device)
+	, m_allocator(allocator)
+	, m_graphics_queue(graphics_queue)
+{
+	// A one-shot command pool + reusable buffer + fence so begin_commands()/submit() can record and
+	// run a pass without the caller touching Vulkan. On failure these stay null and submit() reports it.
+	const auto pool = m_device.createCommandPool(
+		vk::CommandPoolCreateInfo()
+			.setQueueFamilyIndex(graphics_family)
+			.setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient));
+	if (pool.result == vk::Result::eSuccess)
+	{
+		m_command_pool	= pool.value;
+		const auto bufs = m_device.allocateCommandBuffers(vk::CommandBufferAllocateInfo()
+															  .setCommandPool(m_command_pool)
+															  .setLevel(vk::CommandBufferLevel::ePrimary)
+															  .setCommandBufferCount(1));
+		if (bufs.result == vk::Result::eSuccess)
+		{
+			m_command_buffer = bufs.value.front();
+		}
+	}
+	if (const auto fence = m_device.createFence({}); fence.result == vk::Result::eSuccess)
+	{
+		m_fence = fence.value;
+	}
+}
+
 Device::~Device()
 {
+	// Free everything the device owns: created textures/buffers (allocation marks ownership), samplers,
+	// and the one-shot command objects. All before the borrowed vk::Device/allocator are destroyed.
+	for (const Texture& tex : m_textures)
+	{
+		if (tex.allocation)
+		{
+			if (tex.view)
+			{
+				m_device.destroyImageView(tex.view);
+			}
+			m_allocator.destroyImage(tex.image, tex.allocation);
+		}
+	}
+	for (const Buffer& buf : m_buffers)
+	{
+		if (buf.allocation)
+		{
+			m_allocator.destroyBuffer(buf.buffer, buf.allocation);
+		}
+	}
 	for (const vk::Sampler smp : m_samplers)
 	{
 		if (smp)
@@ -21,6 +72,188 @@ Device::~Device()
 			m_device.destroySampler(smp);
 		}
 	}
+	if (m_fence)
+	{
+		m_device.destroyFence(m_fence);
+	}
+	if (m_command_pool)
+	{
+		m_device.destroyCommandPool(m_command_pool); // frees m_command_buffer with it
+	}
+}
+
+std::expected<TextureHandle, vk::Result> Device::create_texture(const TextureDesc& desc)
+{
+	const auto				  image_info = vk::ImageCreateInfo()
+											   .setImageType(vk::ImageType::e2D)
+											   .setFormat(to_vk(desc.format))
+											   .setExtent(vk::Extent3D{desc.extent.width, desc.extent.height, 1})
+											   .setMipLevels(1)
+											   .setArrayLayers(1)
+											   .setSamples(to_vk(desc.samples))
+											   .setTiling(vk::ImageTiling::eOptimal)
+											   .setUsage(to_vk(desc.usage))
+											   .setSharingMode(vk::SharingMode::eExclusive)
+											   .setInitialLayout(vk::ImageLayout::eUndefined);
+	vma::AllocationCreateInfo alloc_info{};
+	alloc_info.usage = vma::MemoryUsage::eAutoPreferDevice;
+
+	vk::Image		image;
+	vma::Allocation allocation;
+	if (const vk::Result result = m_allocator.createImage(&image_info, &alloc_info, &image, &allocation, nullptr);
+		result != vk::Result::eSuccess)
+	{
+		return std::unexpected(result);
+	}
+
+	// A view only when the usage allows one (attachment/sampled); transfer-only textures get none.
+	constexpr TextureUsageFlags VIEW_USAGES =
+		TextureUsageFlags::SAMPLED | TextureUsageFlags::COLOR_ATTACHMENT | TextureUsageFlags::DEPTH_ATTACHMENT;
+	vk::ImageView view{};
+	if ((desc.usage & VIEW_USAGES) != TextureUsageFlags::NONE)
+	{
+		const bool depth	   = (desc.usage & TextureUsageFlags::DEPTH_ATTACHMENT) != TextureUsageFlags::NONE;
+		const auto view_info   = vk::ImageViewCreateInfo()
+									 .setImage(image)
+									 .setViewType(vk::ImageViewType::e2D)
+									 .setFormat(to_vk(desc.format))
+									 .setSubresourceRange(vk::ImageSubresourceRange()
+															  .setAspectMask(depth ? vk::ImageAspectFlagBits::eDepth
+																				   : vk::ImageAspectFlagBits::eColor)
+															  .setLevelCount(1)
+															  .setLayerCount(1));
+		const auto view_result = m_device.createImageView(view_info);
+		if (view_result.result != vk::Result::eSuccess)
+		{
+			m_allocator.destroyImage(image, allocation);
+			return std::unexpected(view_result.result);
+		}
+		view = view_result.value;
+	}
+
+	const Texture slot{.image = image, .view = view, .allocation = allocation};
+	if (!m_free_textures.empty())
+	{
+		const std::uint32_t id = m_free_textures.back();
+		m_free_textures.pop_back();
+		m_textures[id] = slot;
+		return TextureHandle{.id = id};
+	}
+	m_textures.push_back(slot);
+	return TextureHandle{.id = static_cast<std::uint32_t>(m_textures.size() - 1)};
+}
+
+void Device::destroy_texture(TextureHandle handle) noexcept
+{
+	if (handle.id < m_textures.size())
+	{
+		const Texture& tex = m_textures[handle.id];
+		if (tex.view)
+		{
+			m_device.destroyImageView(tex.view);
+		}
+		if (tex.allocation)
+		{
+			m_allocator.destroyImage(tex.image, tex.allocation);
+		}
+		m_textures[handle.id] = Texture{};
+		m_free_textures.push_back(handle.id);
+	}
+}
+
+std::expected<BufferHandle, vk::Result> Device::create_buffer(const BufferDesc& desc)
+{
+	const auto				  buffer_info = vk::BufferCreateInfo()
+												.setSize(desc.size)
+												.setUsage(to_vk(desc.usage))
+												.setSharingMode(vk::SharingMode::eExclusive);
+	vma::AllocationCreateInfo alloc_info{};
+	if (desc.memory == MemoryAccess::HOST_VISIBLE)
+	{
+		alloc_info.usage = vma::MemoryUsage::eAuto;
+		alloc_info.flags = vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom;
+	}
+	else
+	{
+		alloc_info.usage = vma::MemoryUsage::eAutoPreferDevice;
+	}
+
+	vk::Buffer			buffer;
+	vma::Allocation		allocation;
+	vma::AllocationInfo info{};
+	if (const vk::Result result = m_allocator.createBuffer(&buffer_info, &alloc_info, &buffer, &allocation, &info);
+		result != vk::Result::eSuccess)
+	{
+		return std::unexpected(result);
+	}
+
+	const Buffer slot{.buffer = buffer, .allocation = allocation, .mapped = info.pMappedData};
+	if (!m_free_buffers.empty())
+	{
+		const std::uint32_t id = m_free_buffers.back();
+		m_free_buffers.pop_back();
+		m_buffers[id] = slot;
+		return BufferHandle{.id = id};
+	}
+	m_buffers.push_back(slot);
+	return BufferHandle{.id = static_cast<std::uint32_t>(m_buffers.size() - 1)};
+}
+
+void Device::destroy_buffer(BufferHandle handle) noexcept
+{
+	if (handle.id < m_buffers.size())
+	{
+		const Buffer& buf = m_buffers[handle.id];
+		if (buf.allocation)
+		{
+			m_allocator.destroyBuffer(buf.buffer, buf.allocation);
+		}
+		m_buffers[handle.id] = Buffer{};
+		m_free_buffers.push_back(handle.id);
+	}
+}
+
+void* Device::mapped(BufferHandle handle) const noexcept
+{
+	return handle.id < m_buffers.size() ? m_buffers[handle.id].mapped : nullptr;
+}
+
+CommandEncoder Device::begin_commands()
+{
+	if (m_command_buffer)
+	{
+		(void)m_command_buffer.reset();
+		(void)m_command_buffer.begin(
+			vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+	}
+	return CommandEncoder(m_command_buffer, *this);
+}
+
+std::expected<void, vk::Result> Device::submit(CommandEncoder& enc)
+{
+	const vk::CommandBuffer cmd = enc.vk();
+	if (!cmd || !m_fence)
+	{
+		return std::unexpected(vk::Result::eErrorInitializationFailed);
+	}
+	if (const vk::Result result = cmd.end(); result != vk::Result::eSuccess)
+	{
+		return std::unexpected(result);
+	}
+	if (const vk::Result result = m_graphics_queue.submit(vk::SubmitInfo().setCommandBuffers(cmd), m_fence);
+		result != vk::Result::eSuccess)
+	{
+		return std::unexpected(result);
+	}
+	if (const vk::Result result = m_device.waitForFences(m_fence, vk::True, UINT64_MAX); result != vk::Result::eSuccess)
+	{
+		return std::unexpected(result);
+	}
+	if (const vk::Result result = m_device.resetFences(m_fence); result != vk::Result::eSuccess)
+	{
+		return std::unexpected(result);
+	}
+	return {};
 }
 
 std::expected<SamplerHandle, vk::Result> Device::create_sampler(const vk::SamplerCreateInfo& info)
@@ -104,10 +337,10 @@ BufferHandle Device::register_buffer(vk::Buffer buffer)
 	{
 		const std::uint32_t id = m_free_buffers.back();
 		m_free_buffers.pop_back();
-		m_buffers[id] = buffer;
+		m_buffers[id] = Buffer{.buffer = buffer};
 		return BufferHandle{.id = id};
 	}
-	m_buffers.push_back(buffer);
+	m_buffers.push_back(Buffer{.buffer = buffer});
 	return BufferHandle{.id = static_cast<std::uint32_t>(m_buffers.size() - 1)};
 }
 
@@ -115,14 +348,14 @@ void Device::release_buffer(BufferHandle handle) noexcept
 {
 	if (handle.id < m_buffers.size())
 	{
-		m_buffers[handle.id] = vk::Buffer{};
+		m_buffers[handle.id] = Buffer{};
 		m_free_buffers.push_back(handle.id);
 	}
 }
 
 vk::Buffer Device::buffer(BufferHandle handle) const noexcept
 {
-	return handle.id < m_buffers.size() ? m_buffers[handle.id] : vk::Buffer{};
+	return handle.id < m_buffers.size() ? m_buffers[handle.id].buffer : vk::Buffer{};
 }
 
 SemaphoreHandle Device::register_semaphore(vk::Semaphore semaphore)

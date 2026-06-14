@@ -212,6 +212,86 @@ enum class IndexType : std::uint8_t
 };
 
 /**
+ * @brief What a texture may be used for over its lifetime — the creation-time capability bitmask
+ *        (the stand-in for `vk::ImageUsageFlags`).
+ *
+ * Distinct from @ref TextureUsage, which is the transient *state* a texture is in at one point in a
+ * frame (for barriers). This is the set of things it is *allowed* to be, fixed at creation. Combine
+ * with `operator|` (e.g. `TextureUsageFlags::COLOR_ATTACHMENT | TextureUsageFlags::TRANSFER_SRC`).
+ *
+ * @ingroup rhi
+ */
+enum class TextureUsageFlags : std::uint32_t
+{
+	NONE			 = 0,
+	SAMPLED			 = 1U << 0U, ///< Sampled by a shader.
+	COLOR_ATTACHMENT = 1U << 1U, ///< Rendered into as a color attachment.
+	DEPTH_ATTACHMENT = 1U << 2U, ///< Used as a depth-stencil attachment.
+	TRANSFER_SRC	 = 1U << 3U, ///< Read by a transfer (blit/copy source).
+	TRANSFER_DST	 = 1U << 4U, ///< Written by a transfer (blit/copy/clear destination).
+};
+
+/// @brief Bitwise-or two texture-usage masks.
+[[nodiscard]] constexpr TextureUsageFlags operator|(TextureUsageFlags lhs, TextureUsageFlags rhs) noexcept
+{
+	return static_cast<TextureUsageFlags>(static_cast<std::uint32_t>(lhs) | static_cast<std::uint32_t>(rhs));
+}
+/// @brief Bitwise-and two texture-usage masks (test membership against `TextureUsageFlags::NONE`).
+[[nodiscard]] constexpr TextureUsageFlags operator&(TextureUsageFlags lhs, TextureUsageFlags rhs) noexcept
+{
+	return static_cast<TextureUsageFlags>(static_cast<std::uint32_t>(lhs) & static_cast<std::uint32_t>(rhs));
+}
+
+/**
+ * @brief What a buffer may be used for — the creation-time capability bitmask (stand-in for
+ *        `vk::BufferUsageFlags`). Combine with `operator|`.
+ * @ingroup rhi
+ */
+enum class BufferUsageFlags : std::uint32_t
+{
+	NONE		 = 0,
+	VERTEX		 = 1U << 0U, ///< Bound as a vertex buffer.
+	INDEX		 = 1U << 1U, ///< Bound as an index buffer.
+	UNIFORM		 = 1U << 2U, ///< Bound as a uniform buffer.
+	STORAGE		 = 1U << 3U, ///< Bound as a storage buffer (SSBO).
+	TRANSFER_SRC = 1U << 4U, ///< Read by a transfer (copy source).
+	TRANSFER_DST = 1U << 5U, ///< Written by a transfer (copy destination).
+};
+
+/// @brief Bitwise-or two buffer-usage masks.
+[[nodiscard]] constexpr BufferUsageFlags operator|(BufferUsageFlags lhs, BufferUsageFlags rhs) noexcept
+{
+	return static_cast<BufferUsageFlags>(static_cast<std::uint32_t>(lhs) | static_cast<std::uint32_t>(rhs));
+}
+/// @brief Bitwise-and two buffer-usage masks (test membership against `BufferUsageFlags::NONE`).
+[[nodiscard]] constexpr BufferUsageFlags operator&(BufferUsageFlags lhs, BufferUsageFlags rhs) noexcept
+{
+	return static_cast<BufferUsageFlags>(static_cast<std::uint32_t>(lhs) & static_cast<std::uint32_t>(rhs));
+}
+
+/**
+ * @brief Where a buffer's memory lives / how the host reaches it.
+ * @ingroup rhi
+ */
+enum class MemoryAccess : std::uint8_t
+{
+	GPU_ONLY,	  ///< Device-local; not host-visible (the fast default for GPU-resident data).
+	HOST_VISIBLE, ///< Host-visible and persistently mapped (uploads / read-backs); see `Device::mapped`.
+};
+
+/**
+ * @brief What happens to an attachment's existing contents at the start of a render pass — the
+ *        stand-in for `vk::AttachmentLoadOp`.
+ * @ingroup rhi
+ */
+enum class LoadOp : std::uint8_t
+{
+	CLEAR,	   ///< Clear to a provided value.
+	LOAD,	   ///< Preserve the existing contents.
+	DONT_CARE, ///< Contents are undefined (a full overwrite follows).
+};
+
+/**
  * @brief A 2D pixel size — the engine-vocabulary stand-in for `vk::Extent2D`.
  *
  * Flows on the reactive graph's screen-size edge and rides on `ImageRef` so neither names Vulkan.
