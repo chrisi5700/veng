@@ -7,9 +7,22 @@
 
 #include <utility>
 #include <veng/resources/Image.hpp>
+#include <veng/rhi/Convert.hpp>
 
 namespace veng
 {
+std::expected<Image, vk::Result> Image::create(rhi::Device& rhi, rhi::Extent2D extent, rhi::Format format,
+											   rhi::TextureUsageFlags usage, std::uint32_t mip_levels,
+											   rhi::SampleCount samples)
+{
+	// RHI-vocabulary overload: derive device/allocator from the registry and infer the view aspect
+	// from the usage (depth attachments use the depth aspect; everything else is colour).
+	const bool is_depth = (usage & rhi::TextureUsageFlags::DEPTH_ATTACHMENT) != rhi::TextureUsageFlags::NONE;
+	const vk::ImageAspectFlags aspect = is_depth ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor;
+	return create(rhi.allocator(), rhi.device(), rhi, rhi::to_vk(extent), rhi::to_vk(format), rhi::to_vk(usage), aspect,
+				  mip_levels, rhi::to_vk(samples));
+}
+
 std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Device device, rhi::Device& rhi,
 											   vk::Extent2D extent, vk::Format format, vk::ImageUsageFlags usage,
 											   vk::ImageAspectFlags aspect, std::uint32_t mip_levels,

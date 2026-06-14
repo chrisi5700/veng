@@ -47,7 +47,6 @@
 #include <glm/glm.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rhi/Enums.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::passes
 {

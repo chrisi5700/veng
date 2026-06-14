@@ -99,7 +99,7 @@ TEST_CASE("frames in flight render into distinct N-buffered target copies", "[no
 		REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 				vk::Result::eSuccess);
 
-		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, cmd, i % FRAMES_IN_FLIGHT);
+		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), i % FRAMES_IN_FLIGHT);
 		auto					  plan = graph.resolve(std::array{token});
 		REQUIRE(plan.has_value());
 		REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));

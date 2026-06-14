@@ -52,8 +52,8 @@ std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext
 	const std::uint64_t	  size = static_cast<std::uint64_t>(image.extent.width) * image.extent.height * bytes_per_pixel;
 	if (!m_staging.has_value() || m_staging->size() < size)
 	{
-		auto buf = Buffer::create(ctx.allocator(), ctx.rhi(), size, rhi::BufferUsageFlags::TRANSFER_DST,
-								  rhi::MemoryAccess::HOST_VISIBLE);
+		auto buf =
+			Buffer::create(ctx.rhi(), size, rhi::BufferUsageFlags::TRANSFER_DST, rhi::MemoryAccess::HOST_VISIBLE);
 		if (!buf.has_value() || buf->mapped() == nullptr)
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);

@@ -59,6 +59,27 @@ class Image
 		vk::ImageUsageFlags usage, vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor,
 		std::uint32_t mip_levels = 1, vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1);
 
+	/**
+	 * @brief Allocate an image in RHI vocabulary — a caller names only `rhi::` types (no `vk::`/`vma::`).
+	 *
+	 * The higher-level overload for L4/L5 callers (asset loaders, post-process passes): it derives the
+	 * device and allocator from @p rhi and infers the view aspect from @p usage (depth when the usage
+	 * includes `DEPTH_ATTACHMENT`, colour otherwise). Same multi-mip / view-creation rules as the
+	 * low-level overload above.
+	 *
+	 * @param rhi        The RHI device the image registers its handle with (and whose device/allocator back it).
+	 * @param extent     Width and height of the image in texels.
+	 * @param format     Pixel format.
+	 * @param usage      RHI texture-usage capability flags (sampled, attachment, transfer).
+	 * @param mip_levels Number of mip levels; 0 is treated as 1.
+	 * @param samples    Sample count; `X1` for a normal image, higher for an MSAA attachment.
+	 * @return The constructed @ref veng::Image on success, or the `vk::Result` error code on failure.
+	 */
+	[[nodiscard]] static std::expected<Image, vk::Result> create(rhi::Device& rhi, rhi::Extent2D extent,
+																 rhi::Format format, rhi::TextureUsageFlags usage,
+																 std::uint32_t	   mip_levels = 1,
+																 rhi::SampleCount samples = rhi::SampleCount::X1);
+
 	Image(const Image&)			   = delete;
 	Image& operator=(const Image&) = delete;
 	Image(Image&& other) noexcept;

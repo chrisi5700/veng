@@ -34,7 +34,6 @@
 - Warnings are treated as errors in this preset
 
 **Always fix issues before committing:**
-- Run `./fix_and_format.sh` to auto-fix clang-tidy issues and format code
 - Address any remaining clang-tidy or cppcheck warnings manually
 - Ensure the build passes with zero warnings
 

@@ -64,7 +64,6 @@
 #include <veng/rhi/SamplerDesc.hpp>
 #include <veng/rhi/Enums.hpp>
 #include <veng/shader/Shader.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::nodes
 {

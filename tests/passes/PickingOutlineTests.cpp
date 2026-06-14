@@ -117,7 +117,7 @@ TEST_CASE("PickingPass decodes the object under a pixel and reports no-hit on th
 		pool.begin_frame(frame);
 		auto cmd = commands.begin(veng::QueueKind::Graphics, 0);
 		REQUIRE(cmd.has_value());
-		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, *cmd, 0);
+		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, veng::rhi::CommandEncoder(*cmd, ctx.rhi()), 0);
 		const auto				  plan = graph.resolve(std::array{picking.done_token()});
 		REQUIRE(plan.has_value());
 		REQUIRE(plan_contains(*plan, picking.render_node()));
@@ -196,7 +196,7 @@ TEST_CASE("OutlinePass renders the silhouette->blur->ring chain and re-runs only
 		pool.begin_frame(frame);
 		auto cmd = commands.begin(veng::QueueKind::Graphics, 0);
 		REQUIRE(cmd.has_value());
-		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, *cmd, 0);
+		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, veng::rhi::CommandEncoder(*cmd, ctx.rhi()), 0);
 		auto					  plan = graph.resolve(std::array{glow});
 		REQUIRE(plan.has_value());
 		REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));

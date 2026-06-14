@@ -22,7 +22,6 @@
 #include <veng/rendergraph/nodes/Node.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/ResourcePool.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
 {
@@ -102,7 +101,7 @@ class GpuNode : public graph::Node
 
 	 protected:
 	/**
-	 * @brief Record this node's GPU work into `ctx.command_buffer()`.
+	 * @brief Record this node's GPU work through `ctx.encoder()` (the RHI command encoder).
 	 *
 	 * Same contract as `graph::Node::execute`: the returned flag drives the change-cutoff
 	 * that lets downstream consumers skip re-running when this output is unchanged.
@@ -125,7 +124,7 @@ inline void GpuExecContext::prepare_for(graph::Node& node) noexcept
 	for (const ImageUsage& usage : gnode->image_usages(*this))
 	{
 		const rhi::ImageState state = rhi::to_state(usage.usage);
-		m_pool->transition_image(usage.id, m_command_buffer, state.layout, state.stage, state.access);
+		m_pool->transition_image(usage.id, m_encoder.vk(), state.layout, state.stage, state.access);
 	}
 }
 } // namespace veng::gpu

@@ -38,7 +38,6 @@
 #include <veng/gpu/VersionedOutput.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::nodes
 {

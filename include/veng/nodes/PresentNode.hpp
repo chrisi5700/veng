@@ -31,7 +31,6 @@
 #include <veng/gpu/Sink.hpp>
 #include <veng/managers/SwapchainManager.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::nodes
 {

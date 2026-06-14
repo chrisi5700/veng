@@ -17,6 +17,7 @@
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/GpuNode.hpp>
 #include <veng/logging/Logger.hpp>
+#include <veng/rhi/CommandEncoder.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/ResourcePool.hpp>
@@ -57,9 +58,11 @@ class FillBufferNode final : public GpuNode
 	 protected:
 	[[nodiscard]] std::expected<bool, ExecError> record(GpuExecContext& ctx) override
 	{
-		seen_command_buffer = ctx.command_buffer();
+		// The seam no longer exposes a raw command buffer; reach the underlying one through the RHI
+		// encoder's vk() escape hatch (this test deliberately pokes the seam end to end).
+		seen_command_buffer = ctx.encoder().vk();
 		seen_frame_slot		= ctx.frame_slot();
-		ctx.command_buffer().fillBuffer(m_target, 0, m_size, m_value);
+		ctx.encoder().vk().fillBuffer(m_target, 0, m_size, m_value);
 		return true;
 	}
 
@@ -114,7 +117,7 @@ TEST_CASE("a GpuNode records through the injected GpuExecContext and the command
 
 	// Drive the graph with a GPU context: resolve the plan, then execute with the
 	// injected GpuExecContext so the GpuNode records into `cmd`.
-	GpuExecContext	 gpu_ctx(graph, ctx, res_pool, cmd, /*frame_slot=*/0);
+	GpuExecContext	 gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), /*frame_slot=*/0);
 	InlineScheduler	 scheduler;
 	const std::array sinks{out};
 	const auto		 plan = graph.resolve(sinks);

@@ -30,7 +30,6 @@
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rhi/Handles.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
 {

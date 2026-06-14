@@ -28,7 +28,6 @@
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/resources/Image.hpp>
 #include <veng/rhi/Convert.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng
 {
@@ -40,7 +39,7 @@ namespace veng::assets
 /**
  * @brief Whether a texture's bytes are sRGB-encoded colour or linear data.
  *
- * Drives the chosen `vk::Format` so the sampler hardware decodes colour to linear on
+ * Drives the chosen `rhi::Format` so the sampler hardware decodes colour to linear on
  * read and leaves linear data untouched. Getting this wrong — e.g. decoding a normal
  * map as sRGB — is the most common glTF rendering artefact.
  *
@@ -48,8 +47,8 @@ namespace veng::assets
  */
 enum class ColorSpace : std::uint8_t
 {
-	Srgb,	///< Colour data (baseColor, emissive) → `eR8G8B8A8Srgb`; decoded to linear by the sampler.
-	Linear, ///< Linear data (normal, metallic-roughness, occlusion) → `eR8G8B8A8Unorm`.
+	Srgb,	///< Colour data (baseColor, emissive) → `RGBA8_SRGB`; decoded to linear by the sampler.
+	Linear, ///< Linear data (normal, metallic-roughness, occlusion) → `RGBA8_UNORM`.
 };
 
 /**

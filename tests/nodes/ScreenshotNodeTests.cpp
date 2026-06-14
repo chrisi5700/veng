@@ -78,7 +78,7 @@ TEST_CASE("ScreenshotNode captures a rendered image via on_retired (peer sink, n
 
 	auto cmd = commands.begin(veng::QueueKind::Graphics, 0);
 	REQUIRE(cmd.has_value());
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, *cmd, 0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(*cmd, ctx.rhi()), 0);
 	auto					  plan = graph.resolve(std::array{shot_done});
 	REQUIRE(plan.has_value());
 	REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));

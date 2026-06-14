@@ -22,6 +22,11 @@
 #include <vector>
 #include <vulkan/vulkan.hpp>
 
+namespace veng::rhi
+{
+class Device;
+}
+
 namespace veng
 {
 /**
@@ -57,6 +62,16 @@ class DescriptorAllocator
 	 * @param ratios        Per-type size ratios; defaults to @ref default_ratios.
 	 */
 	explicit DescriptorAllocator(vk::Device device, std::uint32_t sets_per_pool = 1024,
+								 std::vector<PoolSizeRatio> ratios = default_ratios());
+
+	/**
+	 * @brief RHI-vocabulary overload for past-L3 callers: a node/pass builds an allocator naming only
+	 *        the @ref veng::rhi::Device; delegates to the `vk::Device` overload with `rhi.device()`.
+	 * @param rhi           The RHI device whose logical device owns all pools and sets.
+	 * @param sets_per_pool Capacity of each pool in descriptor sets (default: 1024).
+	 * @param ratios        Per-type size ratios; defaults to @ref default_ratios.
+	 */
+	explicit DescriptorAllocator(rhi::Device& rhi, std::uint32_t sets_per_pool = 1024,
 								 std::vector<PoolSizeRatio> ratios = default_ratios());
 
 	DescriptorAllocator(const DescriptorAllocator&)			   = delete;

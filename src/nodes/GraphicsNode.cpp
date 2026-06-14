@@ -69,8 +69,8 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// as a node failure (the frame is dropped, the node stays dirty and retries).
 	if (!m_pipeline.has_value())
 	{
-		auto vert = Shader::create_shader(ctx.device(), m_vertex_shader);
-		auto frag = Shader::create_shader(ctx.device(), m_fragment_shader);
+		auto vert = Shader::create_shader(ctx.rhi(), m_vertex_shader);
+		auto frag = Shader::create_shader(ctx.rhi(), m_fragment_shader);
 		if (!vert.has_value() || !frag.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -206,7 +206,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		const std::size_t slot = ctx.frame_slot();
 		if (!m_descriptors.has_value())
 		{
-			m_descriptors.emplace(ctx.device());
+			m_descriptors.emplace(ctx.rhi());
 		}
 		if (slot >= m_bind_groups.size())
 		{

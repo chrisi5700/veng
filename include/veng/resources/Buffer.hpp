@@ -51,18 +51,18 @@ class Buffer
 	/**
 	 * @brief Allocate a buffer in RHI vocabulary — a caller names only `rhi::` types (no `vk::`/`vma::`).
 	 *
-	 * The higher-level overload for L4/L5 callers. `HOST_VISIBLE` memory is persistently mapped for
-	 * host random access (uploads / read-backs, see @ref mapped); `GPU_ONLY` prefers a device-local heap.
+	 * The higher-level overload for L4/L5 callers: it derives the allocator from @p rhi, so a node or
+	 * pass constructs a buffer holding only the RHI device. `HOST_VISIBLE` memory is persistently mapped
+	 * for host random access (uploads / read-backs, see @ref mapped); `GPU_ONLY` prefers a device-local heap.
 	 *
-	 * @param allocator The VMA allocator backing the buffer.
-	 * @param rhi       The RHI device the buffer registers its handle with.
-	 * @param size      Number of bytes to allocate.
-	 * @param usage     RHI buffer-usage flags (vertex, index, uniform, storage, transfer).
-	 * @param memory    Where the buffer lives / whether the host can map it.
+	 * @param rhi    The RHI device the buffer registers its handle with (and whose allocator backs it).
+	 * @param size   Number of bytes to allocate.
+	 * @param usage  RHI buffer-usage flags (vertex, index, uniform, storage, transfer).
+	 * @param memory Where the buffer lives / whether the host can map it.
 	 * @return The constructed @ref veng::Buffer on success, or the `vk::Result` error code on failure.
 	 */
-	[[nodiscard]] static std::expected<Buffer, vk::Result> create(vma::Allocator allocator, rhi::Device& rhi,
-																  std::uint64_t size, rhi::BufferUsageFlags usage,
+	[[nodiscard]] static std::expected<Buffer, vk::Result> create(rhi::Device& rhi, std::uint64_t size,
+																  rhi::BufferUsageFlags usage,
 																  rhi::MemoryAccess memory = rhi::MemoryAccess::GPU_ONLY);
 
 	Buffer(const Buffer&)			 = delete;

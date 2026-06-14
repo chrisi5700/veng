@@ -97,7 +97,7 @@ TEST_CASE("StorageBufferNode uploads a vector<T> and publishes a BufferRef", "[n
 
 	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), 0);
 	InlineScheduler			  scheduler;
 	const auto				  plan = graph.resolve(std::array{ref_slot});
 	REQUIRE(plan.has_value());
@@ -177,7 +177,7 @@ TEST_CASE("StorageBufferNode handles an empty vector without faulting", "[nodes]
 
 	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), 0);
 	InlineScheduler			  scheduler;
 	const auto				  plan = graph.resolve(std::array{ref});
 	REQUIRE(plan.has_value());

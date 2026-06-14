@@ -74,7 +74,7 @@ TEST_CASE("a color-only GraphicsNode renders a triangle into a scene target", "[
 
 	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), 0);
 	InlineScheduler			  scheduler;
 	const std::array		  sinks{token};
 	const auto				  plan = graph.resolve(sinks);

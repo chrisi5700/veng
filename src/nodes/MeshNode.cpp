@@ -22,7 +22,7 @@ namespace
 std::optional<Buffer> upload_buffer(gpu::GpuExecContext& ctx, std::span<const std::byte> bytes,
 									rhi::BufferUsageFlags usage)
 {
-	auto buffer = Buffer::create(ctx.allocator(), ctx.rhi(), bytes.size(), usage, rhi::MemoryAccess::HOST_VISIBLE);
+	auto buffer = Buffer::create(ctx.rhi(), bytes.size(), usage, rhi::MemoryAccess::HOST_VISIBLE);
 	if (!buffer.has_value() || buffer->mapped() == nullptr)
 	{
 		return std::nullopt;

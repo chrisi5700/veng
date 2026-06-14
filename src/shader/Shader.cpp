@@ -956,6 +956,12 @@ std::expected<Shader, std::string> Shader::create_shader(const Context& context,
 	return create_shader(context.device(), name, entry_point);
 }
 
+std::expected<Shader, std::string> Shader::create_shader(rhi::Device& rhi, std::string_view name,
+														 std::string_view entry_point)
+{
+	return create_shader(rhi.device(), name, entry_point);
+}
+
 const std::vector<DescriptorInfo>& Shader::get_descriptor_infos() const
 {
 	return m_descriptor_infos;

@@ -11,13 +11,14 @@
 
 namespace veng
 {
-std::expected<Buffer, vk::Result> Buffer::create(vma::Allocator allocator, rhi::Device& rhi, std::uint64_t size,
-												 rhi::BufferUsageFlags usage, rhi::MemoryAccess memory)
+std::expected<Buffer, vk::Result> Buffer::create(rhi::Device& rhi, std::uint64_t size, rhi::BufferUsageFlags usage,
+												 rhi::MemoryAccess memory)
 {
-	// RHI-vocabulary overload: a caller names only rhi:: types. HOST_VISIBLE buffers are persistently
-	// mapped for host random access (uploads / read-backs); GPU_ONLY prefers a device-local heap.
+	// RHI-vocabulary overload: a caller names only rhi:: types (the allocator comes from the device).
+	// HOST_VISIBLE buffers are persistently mapped for host random access (uploads / read-backs);
+	// GPU_ONLY prefers a device-local heap.
 	const bool host = memory == rhi::MemoryAccess::HOST_VISIBLE;
-	return create(allocator, rhi, static_cast<vk::DeviceSize>(size), rhi::to_vk(usage),
+	return create(rhi.allocator(), rhi, static_cast<vk::DeviceSize>(size), rhi::to_vk(usage),
 				  host ? vma::MemoryUsage::eAuto : vma::MemoryUsage::eAutoPreferDevice,
 				  host ? (vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom)
 					   : vma::AllocationCreateFlags{});

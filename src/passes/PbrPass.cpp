@@ -406,8 +406,8 @@ class PbrRenderNode final : public gpu::GpuNode
 		{
 			return {};
 		}
-		auto vert = Shader::create_shader(ctx.device(), "passes/pbr.vert");
-		auto frag = Shader::create_shader(ctx.device(), "passes/pbr.frag");
+		auto vert = Shader::create_shader(ctx.rhi(), "passes/pbr.vert");
+		auto frag = Shader::create_shader(ctx.rhi(), "passes/pbr.frag");
 		if (!vert.has_value() || !frag.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -501,7 +501,7 @@ class PbrRenderNode final : public gpu::GpuNode
 	{
 		if (!m_descriptors.has_value())
 		{
-			m_descriptors.emplace(ctx.device());
+			m_descriptors.emplace(ctx.rhi());
 		}
 		const std::size_t slot = ctx.frame_slot();
 		m_sets.resize(m_materials.size());

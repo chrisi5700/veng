@@ -120,7 +120,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 			static_cast<std::uint64_t>(image.extent.width) * image.extent.height * bytes_per_pixel;
 		if (!s.staging.has_value() || s.staging->size() < size)
 		{
-			auto buf = Buffer::create(ctx.allocator(), ctx.rhi(), size, rhi::BufferUsageFlags::TRANSFER_DST,
+			auto buf = Buffer::create(ctx.rhi(), size, rhi::BufferUsageFlags::TRANSFER_DST,
 									  rhi::MemoryAccess::HOST_VISIBLE);
 			if (!buf.has_value() || buf->mapped() == nullptr)
 			{

@@ -34,7 +34,6 @@
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/rhi/Enums.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::passes
 {

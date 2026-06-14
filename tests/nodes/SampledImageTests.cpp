@@ -120,7 +120,7 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 				vk::Result::eSuccess);
 
 		res_pool.begin_frame(frame_counter++);
-		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
+		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), 0);
 		auto					  plan = graph.resolve(std::array{out_image});
 		REQUIRE(plan.has_value());
 		REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));

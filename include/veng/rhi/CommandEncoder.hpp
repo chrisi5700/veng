@@ -226,6 +226,95 @@ class CommandEncoder
 							  {}, {});
 	}
 
+	/**
+	 * @brief Upload a host buffer into @p dst's mip 0 and generate its full mip chain, leaving every
+	 *        level in @ref TextureUsage::SAMPLED (shader-read).
+	 *
+	 * @p dst must have been created with `SAMPLED | TRANSFER_SRC | TRANSFER_DST` and @p levels mips.
+	 * This encapsulates the whole texture-upload sequence — the all-levels layout transition, the
+	 * buffer→image copy into level 0, and the blit-down pyramid — so an asset loader (the @ref
+	 * veng::assets::Texture path) names no Vulkan. Requires the format to support a linear blit, which
+	 * R8G8B8A8 UNORM/SRGB universally do.
+	 */
+	void upload_mipped_texture(BufferHandle src, TextureHandle dst, Extent2D extent, std::uint32_t levels) const
+	{
+		const vk::Image		image	   = m_device->image(dst);
+		const std::uint32_t mip_levels = levels == 0 ? 1 : levels;
+
+		// Per-level color-aspect barrier (the encoder is the seam, so it speaks raw vk here).
+		const auto barrier = [&](vk::ImageLayout old_layout, vk::ImageLayout new_layout,
+								 vk::PipelineStageFlags2 src_stage, vk::AccessFlags2 src_access,
+								 vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
+								 std::uint32_t base_level, std::uint32_t level_count)
+		{
+			const auto range		 = vk::ImageSubresourceRange()
+										   .setAspectMask(vk::ImageAspectFlagBits::eColor)
+										   .setBaseMipLevel(base_level)
+										   .setLevelCount(level_count)
+										   .setLayerCount(1);
+			const auto image_barrier = vk::ImageMemoryBarrier2()
+										   .setSrcStageMask(src_stage)
+										   .setSrcAccessMask(src_access)
+										   .setDstStageMask(dst_stage)
+										   .setDstAccessMask(dst_access)
+										   .setOldLayout(old_layout)
+										   .setNewLayout(new_layout)
+										   .setImage(image)
+										   .setSubresourceRange(range);
+			m_cmd.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(image_barrier));
+		};
+
+		// Whole image: UNDEFINED -> TRANSFER_DST (all levels), then upload level 0.
+		barrier(vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+				vk::PipelineStageFlagBits2::eTopOfPipe, vk::AccessFlagBits2::eNone,
+				vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite, 0, mip_levels);
+
+		const auto copy = vk::BufferImageCopy()
+							  .setImageSubresource(
+								  vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1))
+							  .setImageExtent(vk::Extent3D{extent.width, extent.height, 1});
+		m_cmd.copyBufferToImage(m_device->buffer(src), image, vk::ImageLayout::eTransferDstOptimal, copy);
+
+		// Blit-down pyramid: each level is half its predecessor, which becomes shader-read once consumed.
+		auto	   mip_width  = static_cast<std::int32_t>(extent.width);
+		auto	   mip_height = static_cast<std::int32_t>(extent.height);
+		const auto layers	  = [](std::uint32_t level)
+		{
+			return vk::ImageSubresourceLayers()
+				.setAspectMask(vk::ImageAspectFlagBits::eColor)
+				.setMipLevel(level)
+				.setLayerCount(1);
+		};
+		for (std::uint32_t level = 1; level < mip_levels; ++level)
+		{
+			barrier(vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal,
+					vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite,
+					vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead, level - 1, 1);
+
+			const std::int32_t next_width  = mip_width > 1 ? mip_width / 2 : 1;
+			const std::int32_t next_height = mip_height > 1 ? mip_height / 2 : 1;
+			m_cmd.blitImage(image, vk::ImageLayout::eTransferSrcOptimal, image, vk::ImageLayout::eTransferDstOptimal,
+							vk::ImageBlit()
+								.setSrcSubresource(layers(level - 1))
+								.setSrcOffsets({vk::Offset3D{0, 0, 0}, vk::Offset3D{mip_width, mip_height, 1}})
+								.setDstSubresource(layers(level))
+								.setDstOffsets({vk::Offset3D{0, 0, 0}, vk::Offset3D{next_width, next_height, 1}}),
+							vk::Filter::eLinear);
+
+			barrier(vk::ImageLayout::eTransferSrcOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+					vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead,
+					vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderSampledRead, level - 1, 1);
+
+			mip_width  = next_width;
+			mip_height = next_height;
+		}
+
+		// The last level was only ever a blit destination: TRANSFER_DST -> SHADER_READ_ONLY.
+		barrier(vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+				vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite,
+				vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderSampledRead, mip_levels - 1, 1);
+	}
+
 	/// @brief The underlying command buffer — a migration escape hatch for the not-yet-ported
 	///        RenderTargetSet begin path; do not reach for this in new node code.
 	[[nodiscard]] vk::CommandBuffer vk() const noexcept { return m_cmd; }

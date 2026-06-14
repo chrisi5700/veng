@@ -35,7 +35,6 @@
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Buffer.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::nodes
 {

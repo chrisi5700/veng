@@ -173,7 +173,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, const PbrCase& c)
 
 	veng::ResourcePool res_pool(device, ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), 0);
 	InlineScheduler			  scheduler;
 	const auto				  plan = graph.resolve(std::array{token});
 	REQUIRE(plan.has_value());
@@ -398,7 +398,7 @@ TEST_CASE("PbrPass caches a static multi-material scene", "[passes][pbr][caching
 
 	veng::ResourcePool res_pool(device, ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), 0);
 	InlineScheduler			  scheduler;
 
 	// Cold frame: the pass and the mesh upload are planned and run.

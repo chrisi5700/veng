@@ -124,7 +124,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, Graph& graph, Data
 
 	veng::ResourcePool res_pool(device, ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), 0);
 	InlineScheduler			  scheduler;
 	const std::array		  sinks{scene};
 	const auto				  plan = graph.resolve(sinks);

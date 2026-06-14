@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <utility>
 #include <veng/descriptors/DescriptorAllocator.hpp>
+#include <veng/rhi/Device.hpp>
 
 namespace veng
 {
@@ -27,6 +28,12 @@ DescriptorAllocator::DescriptorAllocator(vk::Device device, std::uint32_t sets_p
 	: m_device(device)
 	, m_sets_per_pool(std::max(sets_per_pool, 1U))
 	, m_ratios(std::move(ratios))
+{
+}
+
+DescriptorAllocator::DescriptorAllocator(rhi::Device& rhi, std::uint32_t sets_per_pool,
+										 std::vector<PoolSizeRatio> ratios)
+	: DescriptorAllocator(rhi.device(), sets_per_pool, std::move(ratios))
 {
 }
 

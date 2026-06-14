@@ -120,7 +120,7 @@ TEST_CASE("a UniformNode feeds a GraphicsNode descriptor by reflected name", "[n
 
 	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
-	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
+	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), 0);
 	InlineScheduler			  scheduler;
 	const auto				  plan = graph.resolve(std::array{token});
 	REQUIRE(plan.has_value());

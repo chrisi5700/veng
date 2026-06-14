@@ -104,6 +104,17 @@ class Device
 	/// @brief The persistently-mapped host pointer for a HOST_VISIBLE buffer (null otherwise).
 	[[nodiscard]] void* mapped(BufferHandle handle) const noexcept;
 
+	// --- construction support (for the L1/L2 resource layers that register here) -------------------
+	// These hand the borrowed logical device / allocator back to the engine's `Buffer`/`Image`/
+	// `Shader`/`DescriptorAllocator` so a past-L3 caller can construct a resource naming only the RHI
+	// device — the registry already deals in `vk::` objects (see `image`/`buffer`), so this widens no
+	// new abstraction; it just spares high-level code from reaching for `Context::device/allocator`.
+
+	/// @brief The borrowed logical device — used by L1/L2 construction (`Image`/`Shader`/descriptors).
+	[[nodiscard]] vk::Device device() const noexcept { return m_device; }
+	/// @brief The borrowed VMA allocator backing engine resources — used by L1 `Buffer`/`Image` create.
+	[[nodiscard]] vma::Allocator allocator() const noexcept { return m_allocator; }
+
 	// --- commands ---------------------------------------------------------------------------------
 
 	/// @brief Begin recording a one-shot command encoder (the device owns the command buffer).

@@ -121,7 +121,7 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 		return Frame{.status = Status::AcquireFailed, .plan = std::move(plan)};
 	}
 
-	gpu::GpuExecContext gpu_ctx(graph, *m_context, *m_pool, cmd.value(), slot);
+	gpu::GpuExecContext gpu_ctx(graph, *m_context, *m_pool, rhi::CommandEncoder(cmd.value(), m_context->rhi()), slot);
 	if (!graph.execute(plan, *m_scheduler, gpu_ctx))
 	{
 		return Frame{.status = Status::NodeFailed, .plan = std::move(plan)};

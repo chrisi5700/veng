@@ -86,7 +86,7 @@ TEST_CASE("DynamicMeshNode uploads an indexed mesh and grows across frames", "[n
 		pool.begin_frame(frame);
 		auto cmd = commands.begin(veng::QueueKind::Graphics, 0);
 		REQUIRE(cmd.has_value());
-		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, *cmd, 0);
+		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, veng::rhi::CommandEncoder(*cmd, ctx.rhi()), 0);
 		const auto				  plan = graph.resolve(std::array{mesh});
 		REQUIRE(plan.has_value());
 		REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
