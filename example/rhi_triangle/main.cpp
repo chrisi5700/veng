@@ -97,7 +97,7 @@ int main()
 		auto frame = swap.acquire();
 		if (!frame.has_value())
 		{
-			log.error("rhi_triangle: acquire failed");
+			log.error("rhi_triangle: acquire failed: {}", rhi::to_string(frame.error()));
 			break;
 		}
 		if (!frame->has_value()) // out of date (e.g. a resize) — rebuild and try again next iteration
@@ -123,7 +123,7 @@ int main()
 		auto presented = swap.present(enc, target);
 		if (!presented.has_value())
 		{
-			log.error("rhi_triangle: present failed");
+			log.error("rhi_triangle: present failed: {}", rhi::to_string(presented.error()));
 			break;
 		}
 		if (presented.value()) // out of date after present — rebuild for the next frame

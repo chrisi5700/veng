@@ -34,12 +34,12 @@ Swapchain::Swapchain(const Context& context) noexcept
 {
 }
 
-std::expected<Swapchain, vk::Result> Swapchain::create(const Context& context, Extent2D extent)
+std::expected<Swapchain, Error> Swapchain::create(const Context& context, Extent2D extent)
 {
 	Swapchain swapchain(context);
 	if (auto built = swapchain.build(extent, nullptr); !built.has_value())
 	{
-		return std::unexpected(built.error());
+		return std::unexpected(to_error(built.error()));
 	}
 	// One acquire semaphore + one in-flight fence: single-buffered, the simplest correct loop. The
 	// fence starts signalled so the first acquire does not block on a frame that never ran.
@@ -47,7 +47,7 @@ std::expected<Swapchain, vk::Result> Swapchain::create(const Context& context, E
 	if (available.result != vk::Result::eSuccess)
 	{
 		swapchain.destroy();
-		return std::unexpected(available.result);
+		return std::unexpected(to_error(available.result));
 	}
 	swapchain.m_image_available = available.value;
 	const auto fence =
@@ -55,7 +55,7 @@ std::expected<Swapchain, vk::Result> Swapchain::create(const Context& context, E
 	if (fence.result != vk::Result::eSuccess)
 	{
 		swapchain.destroy();
-		return std::unexpected(fence.result);
+		return std::unexpected(to_error(fence.result));
 	}
 	swapchain.m_frame_fence = fence.value;
 	return swapchain;
@@ -140,12 +140,12 @@ std::expected<void, vk::Result> Swapchain::build(Extent2D extent, vk::SwapchainK
 	return {};
 }
 
-std::expected<std::optional<Swapchain::Frame>, vk::Result> Swapchain::acquire()
+std::expected<std::optional<Swapchain::Frame>, Error> Swapchain::acquire()
 {
 	// Wait out the previous frame on this single in-flight slot before the caller re-records.
 	if (m_device.waitForFences(m_frame_fence, vk::True, UINT64_MAX) != vk::Result::eSuccess)
 	{
-		return std::unexpected(vk::Result::eErrorDeviceLost);
+		return std::unexpected(to_error(vk::Result::eErrorDeviceLost));
 	}
 	const auto acquired = m_device.acquireNextImageKHR(m_swapchain, UINT64_MAX, m_image_available, nullptr);
 	if (acquired.result == vk::Result::eErrorOutOfDateKHR)
@@ -154,23 +154,23 @@ std::expected<std::optional<Swapchain::Frame>, vk::Result> Swapchain::acquire()
 	}
 	if (acquired.result != vk::Result::eSuccess && acquired.result != vk::Result::eSuboptimalKHR)
 	{
-		return std::unexpected(acquired.result);
+		return std::unexpected(to_error(acquired.result));
 	}
 	// Reset only now that we are committed to submitting (which re-signals the fence).
 	if (m_device.resetFences(m_frame_fence) != vk::Result::eSuccess)
 	{
-		return std::unexpected(vk::Result::eErrorDeviceLost);
+		return std::unexpected(to_error(vk::Result::eErrorDeviceLost));
 	}
 	const std::uint32_t index = acquired.value;
 	return std::optional<Frame>{Frame{.target = m_textures[index], .image_index = index, .extent = m_extent}};
 }
 
-std::expected<bool, vk::Result> Swapchain::present(CommandEncoder& enc, const Frame& frame)
+std::expected<bool, Error> Swapchain::present(CommandEncoder& enc, const Frame& frame)
 {
 	const vk::CommandBuffer cmd = enc.vk();
 	if (const vk::Result result = cmd.end(); result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 	// Wait on the acquire at color-attachment-output (the first stage that touches the image), signal
 	// the per-image present semaphore, and fence the submit so the next acquire knows it has retired.
@@ -184,7 +184,7 @@ std::expected<bool, vk::Result> Swapchain::present(CommandEncoder& enc, const Fr
 							  .setSignalSemaphores(signal);
 	if (const vk::Result result = m_queue.submit(submit, m_frame_fence); result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 	const auto info =
 		vk::PresentInfoKHR().setWaitSemaphores(signal).setSwapchains(m_swapchain).setImageIndices(frame.image_index);
@@ -195,12 +195,12 @@ std::expected<bool, vk::Result> Swapchain::present(CommandEncoder& enc, const Fr
 	}
 	if (result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 	return false;
 }
 
-std::expected<void, vk::Result> Swapchain::recreate()
+std::expected<void, Error> Swapchain::recreate()
 {
 	(void)m_device.waitIdle(); // the simplest barrier before swapping the image set out
 	const Extent2D extent = surface_extent(m_extent);
@@ -210,11 +210,15 @@ std::expected<void, vk::Result> Swapchain::recreate()
 	}
 	const vk::SwapchainKHR old	= m_swapchain;
 	auto				   built = build(extent, old);
-	if (built.has_value() && old)
+	if (!built.has_value())
+	{
+		return std::unexpected(to_error(built.error()));
+	}
+	if (old)
 	{
 		m_device.destroySwapchainKHR(old);
 	}
-	return built;
+	return {};
 }
 
 Extent2D Swapchain::surface_extent(Extent2D fallback) const

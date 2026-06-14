@@ -32,6 +32,7 @@
 #include <vector>
 #include <veng/rhi/BindGroup.hpp>
 #include <veng/rhi/Enums.hpp>
+#include <veng/rhi/Error.hpp>
 #include <veng/rhi/Handles.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
@@ -92,11 +93,11 @@ class Device
 	// --- device-level resource creation (RHI-owned; freed on destroy_* or with the device) --------
 
 	/// @brief Allocate an RHI-owned texture (image + view, registered), returning its handle.
-	[[nodiscard]] std::expected<TextureHandle, vk::Result> create_texture(const TextureDesc& desc);
+	[[nodiscard]] std::expected<TextureHandle, Error> create_texture(const TextureDesc& desc);
 	/// @brief Free a texture created by @ref create_texture (image, view, memory) and its slot.
 	void destroy_texture(TextureHandle handle) noexcept;
 	/// @brief Allocate an RHI-owned buffer, returning its handle. HOST_VISIBLE buffers are mapped.
-	[[nodiscard]] std::expected<BufferHandle, vk::Result> create_buffer(const BufferDesc& desc);
+	[[nodiscard]] std::expected<BufferHandle, Error> create_buffer(const BufferDesc& desc);
 	/// @brief Free a buffer created by @ref create_buffer and its slot.
 	void destroy_buffer(BufferHandle handle) noexcept;
 	/// @brief The persistently-mapped host pointer for a HOST_VISIBLE buffer (null otherwise).
@@ -107,7 +108,7 @@ class Device
 	/// @brief Begin recording a one-shot command encoder (the device owns the command buffer).
 	[[nodiscard]] CommandEncoder begin_commands();
 	/// @brief End @p enc, submit it on the graphics queue, and block until it completes.
-	[[nodiscard]] std::expected<void, vk::Result> submit(CommandEncoder& enc);
+	[[nodiscard]] std::expected<void, Error> submit(CommandEncoder& enc);
 
 	/// @brief Register an image + its default view, returning a stable handle to them.
 	[[nodiscard]] TextureHandle register_texture(vk::Image image, vk::ImageView view);
@@ -134,8 +135,8 @@ class Device
 	/// @brief Resolve a semaphore handle to its `vk::Semaphore`, or a null handle if invalid/released.
 	[[nodiscard]] vk::Semaphore semaphore(SemaphoreHandle handle) const noexcept;
 
-	/// @brief Create a device-owned sampler from @p info, returning a handle (or the `vk::Result` on failure).
-	[[nodiscard]] std::expected<SamplerHandle, vk::Result> create_sampler(const vk::SamplerCreateInfo& info);
+	/// @brief Create a device-owned sampler from @p info, returning a handle (or an @ref Error on failure).
+	[[nodiscard]] std::expected<SamplerHandle, Error> create_sampler(const vk::SamplerCreateInfo& info);
 	/// @brief Destroy a sampler and free its slot (optional — all owned samplers are freed on device destroy).
 	void release_sampler(SamplerHandle handle) noexcept;
 	/// @brief Resolve a sampler handle to its `vk::Sampler`, or a null handle if invalid/released.

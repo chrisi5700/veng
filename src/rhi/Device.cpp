@@ -82,7 +82,7 @@ Device::~Device()
 	}
 }
 
-std::expected<TextureHandle, vk::Result> Device::create_texture(const TextureDesc& desc)
+std::expected<TextureHandle, Error> Device::create_texture(const TextureDesc& desc)
 {
 	const auto				  image_info = vk::ImageCreateInfo()
 											   .setImageType(vk::ImageType::e2D)
@@ -103,7 +103,7 @@ std::expected<TextureHandle, vk::Result> Device::create_texture(const TextureDes
 	if (const vk::Result result = m_allocator.createImage(&image_info, &alloc_info, &image, &allocation, nullptr);
 		result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 
 	// A view only when the usage allows one (attachment/sampled); transfer-only textures get none.
@@ -126,7 +126,7 @@ std::expected<TextureHandle, vk::Result> Device::create_texture(const TextureDes
 		if (view_result.result != vk::Result::eSuccess)
 		{
 			m_allocator.destroyImage(image, allocation);
-			return std::unexpected(view_result.result);
+			return std::unexpected(to_error(view_result.result));
 		}
 		view = view_result.value;
 	}
@@ -161,7 +161,7 @@ void Device::destroy_texture(TextureHandle handle) noexcept
 	}
 }
 
-std::expected<BufferHandle, vk::Result> Device::create_buffer(const BufferDesc& desc)
+std::expected<BufferHandle, Error> Device::create_buffer(const BufferDesc& desc)
 {
 	const auto				  buffer_info = vk::BufferCreateInfo()
 												.setSize(desc.size)
@@ -184,7 +184,7 @@ std::expected<BufferHandle, vk::Result> Device::create_buffer(const BufferDesc& 
 	if (const vk::Result result = m_allocator.createBuffer(&buffer_info, &alloc_info, &buffer, &allocation, &info);
 		result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 
 	const Buffer slot{.buffer = buffer, .allocation = allocation, .mapped = info.pMappedData};
@@ -229,39 +229,39 @@ CommandEncoder Device::begin_commands()
 	return CommandEncoder(m_command_buffer, *this);
 }
 
-std::expected<void, vk::Result> Device::submit(CommandEncoder& enc)
+std::expected<void, Error> Device::submit(CommandEncoder& enc)
 {
 	const vk::CommandBuffer cmd = enc.vk();
 	if (!cmd || !m_fence)
 	{
-		return std::unexpected(vk::Result::eErrorInitializationFailed);
+		return std::unexpected(to_error(vk::Result::eErrorInitializationFailed));
 	}
 	if (const vk::Result result = cmd.end(); result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 	if (const vk::Result result = m_graphics_queue.submit(vk::SubmitInfo().setCommandBuffers(cmd), m_fence);
 		result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 	if (const vk::Result result = m_device.waitForFences(m_fence, vk::True, UINT64_MAX); result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 	if (const vk::Result result = m_device.resetFences(m_fence); result != vk::Result::eSuccess)
 	{
-		return std::unexpected(result);
+		return std::unexpected(to_error(result));
 	}
 	return {};
 }
 
-std::expected<SamplerHandle, vk::Result> Device::create_sampler(const vk::SamplerCreateInfo& info)
+std::expected<SamplerHandle, Error> Device::create_sampler(const vk::SamplerCreateInfo& info)
 {
 	const auto created = m_device.createSampler(info);
 	if (created.result != vk::Result::eSuccess)
 	{
-		return std::unexpected(created.result);
+		return std::unexpected(to_error(created.result));
 	}
 	if (!m_free_samplers.empty())
 	{

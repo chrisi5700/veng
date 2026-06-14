@@ -30,6 +30,7 @@
 #include <optional>
 #include <vector>
 #include <veng/rhi/Enums.hpp>
+#include <veng/rhi/Error.hpp>
 #include <veng/rhi/Handles.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -66,9 +67,9 @@ class Swapchain
 	 * @brief Create a swapchain over @p context's surface at (approximately) @p extent.
 	 * @param context A windowed @ref veng::Context (its `surface()` must be non-null).
 	 * @param extent  The desired initial extent in pixels (clamped to the surface's capabilities).
-	 * @return A ready swapchain, or the failing `vk::Result`.
+	 * @return A ready swapchain, or the failing @ref Error.
 	 */
-	[[nodiscard]] static std::expected<Swapchain, vk::Result> create(const Context& context, Extent2D extent);
+	[[nodiscard]] static std::expected<Swapchain, Error> create(const Context& context, Extent2D extent);
 
 	Swapchain(const Swapchain&)			   = delete;
 	Swapchain& operator=(const Swapchain&) = delete;
@@ -88,9 +89,9 @@ class Swapchain
 	 * about to re-record is free. A `nullopt` result means the swapchain is out of date (e.g. the
 	 * window resized) — call @ref recreate and skip the frame.
 	 *
-	 * @return The @ref Frame to render into, `nullopt` if out of date, or a `vk::Result` on failure.
+	 * @return The @ref Frame to render into, `nullopt` if out of date, or an @ref Error on failure.
 	 */
-	[[nodiscard]] std::expected<std::optional<Frame>, vk::Result> acquire();
+	[[nodiscard]] std::expected<std::optional<Frame>, Error> acquire();
 
 	/**
 	 * @brief End @p enc, submit it (waiting on the acquire, signalling present-ready), and queue
@@ -99,16 +100,16 @@ class Swapchain
 	 * The recorded commands must have left @p frame's target in @ref TextureUsage::PRESENT.
 	 *
 	 * @return `true` if the swapchain is now out of date (call @ref recreate), `false` on clean
-	 *         success, or a `vk::Result` on failure.
+	 *         success, or an @ref Error on failure.
 	 */
-	[[nodiscard]] std::expected<bool, vk::Result> present(CommandEncoder& enc, const Frame& frame);
+	[[nodiscard]] std::expected<bool, Error> present(CommandEncoder& enc, const Frame& frame);
 
 	/**
 	 * @brief Rebuild the swapchain at the surface's current size (re-queried from its capabilities).
 	 * @pre Safe to call any time; it waits the device idle first.
-	 * @return `void` on success (a no-op while the window is minimised to a zero extent), or a `vk::Result`.
+	 * @return `void` on success (a no-op while the window is minimised to a zero extent), or an @ref Error.
 	 */
-	[[nodiscard]] std::expected<void, vk::Result> recreate();
+	[[nodiscard]] std::expected<void, Error> recreate();
 
 	 private:
 	explicit Swapchain(const Context& context) noexcept;

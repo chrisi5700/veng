@@ -17,10 +17,30 @@
 
 #include <veng/rhi/BindGroup.hpp>
 #include <veng/rhi/Enums.hpp>
+#include <veng/rhi/Error.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::rhi
 {
+/// @brief Map a `vk::Result` to the RHI's @ref Error (anything unmapped becomes @ref Error::UNKNOWN).
+///        The single seam where a driver `vk::Result` becomes the vk-free error the RHI surface returns.
+[[nodiscard]] constexpr Error to_error(vk::Result result) noexcept
+{
+	switch (result)
+	{
+		case vk::Result::eErrorOutOfHostMemory: return Error::OUT_OF_HOST_MEMORY;
+		case vk::Result::eErrorOutOfDeviceMemory: return Error::OUT_OF_DEVICE_MEMORY;
+		case vk::Result::eErrorInitializationFailed: return Error::INITIALIZATION_FAILED;
+		case vk::Result::eErrorDeviceLost: return Error::DEVICE_LOST;
+		case vk::Result::eErrorMemoryMapFailed: return Error::MEMORY_MAP_FAILED;
+		case vk::Result::eErrorFeatureNotPresent: return Error::FEATURE_NOT_PRESENT;
+		case vk::Result::eErrorSurfaceLostKHR: return Error::SURFACE_LOST;
+		case vk::Result::eErrorOutOfDateKHR: return Error::OUT_OF_DATE;
+		case vk::Result::eSuboptimalKHR: return Error::SUBOPTIMAL;
+		default: return Error::UNKNOWN;
+	}
+}
+
 /// @brief Translate a reflected `vk::DescriptorType` to its @ref rhi::BindingType (sampled-image fallback).
 [[nodiscard]] constexpr BindingType to_binding_type(vk::DescriptorType type) noexcept
 {
