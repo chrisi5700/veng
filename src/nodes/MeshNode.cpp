@@ -66,7 +66,7 @@ std::expected<bool, graph::ExecError> MeshNode::record(gpu::GpuExecContext& ctx)
 					 .index_buffer	= m_index_buffer.has_value() ? m_index_buffer->handle() : rhi::BufferHandle{},
 					 .vertex_count	= m_vertex_count,
 					 .index_count	= m_index_count,
-					 .index_type	= vk::IndexType::eUint32,
+					 .index_type	= rhi::IndexType::UINT32,
 					 .vertex_stride = m_vertex_stride});
 	return true;
 }

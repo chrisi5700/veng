@@ -86,7 +86,7 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	graph.set_producer(scene_image, raster_node);
 
 	auto			 blit	   = std::make_unique<veng::nodes::BlitNode>(scene_image, dst, presented_image,
-																		 vk::ImageLayout::eTransferSrcOptimal);
+																		 veng::rhi::TextureUsage::TRANSFER_SRC);
 	auto*			 blit_ptr  = blit.get();
 	const NodeHandle blit_node = graph.add(std::move(blit));
 	graph.set_producer(presented_image, blit_node);
@@ -185,7 +185,7 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 													veng::rhi::Format::UNDEFINED, 3, screen, scene_image);
 	graph.set_producer(scene_image, graph.add(std::move(raster)));
 	auto blit = std::make_unique<veng::nodes::BlitNode>(scene_image, dst, presented_image,
-														vk::ImageLayout::eTransferSrcOptimal);
+														veng::rhi::TextureUsage::TRANSFER_SRC);
 	graph.set_producer(presented_image, graph.add(std::move(blit)));
 
 	const auto pool =

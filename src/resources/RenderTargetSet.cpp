@@ -91,10 +91,13 @@ std::expected<void, vk::Result> RenderTargetSet::acquire(ResourcePool& pool, vk:
 	return {};
 }
 
-void RenderTargetSet::begin(ResourcePool& pool, vk::CommandBuffer cmd, vk::Extent2D extent,
+void RenderTargetSet::begin(ResourcePool& pool, rhi::CommandEncoder& enc, vk::Extent2D extent,
 							std::array<float, 4> clear_color)
 {
-	const bool msaa = multisampled();
+	// RenderTargetSet is the engine's MSAA/attachment plumbing — legitimately Vulkan-aware. It records
+	// the attachment transitions + beginRendering through the encoder's underlying command buffer.
+	const vk::CommandBuffer cmd	 = enc.vk();
+	const bool				msaa = multisampled();
 
 	// Auto-tracked transitions: the pool inserts the barrier and updates its layout record so the
 	// consumer side can reason about layout without desyncing from actual GPU state. Under MSAA both
@@ -121,9 +124,9 @@ void RenderTargetSet::begin(ResourcePool& pool, vk::CommandBuffer cmd, vk::Exten
 								  .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
 								  .setLoadOp(vk::AttachmentLoadOp::eClear)
 								  // The multisampled image is consumed by the resolve, never read after; only the
-							// resolved single-sample copy is kept (eStore on the resolve via eDontCare here).
-							.setStoreOp(msaa ? vk::AttachmentStoreOp::eDontCare : vk::AttachmentStoreOp::eStore)
-							.setClearValue(color_clear);
+								  // resolved single-sample copy is kept (eStore on the resolve via eDontCare here).
+								  .setStoreOp(msaa ? vk::AttachmentStoreOp::eDontCare : vk::AttachmentStoreOp::eStore)
+								  .setClearValue(color_clear);
 	if (msaa)
 	{
 		color_attach.setResolveMode(vk::ResolveModeFlagBits::eAverage)

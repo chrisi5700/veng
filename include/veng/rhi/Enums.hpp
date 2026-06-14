@@ -181,6 +181,37 @@ enum class AddressMode : std::uint8_t
 };
 
 /**
+ * @brief How a texture is being used at a point in a frame — the engine-vocabulary stand-in for
+ *        the `vk::ImageLayout`/`PipelineStage`/`Access` triple.
+ *
+ * A node declares the usage it needs (via `GpuNode::image_usages`) or asks the command encoder to
+ * transition to one (`CommandEncoder::transition`); the RHI maps each usage to the concrete layout,
+ * pipeline stage, and access scope. No high-level code names a Vulkan image layout again.
+ *
+ * @ingroup rhi
+ */
+enum class TextureUsage : std::uint8_t
+{
+	UNDEFINED,		  ///< No defined contents/layout — the "discard prior contents" source state.
+	COLOR_ATTACHMENT, ///< Written as a color attachment by a render pass.
+	DEPTH_ATTACHMENT, ///< Read/written as a depth-stencil attachment.
+	SAMPLED,		  ///< Sampled (read) by a shader.
+	TRANSFER_SRC,	  ///< Read by a transfer (blit/copy) as the source.
+	TRANSFER_DST,	  ///< Written by a transfer (blit/copy/clear) as the destination.
+	PRESENT,		  ///< Handed to the presentation engine.
+};
+
+/**
+ * @brief Index element width for an indexed draw — the stand-in for `vk::IndexType`.
+ * @ingroup rhi
+ */
+enum class IndexType : std::uint8_t
+{
+	UINT16, ///< 16-bit indices.
+	UINT32, ///< 32-bit indices.
+};
+
+/**
  * @brief A 2D pixel size — the engine-vocabulary stand-in for `vk::Extent2D`.
  *
  * Flows on the reactive graph's screen-size edge and rides on `ImageRef` so neither names Vulkan.

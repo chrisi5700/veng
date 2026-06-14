@@ -111,11 +111,9 @@ class PhongRenderNode final : public gpu::GpuNode
 		}
 		Image* const color_image = m_targets.color();
 
-		const vk::CommandBuffer cmd = ctx.command_buffer();
-		m_targets.begin(ctx.pool(), cmd, extent, m_config.clear_color);
-		cmd.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(extent.width), static_cast<float>(extent.height),
-										0.0F, 1.0F));
-		cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+		rhi::CommandEncoder& enc = ctx.encoder();
+		m_targets.begin(ctx.pool(), enc, extent, m_config.clear_color);
+		enc.set_viewport_scissor(rhi::to_rhi(extent));
 
 		// Opaque first (writes depth), then each translucent object's far faces, then its near
 		// faces — both depth-tested against the opaque pass but not writing depth, alpha-blended.
@@ -126,7 +124,7 @@ class PhongRenderNode final : public gpu::GpuNode
 		};
 		const auto draw_batch = [&](const Batch& batch) -> std::expected<void, graph::ExecError>
 		{
-			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, batch.pipe->pipeline());
+			enc.bind_pipeline(batch.pipe->handle());
 			for (const Object& obj : m_objects)
 			{
 				if (obj.transparent != batch.transparent)
@@ -150,20 +148,19 @@ class PhongRenderNode final : public gpu::GpuNode
 									 .view_proj = view_proj,
 									 .color		= obj.color,
 									 .eye		= glm::vec4(eye_pos, shininess)};
-				cmd.pushConstants<std::byte>(
-					batch.pipe->layout(), vk::ShaderStageFlagBits::eVertex, 0,
-					vk::ArrayProxy<const std::byte>(static_cast<std::uint32_t>(sizeof(PhongPush)),
-													static_cast<const std::byte*>(static_cast<const void*>(&push))));
-				const vk::DeviceSize offset = 0;
-				cmd.bindVertexBuffers(0, ctx.rhi().buffer(mesh.vertex_buffer), offset);
+				enc.push_constants(
+					batch.pipe->handle(), rhi::ShaderStage::VERTEX, 0,
+					std::span<const std::byte>(static_cast<const std::byte*>(static_cast<const void*>(&push)),
+											   sizeof(PhongPush)));
+				enc.bind_vertex_buffer(mesh.vertex_buffer);
 				if (mesh.index_buffer.valid())
 				{
-					cmd.bindIndexBuffer(ctx.rhi().buffer(mesh.index_buffer), 0, mesh.index_type);
-					cmd.drawIndexed(mesh.index_count, 1, 0, 0, 0);
+					enc.bind_index_buffer(mesh.index_buffer, mesh.index_type);
+					enc.draw_indexed(mesh.index_count, 1);
 				}
 				else
 				{
-					cmd.draw(mesh.vertex_count, 1, 0, 0);
+					enc.draw(mesh.vertex_count, 1);
 				}
 			}
 			return {};
@@ -178,7 +175,7 @@ class PhongRenderNode final : public gpu::GpuNode
 		{
 			drawn = draw_batch(Batch{.pipe = &*m_transparent_front, .transparent = true});
 		}
-		cmd.endRendering();
+		enc.end_rendering();
 		if (!drawn.has_value())
 		{
 			return std::unexpected(drawn.error());

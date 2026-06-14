@@ -52,8 +52,8 @@ AppLoop::AppLoop(const AppConfig& config)
 	}
 	m_swap = std::make_unique<veng::SwapchainManager>(std::move(swap_result.value()));
 
-	m_pool = std::make_unique<veng::ResourcePool>(m_ctx->device(), m_ctx->rhi(), m_ctx->allocator(),
-												  m_config.frames_in_flight);
+	m_pool	   = std::make_unique<veng::ResourcePool>(m_ctx->device(), m_ctx->rhi(), m_ctx->allocator(),
+													  m_config.frames_in_flight);
 	m_commands = std::make_unique<veng::CommandManager>(*m_ctx);
 
 	// The scene renders into a linear-light HDR target when config.hdr is set (resolved to the
@@ -80,9 +80,9 @@ AppLoop::AppLoop(const AppConfig& config)
 	{
 		m_tonemapped_image = m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 		const TypedHandle<float> exposure = m_graph.add_source<float>(m_config.exposure);
-		auto tonemap = std::make_unique<veng::nodes::GraphicsNode>("passes/fullscreen.vert", "passes/tonemap.frag",
-																   veng::rhi::to_rhi(m_swap->format()), veng::rhi::Format::UNDEFINED, 3,
-																   m_screen, m_tonemapped_image);
+		auto					 tonemap  = std::make_unique<veng::nodes::GraphicsNode>(
+			"passes/fullscreen.vert", "passes/tonemap.frag", veng::rhi::to_rhi(m_swap->format()),
+			veng::rhi::Format::UNDEFINED, 3, m_screen, m_tonemapped_image);
 		tonemap->add_sampled_image(m_scene_image, "hdr")
 			.push_constant<float>(exposure, veng::rhi::ShaderStage::FRAGMENT);
 		m_graph.set_producer(m_tonemapped_image, m_graph.add(std::move(tonemap)));
@@ -90,7 +90,7 @@ AppLoop::AppLoop(const AppConfig& config)
 	}
 
 	auto blit = std::make_unique<veng::nodes::BlitNode>(blit_source, m_swapchain_image, m_presented_image,
-														vk::ImageLayout::ePresentSrcKHR);
+														veng::rhi::TextureUsage::PRESENT);
 	m_graph.set_producer(m_presented_image, m_graph.add(std::move(blit)));
 
 	auto present  = std::make_unique<veng::nodes::PresentNode>(*m_swap, m_presented_image, m_frame_done);

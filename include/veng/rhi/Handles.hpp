@@ -46,6 +46,14 @@ struct SamplerHandle
 	[[nodiscard]] bool valid() const noexcept { return id != INVALID_HANDLE; }
 	friend bool		   operator==(const SamplerHandle&, const SamplerHandle&) noexcept = default;
 };
+
+/// @brief Opaque handle to a registered graphics/compute pipeline (pipeline + layout). @see Device::register_pipeline
+struct PipelineHandle
+{
+	std::uint32_t	   id = INVALID_HANDLE;
+	[[nodiscard]] bool valid() const noexcept { return id != INVALID_HANDLE; }
+	friend bool		   operator==(const PipelineHandle&, const PipelineHandle&) noexcept = default;
+};
 } // namespace veng::rhi
 
 #endif // VENG_RHI_HANDLES_HPP

@@ -81,11 +81,25 @@ class Device
 	/// @brief Resolve a sampler handle to its `vk::Sampler`, or a null handle if invalid/released.
 	[[nodiscard]] vk::Sampler sampler(SamplerHandle handle) const noexcept;
 
+	/// @brief Register a pipeline + its layout, returning a stable handle (non-owning — `GraphicsPipeline` owns them).
+	[[nodiscard]] PipelineHandle register_pipeline(vk::Pipeline pipeline, vk::PipelineLayout layout);
+	/// @brief Free a pipeline slot for reuse (called by the owning `GraphicsPipeline` on destroy).
+	void release_pipeline(PipelineHandle handle) noexcept;
+	/// @brief Resolve a pipeline handle to its `vk::Pipeline`, or a null handle if invalid/released.
+	[[nodiscard]] vk::Pipeline pipeline(PipelineHandle handle) const noexcept;
+	/// @brief Resolve a pipeline handle to its `vk::PipelineLayout`, or a null handle if invalid/released.
+	[[nodiscard]] vk::PipelineLayout pipeline_layout(PipelineHandle handle) const noexcept;
+
 	 private:
 	struct Texture
 	{
 		vk::Image	  image;
 		vk::ImageView view;
+	};
+	struct Pipeline
+	{
+		vk::Pipeline	   pipeline;
+		vk::PipelineLayout layout;
 	};
 	vk::Device				   m_device; ///< For owned-sampler create/destroy.
 	std::vector<Texture>	   m_textures;
@@ -94,6 +108,8 @@ class Device
 	std::vector<std::uint32_t> m_free_buffers;
 	std::vector<vk::Sampler>   m_samplers; ///< Device-owned; destroyed in the destructor.
 	std::vector<std::uint32_t> m_free_samplers;
+	std::vector<Pipeline>	   m_pipelines; ///< Non-owning; `GraphicsPipeline` owns the vk objects.
+	std::vector<std::uint32_t> m_free_pipelines;
 };
 } // namespace veng::rhi
 

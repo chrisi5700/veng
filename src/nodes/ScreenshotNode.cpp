@@ -30,10 +30,7 @@ std::vector<gpu::ImageUsage> ScreenshotNode::image_usages(graph::ExecContext& ct
 	{
 		return {};
 	}
-	return {gpu::ImageUsage{.id		= src->value().pool_id,
-							.layout = vk::ImageLayout::eTransferSrcOptimal,
-							.stage	= vk::PipelineStageFlagBits2::eTransfer,
-							.access = vk::AccessFlagBits2::eTransferRead}};
+	return {gpu::ImageUsage{.id = src->value().pool_id, .usage = rhi::TextureUsage::TRANSFER_SRC}};
 }
 
 std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext& ctx)
@@ -64,21 +61,14 @@ std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext
 		}
 		m_staging = std::move(buf.value());
 	}
-	m_extent = rhi::to_vk(image.extent);
+	m_extent = image.extent;
 
 	// Retain the pool copy we read while this frame is in flight (the producer may be cached).
 	ctx.pool().consume(image);
 
-	const vk::CommandBuffer cmd = ctx.command_buffer();
-	const auto layers = vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);
-	cmd.copyImageToBuffer(ctx.rhi().image(image.texture), vk::ImageLayout::eTransferSrcOptimal, m_staging->buffer(),
-						  vk::BufferImageCopy().setImageSubresource(layers).setImageExtent(
-							  vk::Extent3D{image.extent.width, image.extent.height, 1}));
-	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost, {},
-						vk::MemoryBarrier()
-							.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-							.setDstAccessMask(vk::AccessFlagBits::eHostRead),
-						{}, {});
+	// Copy the source (already in TRANSFER_SRC, transitioned by the executor from image_usages) into
+	// host-visible staging, then make the write visible to the host read on_retired performs.
+	ctx.encoder().copy_texture_to_host_buffer(image.texture, m_staging->handle(), image.extent);
 	m_pending_write = true;
 	return true;
 }

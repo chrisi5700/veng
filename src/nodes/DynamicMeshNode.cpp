@@ -74,7 +74,7 @@ std::expected<bool, graph::ExecError> DynamicMeshNode::record(gpu::GpuExecContex
 									 .index_buffer	= index_handle,
 									 .vertex_count	= vertices.count,
 									 .index_count	= index_count,
-									 .index_type	= vk::IndexType::eUint32,
+									 .index_type	= rhi::IndexType::UINT32,
 									 .vertex_stride = m_vertex_stride});
 	return true;
 }

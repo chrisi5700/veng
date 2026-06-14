@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cstddef>
+#include <span>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -15,7 +16,6 @@
 #include <veng/gpu/MeshRef.hpp>
 #include <veng/gpu/UniformRef.hpp>
 #include <veng/logging/Logger.hpp>
-#include <veng/managers/CommandManager.hpp>
 #include <veng/nodes/GraphicsNode.hpp>
 #include <veng/resources/SamplerConvert.hpp>
 #include <veng/rhi/Convert.hpp>
@@ -56,10 +56,7 @@ std::vector<gpu::ImageUsage> GraphicsNode::image_usages(graph::ExecContext& ctx)
 		{
 			continue;
 		}
-		usages.push_back(gpu::ImageUsage{.id	 = ref.pool_id,
-										 .layout = vk::ImageLayout::eShaderReadOnlyOptimal,
-										 .stage	 = vk::PipelineStageFlagBits2::eFragmentShader,
-										 .access = vk::AccessFlagBits2::eShaderSampledRead});
+		usages.push_back(gpu::ImageUsage{.id = ref.pool_id, .usage = rhi::TextureUsage::SAMPLED});
 	}
 	return usages;
 }
@@ -195,13 +192,11 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	Image* const color_image = m_targets.color();
 	m_last_color			 = color_image;
 
-	const vk::CommandBuffer cmd = ctx.command_buffer();
-	m_targets.begin(ctx.pool(), cmd, extent, m_clear_color);
+	rhi::CommandEncoder& enc = ctx.encoder();
+	m_targets.begin(ctx.pool(), enc, extent, m_clear_color);
 
-	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline->pipeline());
-	cmd.setViewport(
-		0, vk::Viewport(0.0F, 0.0F, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0F, 1.0F));
-	cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+	enc.bind_pipeline(m_pipeline->handle());
+	enc.set_viewport_scissor(rhi::to_rhi(extent));
 
 	// Descriptors: write the uniform-buffer + sampled-image edges into a set at their name-matched
 	// bindings (plus the node's sampler at every reflected SamplerState), then bind it. The set is
@@ -334,7 +329,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		}
 
 		ctx.device().updateDescriptorSets(writes, {});
-		cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_pipeline->layout(), 0, set, {});
+		enc.bind_descriptor_set(m_pipeline->handle(), set);
 	}
 
 	// Record each draw: its push constants, then its geometry. All draws share the pipeline,
@@ -348,9 +343,8 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		{
 			if (const void* bytes = push.read(ctx); bytes != nullptr)
 			{
-				cmd.pushConstants<std::byte>(
-					m_pipeline->layout(), rhi::to_vk(push.stage), push.offset,
-					vk::ArrayProxy<const std::byte>(push.size, static_cast<const std::byte*>(bytes)));
+				enc.push_constants(m_pipeline->handle(), push.stage, push.offset,
+								   std::span<const std::byte>(static_cast<const std::byte*>(bytes), push.size));
 			}
 		}
 
@@ -381,22 +375,21 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
 			}
-			const gpu::MeshRef	 mesh	= mesh_data->value();
-			const vk::DeviceSize offset = 0;
-			cmd.bindVertexBuffers(0, ctx.rhi().buffer(mesh.vertex_buffer), offset);
+			const gpu::MeshRef mesh = mesh_data->value();
+			enc.bind_vertex_buffer(mesh.vertex_buffer);
 			if (mesh.index_buffer.valid())
 			{
-				cmd.bindIndexBuffer(ctx.rhi().buffer(mesh.index_buffer), 0, mesh.index_type);
-				cmd.drawIndexed(mesh.index_count, instance_count, 0, 0, 0);
+				enc.bind_index_buffer(mesh.index_buffer, mesh.index_type);
+				enc.draw_indexed(mesh.index_count, instance_count);
 			}
 			else
 			{
-				cmd.draw(mesh.vertex_count, instance_count, 0, 0);
+				enc.draw(mesh.vertex_count, instance_count);
 			}
 		}
 		else
 		{
-			cmd.draw(draw.vertex_count, instance_count, 0, 0);
+			enc.draw(draw.vertex_count, instance_count);
 		}
 		return {};
 	};
@@ -418,7 +411,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			}
 		}
 	}
-	cmd.endRendering();
+	enc.end_rendering();
 
 	// No end-of-pass transition: the image stays in eColorAttachmentOptimal. The CONSUMER's
 	// declared `image_usages` drives the layout it actually needs (sampled / transfer-src), and

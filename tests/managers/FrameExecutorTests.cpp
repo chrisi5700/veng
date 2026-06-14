@@ -66,7 +66,7 @@ TEST_CASE("FrameExecutor drives the headless frame loop", "[managers][frameexecu
 	graph.set_producer(scene_image, graph.add(std::move(raster)));
 
 	auto blit = std::make_unique<veng::nodes::BlitNode>(scene_image, swapchain_image, presented_image,
-														vk::ImageLayout::ePresentSrcKHR);
+														veng::rhi::TextureUsage::PRESENT);
 	graph.set_producer(presented_image, graph.add(std::move(blit)));
 
 	auto  present	  = std::make_unique<veng::nodes::PresentNode>(swap, presented_image, frame_done);

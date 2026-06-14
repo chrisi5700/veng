@@ -14,11 +14,13 @@
 namespace veng
 {
 GraphicsPipeline::GraphicsPipeline(vk::Device device, vk::DescriptorSetLayout descriptor_set_layout,
-								   vk::PipelineLayout pipeline_layout, vk::Pipeline pipeline) noexcept
+								   vk::PipelineLayout pipeline_layout, vk::Pipeline pipeline, rhi::Device& rhi) noexcept
 	: m_device(device)
 	, m_descriptor_set_layout(descriptor_set_layout)
 	, m_pipeline_layout(pipeline_layout)
 	, m_pipeline(pipeline)
+	, m_rhi(&rhi)
+	, m_handle(rhi.register_pipeline(pipeline, pipeline_layout))
 {
 }
 
@@ -27,6 +29,10 @@ void GraphicsPipeline::destroy() noexcept
 	if (!m_device)
 	{
 		return;
+	}
+	if (m_rhi != nullptr)
+	{
+		m_rhi->release_pipeline(m_handle);
 	}
 	// vkDestroy* on a VK_NULL_HANDLE is a defined no-op, so the per-handle null checks the
 	// outer m_device guard already covers are redundant — let any unset handle fall through.
@@ -37,6 +43,8 @@ void GraphicsPipeline::destroy() noexcept
 	m_descriptor_set_layout = nullptr;
 	m_pipeline_layout		= nullptr;
 	m_pipeline				= nullptr;
+	m_rhi					= nullptr;
+	m_handle				= rhi::PipelineHandle{};
 }
 
 GraphicsPipeline::GraphicsPipeline(GraphicsPipeline&& other) noexcept
@@ -44,11 +52,15 @@ GraphicsPipeline::GraphicsPipeline(GraphicsPipeline&& other) noexcept
 	, m_descriptor_set_layout(other.m_descriptor_set_layout)
 	, m_pipeline_layout(other.m_pipeline_layout)
 	, m_pipeline(other.m_pipeline)
+	, m_rhi(other.m_rhi)
+	, m_handle(other.m_handle)
 {
 	other.m_device				  = nullptr;
 	other.m_descriptor_set_layout = nullptr;
 	other.m_pipeline_layout		  = nullptr;
 	other.m_pipeline			  = nullptr;
+	other.m_rhi					  = nullptr;
+	other.m_handle				  = rhi::PipelineHandle{};
 }
 
 GraphicsPipeline& GraphicsPipeline::operator=(GraphicsPipeline&& other) noexcept
@@ -60,10 +72,14 @@ GraphicsPipeline& GraphicsPipeline::operator=(GraphicsPipeline&& other) noexcept
 		m_descriptor_set_layout		  = other.m_descriptor_set_layout;
 		m_pipeline_layout			  = other.m_pipeline_layout;
 		m_pipeline					  = other.m_pipeline;
+		m_rhi						  = other.m_rhi;
+		m_handle					  = other.m_handle;
 		other.m_device				  = nullptr;
 		other.m_descriptor_set_layout = nullptr;
 		other.m_pipeline_layout		  = nullptr;
 		other.m_pipeline			  = nullptr;
+		other.m_rhi					  = nullptr;
+		other.m_handle				  = rhi::PipelineHandle{};
 	}
 	return *this;
 }
@@ -293,6 +309,6 @@ std::expected<GraphicsPipeline, PipelineError> GraphicsPipelineBuilder::build(co
 		return std::unexpected(PipelineError::PIPELINE_CREATION_FAILED);
 	}
 
-	return GraphicsPipeline(device, descriptor_set_layout.value, pipeline_layout.value, pipeline.value);
+	return GraphicsPipeline(device, descriptor_set_layout.value, pipeline_layout.value, pipeline.value, context.rhi());
 }
 } // namespace veng

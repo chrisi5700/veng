@@ -255,11 +255,9 @@ class PbrRenderNode final : public gpu::GpuNode
 			return std::unexpected(sets.error());
 		}
 
-		const vk::CommandBuffer cmd = ctx.command_buffer();
-		m_targets.begin(ctx.pool(), cmd, extent, m_config.clear_color);
-		cmd.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(extent.width), static_cast<float>(extent.height),
-										0.0F, 1.0F));
-		cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
+		rhi::CommandEncoder& enc = ctx.encoder();
+		m_targets.begin(ctx.pool(), enc, extent, m_config.clear_color);
+		enc.set_viewport_scissor(rhi::to_rhi(extent));
 		const std::size_t					  slot		  = ctx.frame_slot();
 		std::expected<void, graph::ExecError> draw_result = {};
 
@@ -289,25 +287,23 @@ class PbrRenderNode final : public gpu::GpuNode
 				return std::unexpected(graph::ExecError::NODE_FAILED);
 			}
 			const Material& material = m_materials[obj.material];
-			cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipe.layout(), 0, m_sets[obj.material][slot], {});
+			enc.bind_descriptor_set(pipe.handle(), m_sets[obj.material][slot]);
 			const PbrPush push{.model	   = model_d->value(),
 							   .base_color = material.base_color,
 							   .mr_factors = material.mr_factors,
 							   .emissive   = material.emissive};
-			cmd.pushConstants<std::byte>(
-				pipe.layout(), vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment, 0,
-				vk::ArrayProxy<const std::byte>(static_cast<std::uint32_t>(sizeof(PbrPush)),
-												static_cast<const std::byte*>(static_cast<const void*>(&push))));
-			const vk::DeviceSize offset = 0;
-			cmd.bindVertexBuffers(0, ctx.rhi().buffer(mesh.vertex_buffer), offset);
+			enc.push_constants(pipe.handle(), rhi::ShaderStage::VERTEX | rhi::ShaderStage::FRAGMENT, 0,
+							   std::span<const std::byte>(
+								   static_cast<const std::byte*>(static_cast<const void*>(&push)), sizeof(PbrPush)));
+			enc.bind_vertex_buffer(mesh.vertex_buffer);
 			if (mesh.index_buffer.valid())
 			{
-				cmd.bindIndexBuffer(ctx.rhi().buffer(mesh.index_buffer), 0, mesh.index_type);
-				cmd.drawIndexed(mesh.index_count, 1, 0, 0, 0);
+				enc.bind_index_buffer(mesh.index_buffer, mesh.index_type);
+				enc.draw_indexed(mesh.index_count, 1);
 			}
 			else
 			{
-				cmd.draw(mesh.vertex_count, 1, 0, 0);
+				enc.draw(mesh.vertex_count, 1);
 			}
 			return {};
 		};
@@ -315,7 +311,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		// Draw the objects whose material's `transparent` flag matches, with `pipe` bound once.
 		const auto draw_batch = [&](const GraphicsPipeline& pipe, bool transparent)
 		{
-			cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, pipe.pipeline());
+			enc.bind_pipeline(pipe.handle());
 			for (const Object& obj : m_objects)
 			{
 				if (m_materials[obj.material].transparent != transparent)
@@ -342,7 +338,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		{
 			draw_batch(*m_blend_near, true);
 		}
-		cmd.endRendering();
+		enc.end_rendering();
 		if (!draw_result.has_value())
 		{
 			return std::unexpected(draw_result.error());

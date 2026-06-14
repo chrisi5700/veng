@@ -122,4 +122,36 @@ vk::Buffer Device::buffer(BufferHandle handle) const noexcept
 {
 	return handle.id < m_buffers.size() ? m_buffers[handle.id] : vk::Buffer{};
 }
+
+PipelineHandle Device::register_pipeline(vk::Pipeline pipeline, vk::PipelineLayout layout)
+{
+	if (!m_free_pipelines.empty())
+	{
+		const std::uint32_t id = m_free_pipelines.back();
+		m_free_pipelines.pop_back();
+		m_pipelines[id] = Pipeline{.pipeline = pipeline, .layout = layout};
+		return PipelineHandle{.id = id};
+	}
+	m_pipelines.push_back(Pipeline{.pipeline = pipeline, .layout = layout});
+	return PipelineHandle{.id = static_cast<std::uint32_t>(m_pipelines.size() - 1)};
+}
+
+void Device::release_pipeline(PipelineHandle handle) noexcept
+{
+	if (handle.id < m_pipelines.size())
+	{
+		m_pipelines[handle.id] = Pipeline{};
+		m_free_pipelines.push_back(handle.id);
+	}
+}
+
+vk::Pipeline Device::pipeline(PipelineHandle handle) const noexcept
+{
+	return handle.id < m_pipelines.size() ? m_pipelines[handle.id].pipeline : vk::Pipeline{};
+}
+
+vk::PipelineLayout Device::pipeline_layout(PipelineHandle handle) const noexcept
+{
+	return handle.id < m_pipelines.size() ? m_pipelines[handle.id].layout : vk::PipelineLayout{};
+}
 } // namespace veng::rhi

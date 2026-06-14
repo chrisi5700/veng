@@ -19,7 +19,9 @@
 #include <expected>
 #include <span>
 #include <vector>
+#include <veng/rhi/Device.hpp>
 #include <veng/rhi/Enums.hpp>
+#include <veng/rhi/Handles.hpp>
 #include <vulkan/vulkan.hpp>
 
 #include "veng/context/Context.hpp"
@@ -53,17 +55,21 @@ class GraphicsPipeline
 	[[nodiscard]] vk::PipelineLayout layout() const noexcept { return m_pipeline_layout; }
 	/** @brief The descriptor-set layout merged from vertex and fragment stage reflections. */
 	[[nodiscard]] vk::DescriptorSetLayout descriptor_set_layout() const noexcept { return m_descriptor_set_layout; }
+	/** @brief The RHI handle for this pipeline — what a node binds via `CommandEncoder::bind_pipeline`. */
+	[[nodiscard]] rhi::PipelineHandle handle() const noexcept { return m_handle; }
 
 	 private:
 	friend class GraphicsPipelineBuilder;
 	GraphicsPipeline(vk::Device device, vk::DescriptorSetLayout descriptor_set_layout,
-					 vk::PipelineLayout pipeline_layout, vk::Pipeline pipeline) noexcept;
+					 vk::PipelineLayout pipeline_layout, vk::Pipeline pipeline, rhi::Device& rhi) noexcept;
 	void destroy() noexcept;
 
 	vk::Device				m_device;
 	vk::DescriptorSetLayout m_descriptor_set_layout;
 	vk::PipelineLayout		m_pipeline_layout;
 	vk::Pipeline			m_pipeline;
+	rhi::Device*			m_rhi = nullptr; ///< Registry that owns this pipeline's handle slot.
+	rhi::PipelineHandle		m_handle;		 ///< This pipeline's slot in the registry.
 };
 
 /**

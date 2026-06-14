@@ -27,7 +27,7 @@
 #include <veng/gpu/GpuNode.hpp>
 #include <veng/gpu/VersionedOutput.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
-#include <vulkan/vulkan.hpp>
+#include <veng/rhi/Enums.hpp>
 
 namespace veng::nodes
 {
@@ -52,10 +52,11 @@ class BlitNode final : public gpu::GpuNode
 	 * @param src         Data handle for the source @ref veng::gpu::ImageRef edge.
 	 * @param dst         Data handle for the destination @ref veng::gpu::ImageRef edge.
 	 * @param output      Data handle into which the written `dst` ref is forwarded.
-	 * @param final_layout Layout to leave `dst` in after the blit completes.
+	 * @param final_usage Usage to leave `dst` in after the blit completes (`PRESENT` for the
+	 *                    present path, `TRANSFER_SRC` for a readback or further blit — the default).
 	 */
 	BlitNode(graph::DataHandle src, graph::DataHandle dst, graph::DataHandle output,
-			 vk::ImageLayout final_layout = vk::ImageLayout::eTransferSrcOptimal) noexcept;
+			 rhi::TextureUsage final_usage = rhi::TextureUsage::TRANSFER_SRC) noexcept;
 
 	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return m_inputs; }
 	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
@@ -73,7 +74,7 @@ class BlitNode final : public gpu::GpuNode
 	 private:
 	std::array<graph::DataHandle, 2> m_inputs; ///< [src, dst]
 	graph::DataHandle				 m_output;
-	vk::ImageLayout					 m_final_layout;
+	rhi::TextureUsage				 m_final_usage;
 	std::size_t						 m_record_count = 0;
 	gpu::VersionedOutput m_versioned; ///< Owns the per-produce version bump for the forwarded @ref veng::gpu::ImageRef.
 };

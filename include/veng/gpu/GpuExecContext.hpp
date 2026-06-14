@@ -20,6 +20,7 @@
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rendergraph/nodes/Node.hpp>
 #include <veng/resources/ResourcePool.hpp>
+#include <veng/rhi/CommandEncoder.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -54,6 +55,7 @@ class GpuExecContext final : public graph::ExecContext
 		, m_context(&context)
 		, m_pool(&pool)
 		, m_command_buffer(command_buffer)
+		, m_encoder(command_buffer, context.rhi())
 		, m_frame_slot(frame_slot)
 	{
 	}
@@ -87,6 +89,10 @@ class GpuExecContext final : public graph::ExecContext
 	/// @return The active `vk::CommandBuffer`.
 	[[nodiscard]] vk::CommandBuffer command_buffer() const noexcept { return m_command_buffer; }
 
+	/// @brief The RHI command encoder for this frame — the mid-level recording surface nodes use.
+	/// @return The @ref veng::rhi::CommandEncoder wrapping this frame's command buffer.
+	[[nodiscard]] rhi::CommandEncoder& encoder() noexcept { return m_encoder; }
+
 	/// @brief Convenience accessor for the logical device.
 	/// @return The `vk::Device` from the engine @ref veng::Context.
 	[[nodiscard]] vk::Device device() const noexcept { return m_context->device(); }
@@ -118,6 +124,7 @@ class GpuExecContext final : public graph::ExecContext
 	const Context*		m_context;		  ///< Engine-wide Vulkan context.
 	ResourcePool*		m_pool;			  ///< Transient resource pool for this frame.
 	vk::CommandBuffer	m_command_buffer; ///< Command buffer being recorded.
+	rhi::CommandEncoder m_encoder;		  ///< Mid-level recording surface over the command buffer.
 	std::size_t			m_frame_slot;	  ///< In-flight slot index (0..N-1).
 };
 } // namespace veng::gpu

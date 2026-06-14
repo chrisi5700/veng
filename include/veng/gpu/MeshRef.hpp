@@ -22,8 +22,8 @@
 #define VENG_MESHREF_HPP
 
 #include <cstdint>
+#include <veng/rhi/Enums.hpp>
 #include <veng/rhi/Handles.hpp>
-#include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
 {
@@ -44,9 +44,9 @@ struct MeshRef
 	rhi::BufferHandle vertex_buffer{}; ///< Vertex buffer handle.
 	rhi::BufferHandle index_buffer{};  ///< Index buffer handle; invalid means draw non-indexed using `vertex_count`.
 
-	std::uint32_t vertex_count = 0;						 ///< Vertices in the vertex buffer (non-indexed draw count).
-	std::uint32_t index_count  = 0;						 ///< Indices in the index buffer (indexed draw count).
-	vk::IndexType index_type   = vk::IndexType::eUint32; ///< Index element type.
+	std::uint32_t  vertex_count = 0;					  ///< Vertices in the vertex buffer (non-indexed draw count).
+	std::uint32_t  index_count	= 0;					  ///< Indices in the index buffer (indexed draw count).
+	rhi::IndexType index_type	= rhi::IndexType::UINT32; ///< Index element type.
 
 	/// Bytes per vertex (the producing node's `sizeof(Vertex)`). The consuming `GraphicsNode`
 	/// asserts this against the stride its bound vertex shader reflects, turning a layout

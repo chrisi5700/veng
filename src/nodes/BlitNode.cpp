@@ -6,19 +6,17 @@
  */
 
 #include <array>
-#include <cstdint>
 #include <veng/gpu/ImageRef.hpp>
-#include <veng/managers/CommandManager.hpp>
 #include <veng/nodes/BlitNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 
 namespace veng::nodes
 {
 BlitNode::BlitNode(graph::DataHandle src, graph::DataHandle dst, graph::DataHandle output,
-				   vk::ImageLayout final_layout) noexcept
+				   rhi::TextureUsage final_usage) noexcept
 	: m_inputs{src, dst}
 	, m_output(output)
-	, m_final_layout(final_layout)
+	, m_final_usage(final_usage)
 {
 }
 
@@ -32,10 +30,7 @@ std::vector<gpu::ImageUsage> BlitNode::image_usages(graph::ExecContext& ctx)
 	{
 		return {};
 	}
-	return {gpu::ImageUsage{.id		= src->value().pool_id,
-							.layout = vk::ImageLayout::eTransferSrcOptimal,
-							.stage	= vk::PipelineStageFlagBits2::eTransfer,
-							.access = vk::AccessFlagBits2::eTransferRead}};
+	return {gpu::ImageUsage{.id = src->value().pool_id, .usage = rhi::TextureUsage::TRANSFER_SRC}};
 }
 
 std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
@@ -53,44 +48,26 @@ std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}
-	const vk::Image source_image = ctx.rhi().image(source.texture);
-	const vk::Image target_image = ctx.rhi().image(target.texture);
 
 	// Retain the pooled source copy we read while this frame is in flight (the dst is the
 	// swapchain / a test target — not pool-owned, so consume is a no-op for it).
 	ctx.pool().consume(source);
 
-	const vk::CommandBuffer cmd = ctx.command_buffer();
+	rhi::CommandEncoder& enc = ctx.encoder();
 
-	// Target: undefined -> transfer dst. We overwrite the whole image, so its prior
-	// contents and layout are discarded (the swapchain image is fresh each acquire).
-	CommandManager::image_barrier(cmd, target_image, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
-								  vk::PipelineStageFlagBits2::eTopOfPipe, vk::AccessFlagBits2::eNone,
-								  vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite);
+	// Target: discard prior contents (undefined) -> transfer dst. We overwrite the whole image, so
+	// its prior contents and layout are discarded (the swapchain image is fresh each acquire). The
+	// source is already in TRANSFER_SRC (the executor transitioned it from this node's image_usages).
+	enc.transition(target.texture, rhi::TextureUsage::UNDEFINED, rhi::TextureUsage::TRANSFER_DST);
 
 	// Blit (not copy): absorbs any size/format mismatch between source and target — which
 	// matters across a resize and between the scene format and the surface format.
-	const auto layers = vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);
-	const auto region =
-		vk::ImageBlit()
-			.setSrcSubresource(layers)
-			.setDstSubresource(layers)
-			.setSrcOffsets({vk::Offset3D{0, 0, 0}, vk::Offset3D{static_cast<std::int32_t>(source.extent.width),
-																static_cast<std::int32_t>(source.extent.height), 1}})
-			.setDstOffsets({vk::Offset3D{0, 0, 0}, vk::Offset3D{static_cast<std::int32_t>(target.extent.width),
-																static_cast<std::int32_t>(target.extent.height), 1}});
-	cmd.blitImage(source_image, vk::ImageLayout::eTransferSrcOptimal, target_image,
-				  vk::ImageLayout::eTransferDstOptimal, region, vk::Filter::eLinear);
+	enc.blit(source.texture, source.extent, target.texture, target.extent, rhi::Filter::LINEAR);
 
-	// Leave the target ready for its consumer. For PRESENT_SRC the presentation engine is
-	// synced by the render-finished semaphore, so no dst access scope is needed; otherwise
-	// a transfer reader (a readback / a further blit) waits on the write.
-	const bool to_present = m_final_layout == vk::ImageLayout::ePresentSrcKHR;
-	CommandManager::image_barrier(cmd, target_image, vk::ImageLayout::eTransferDstOptimal, m_final_layout,
-								  vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite,
-								  to_present ? vk::PipelineStageFlagBits2::eBottomOfPipe
-											 : vk::PipelineStageFlagBits2::eTransfer,
-								  to_present ? vk::AccessFlagBits2::eNone : vk::AccessFlagBits2::eTransferRead);
+	// Leave the target ready for its consumer. PRESENT means the presentation engine takes it (synced
+	// by the render-finished semaphore, no dst access scope needed); otherwise a transfer reader (a
+	// readback / a further blit) waits on the write.
+	enc.transition(target.texture, rhi::TextureUsage::TRANSFER_DST, m_final_usage);
 
 	// Forward the written target so the next node is ordered after us and sees the image
 	// (carries the swapchain index + present semaphores the PresentNode needs). The version bump

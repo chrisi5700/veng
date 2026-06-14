@@ -30,6 +30,7 @@
 #include <expected>
 #include <veng/resources/Image.hpp>
 #include <veng/resources/ResourcePool.hpp>
+#include <veng/rhi/CommandEncoder.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng
@@ -108,7 +109,7 @@ class RenderTargetSet
 	 * @param extent      This frame's render extent (the render area).
 	 * @param clear_color RGBA color the attachment is cleared to this frame.
 	 */
-	void begin(ResourcePool& pool, vk::CommandBuffer cmd, vk::Extent2D extent, std::array<float, 4> clear_color);
+	void begin(ResourcePool& pool, rhi::CommandEncoder& enc, vk::Extent2D extent, std::array<float, 4> clear_color);
 
 	/// @return The single-sample image a consumer samples/blits — the resolve target under MSAA,
 	///         the color attachment otherwise. Valid after @ref acquire; null before.

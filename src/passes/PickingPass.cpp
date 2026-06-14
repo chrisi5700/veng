@@ -77,10 +77,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 		{
 			return {};
 		}
-		return {gpu::ImageUsage{.id		= src->value().pool_id,
-								.layout = vk::ImageLayout::eTransferSrcOptimal,
-								.stage	= vk::PipelineStageFlagBits2::eTransfer,
-								.access = vk::AccessFlagBits2::eTransferRead}};
+		return {gpu::ImageUsage{.id = src->value().pool_id, .usage = rhi::TextureUsage::TRANSFER_SRC}};
 	}
 
 	std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override
@@ -132,24 +129,16 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 			}
 			s.staging = std::move(buf.value());
 		}
-		s.extent	= rhi::to_vk(image.extent);
+		s.extent	= image.extent;
 		s.row_pitch = image.extent.width * bytes_per_pixel;
 
 		// The id render may be cached (its output unchanged) — retain the pool copy we read while
 		// this frame is in flight.
 		ctx.pool().consume(image);
 
-		const vk::CommandBuffer cmd = ctx.command_buffer();
-		const auto				layers =
-			vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);
-		cmd.copyImageToBuffer(ctx.rhi().image(image.texture), vk::ImageLayout::eTransferSrcOptimal, s.staging->buffer(),
-							  vk::BufferImageCopy().setImageSubresource(layers).setImageExtent(
-								  vk::Extent3D{image.extent.width, image.extent.height, 1}));
-		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost, {},
-							vk::MemoryBarrier()
-								.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-								.setDstAccessMask(vk::AccessFlagBits::eHostRead),
-							{}, {});
+		// The source is already in TRANSFER_SRC (transitioned by the executor from image_usages);
+		// copy it into host-visible staging and barrier for the host read on_retired performs.
+		ctx.encoder().copy_texture_to_host_buffer(image.texture, s.staging->handle(), image.extent);
 		return true;
 	}
 
@@ -203,7 +192,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 	struct Slot
 	{
 		std::optional<Buffer> staging;
-		vk::Extent2D		  extent{};
+		rhi::Extent2D		  extent{};
 		std::uint32_t		  row_pitch = 0;
 		std::vector<Request>  in_flight;
 	};

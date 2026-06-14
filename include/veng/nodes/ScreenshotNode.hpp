@@ -32,7 +32,7 @@
 #include <veng/gpu/SubmitContext.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Buffer.hpp>
-#include <vulkan/vulkan.hpp>
+#include <veng/rhi/Enums.hpp>
 
 namespace veng::nodes
 {
@@ -83,7 +83,7 @@ class ScreenshotNode final : public gpu::GpuNode, public gpu::Sink
 	graph::DataHandle	  m_output;
 	std::string			  m_path;
 	std::optional<Buffer> m_staging;
-	vk::Extent2D		  m_extent{};
+	rhi::Extent2D		  m_extent{};
 	bool				  m_pending_write = false;
 	std::size_t			  m_capture_count = 0;
 };

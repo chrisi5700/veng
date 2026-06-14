@@ -198,6 +198,64 @@ namespace veng::rhi
 	return vk::Filter::eLinear; // unreachable
 }
 
+/// @brief Translate an @ref rhi::IndexType to its `vk::IndexType`.
+[[nodiscard]] constexpr vk::IndexType to_vk(IndexType type) noexcept
+{
+	switch (type)
+	{
+		case IndexType::UINT16: return vk::IndexType::eUint16;
+		case IndexType::UINT32: return vk::IndexType::eUint32;
+	}
+	return vk::IndexType::eUint32; // unreachable
+}
+
+/**
+ * @brief The concrete Vulkan layout + synchronization scope a @ref rhi::TextureUsage maps to.
+ *
+ * The RHI owns this table so no high-level code names a `vk::ImageLayout`/stage/access again. A
+ * barrier between two usages takes the source scope from the old usage's state and the destination
+ * scope from the new usage's state (see @ref veng::rhi::CommandEncoder::transition).
+ *
+ * @ingroup rhi
+ */
+struct ImageState
+{
+	vk::ImageLayout			layout; ///< The image layout the usage requires.
+	vk::PipelineStageFlags2 stage;	///< The pipeline stage that performs the access.
+	vk::AccessFlags2		access; ///< The access scope (read/write kind).
+};
+
+/// @brief Map a @ref rhi::TextureUsage to its concrete layout + synchronization scope.
+[[nodiscard]] inline ImageState to_state(TextureUsage usage) noexcept
+{
+	switch (usage)
+	{
+		case TextureUsage::UNDEFINED:
+			return {vk::ImageLayout::eUndefined, vk::PipelineStageFlagBits2::eTopOfPipe, vk::AccessFlagBits2::eNone};
+		case TextureUsage::COLOR_ATTACHMENT:
+			return {vk::ImageLayout::eColorAttachmentOptimal, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+					vk::AccessFlagBits2::eColorAttachmentWrite};
+		case TextureUsage::DEPTH_ATTACHMENT:
+			return {vk::ImageLayout::eDepthAttachmentOptimal,
+					vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+					vk::AccessFlagBits2::eDepthStencilAttachmentWrite |
+						vk::AccessFlagBits2::eDepthStencilAttachmentRead};
+		case TextureUsage::SAMPLED:
+			return {vk::ImageLayout::eShaderReadOnlyOptimal, vk::PipelineStageFlagBits2::eFragmentShader,
+					vk::AccessFlagBits2::eShaderSampledRead};
+		case TextureUsage::TRANSFER_SRC:
+			return {vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eTransfer,
+					vk::AccessFlagBits2::eTransferRead};
+		case TextureUsage::TRANSFER_DST:
+			return {vk::ImageLayout::eTransferDstOptimal, vk::PipelineStageFlagBits2::eTransfer,
+					vk::AccessFlagBits2::eTransferWrite};
+		case TextureUsage::PRESENT:
+			return {vk::ImageLayout::ePresentSrcKHR, vk::PipelineStageFlagBits2::eBottomOfPipe,
+					vk::AccessFlagBits2::eNone};
+	}
+	return {vk::ImageLayout::eUndefined, vk::PipelineStageFlagBits2::eTopOfPipe, vk::AccessFlagBits2::eNone};
+}
+
 /// @brief Translate an @ref rhi::MipmapMode to its `vk::SamplerMipmapMode`.
 [[nodiscard]] constexpr vk::SamplerMipmapMode to_vk(MipmapMode mode) noexcept
 {

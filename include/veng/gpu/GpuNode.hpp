@@ -27,22 +27,21 @@
 namespace veng::gpu
 {
 /**
- * @brief A pool-backed image a node touches, plus the layout/stage/access it must be in
+ * @brief A pool-backed image a node touches, plus the @ref veng::rhi::TextureUsage it must be in
  *        before `record` runs.
  *
  * The executor reads these from each @ref veng::gpu::GpuNode in the plan and inserts the barrier
- * transitions for them — nodes no longer record their own layout transitions for
- * pool-backed targets.
+ * transitions for them — nodes no longer record their own layout transitions for pool-backed
+ * targets, and no longer name a Vulkan image layout: the RHI maps the usage to the concrete
+ * layout + synchronization scope (see @ref veng::rhi::to_state).
  *
  * @ingroup gpu_handles
  * @see GpuNode::image_usages
  */
 struct ImageUsage
 {
-	ImageId					id;		///< Pool id of the image being declared.
-	vk::ImageLayout			layout; ///< Layout the image must be in before `record`.
-	vk::PipelineStageFlags2 stage;	///< Pipeline stage at which the node first accesses it.
-	vk::AccessFlags2		access; ///< Access kind (read/write) the node performs.
+	ImageId			  id;	 ///< Pool id of the image being declared.
+	rhi::TextureUsage usage; ///< How the node uses the image before `record` runs.
 };
 
 /**
@@ -125,7 +124,8 @@ inline void GpuExecContext::prepare_for(graph::Node& node) noexcept
 	}
 	for (const ImageUsage& usage : gnode->image_usages(*this))
 	{
-		m_pool->transition_image(usage.id, m_command_buffer, usage.layout, usage.stage, usage.access);
+		const rhi::ImageState state = rhi::to_state(usage.usage);
+		m_pool->transition_image(usage.id, m_command_buffer, state.layout, state.stage, state.access);
 	}
 }
 } // namespace veng::gpu
