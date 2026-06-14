@@ -6,6 +6,8 @@
  */
 
 #include <expected>
+#include <vector>
+#include <veng/rhi/Convert.hpp>
 #include <veng/rhi/Device.hpp>
 
 namespace veng::rhi
@@ -153,5 +155,51 @@ vk::Pipeline Device::pipeline(PipelineHandle handle) const noexcept
 vk::PipelineLayout Device::pipeline_layout(PipelineHandle handle) const noexcept
 {
 	return handle.id < m_pipelines.size() ? m_pipelines[handle.id].layout : vk::PipelineLayout{};
+}
+
+void Device::update_bind_group(const BindGroup& group, std::span<const BindGroupEntry> entries) const
+{
+	// Build the vk write list from the RHI entries, resolving each handle to its vk object. The
+	// buffer/image infos are stored in side vectors reserved up front so the .back() addresses the
+	// WriteDescriptorSet proxies point at stay stable.
+	std::vector<vk::DescriptorBufferInfo> buffer_infos;
+	std::vector<vk::DescriptorImageInfo>  image_infos;
+	std::vector<vk::WriteDescriptorSet>	  writes;
+	buffer_infos.reserve(entries.size());
+	image_infos.reserve(entries.size());
+	writes.reserve(entries.size());
+
+	for (const BindGroupEntry& entry : entries)
+	{
+		auto write = vk::WriteDescriptorSet()
+						 .setDstSet(group.set)
+						 .setDstBinding(entry.binding)
+						 .setDstArrayElement(0)
+						 .setDescriptorType(to_vk(entry.type));
+		switch (entry.type)
+		{
+			case BindingType::UNIFORM_BUFFER:
+			case BindingType::STORAGE_BUFFER:
+				buffer_infos.push_back(vk::DescriptorBufferInfo()
+										   .setBuffer(buffer(entry.buffer))
+										   .setOffset(0)
+										   .setRange(entry.buffer_size));
+				write.setBufferInfo(buffer_infos.back());
+				break;
+			case BindingType::SAMPLED_IMAGE:
+				image_infos.push_back(vk::DescriptorImageInfo()
+										  .setImageView(view(entry.texture))
+										  .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal));
+				write.setImageInfo(image_infos.back());
+				break;
+			case BindingType::SAMPLER:
+				image_infos.push_back(vk::DescriptorImageInfo().setSampler(sampler(entry.sampler)));
+				write.setImageInfo(image_infos.back());
+				break;
+		}
+		writes.push_back(write);
+	}
+
+	m_device.updateDescriptorSets(writes, {});
 }
 } // namespace veng::rhi

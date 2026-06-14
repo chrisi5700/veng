@@ -23,7 +23,9 @@
 
 #include <cstdint>
 #include <expected>
+#include <span>
 #include <vector>
+#include <veng/rhi/BindGroup.hpp>
 #include <veng/rhi/Handles.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -89,6 +91,10 @@ class Device
 	[[nodiscard]] vk::Pipeline pipeline(PipelineHandle handle) const noexcept;
 	/// @brief Resolve a pipeline handle to its `vk::PipelineLayout`, or a null handle if invalid/released.
 	[[nodiscard]] vk::PipelineLayout pipeline_layout(PipelineHandle handle) const noexcept;
+
+	/// @brief Write @p entries (resolving their handles) into @p group's descriptor set — the single
+	///        `updateDescriptorSets` behind @ref veng::rhi::BindGroup. No caller names a vk write struct.
+	void update_bind_group(const BindGroup& group, std::span<const BindGroupEntry> entries) const;
 
 	 private:
 	struct Texture

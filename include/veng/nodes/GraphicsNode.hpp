@@ -570,7 +570,9 @@ class GraphicsNode final : public gpu::GpuNode
 	std::map<std::string, DescriptorInfo>
 									   m_descriptors_by_name; ///< Reflected name -> descriptor info (binding + type).
 	std::optional<DescriptorAllocator> m_descriptors;
-	std::vector<vk::DescriptorSet>	   m_descriptor_sets; ///< One per frame slot, allocated lazily.
+	std::vector<rhi::BindGroup>		   m_bind_groups; ///< One per frame slot, allocated lazily.
+	std::vector<std::vector<rhi::BindGroupEntry>>
+					   m_cached_entries; ///< Last-written entries per slot; a rewrite happens only when these change.
 	gpu::SamplerConfig m_sampler_config; ///< How the lazy sampler is configured (default: render target).
 	rhi::SamplerHandle m_sampler_handle; ///< Device-owned sampler; created lazily when there are sampled images.
 

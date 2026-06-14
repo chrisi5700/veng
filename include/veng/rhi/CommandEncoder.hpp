@@ -75,13 +75,12 @@ class CommandEncoder
 	}
 
 	// --- graphics: resource binding ---------------------------------------------------------
-	// NOTE: bind_descriptor_set still takes a raw vk::DescriptorSet — descriptor sets become an
-	// immutable rhi::BindGroup in Stage 3; this is the one remaining vk type on the encoder surface.
 
-	/// @brief Bind descriptor set 0 (built by the node) using @p pipeline's layout.
-	void bind_descriptor_set(PipelineHandle pipeline, vk::DescriptorSet set) const
+	/// @brief Bind @p group as descriptor set 0 using @p pipeline's layout.
+	void bind_descriptor_set(PipelineHandle pipeline, const BindGroup& group) const
 	{
-		m_cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_device->pipeline_layout(pipeline), 0, set, {});
+		m_cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_device->pipeline_layout(pipeline), 0, group.set,
+								 {});
 	}
 
 	/// @brief Bind a vertex buffer at binding 0.

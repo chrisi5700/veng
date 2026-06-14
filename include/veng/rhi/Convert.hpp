@@ -15,11 +15,37 @@
 #ifndef VENG_RHI_CONVERT_HPP
 #define VENG_RHI_CONVERT_HPP
 
+#include <veng/rhi/BindGroup.hpp>
 #include <veng/rhi/Enums.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::rhi
 {
+/// @brief Translate a reflected `vk::DescriptorType` to its @ref rhi::BindingType (sampled-image fallback).
+[[nodiscard]] constexpr BindingType to_binding_type(vk::DescriptorType type) noexcept
+{
+	switch (type)
+	{
+		case vk::DescriptorType::eUniformBuffer: return BindingType::UNIFORM_BUFFER;
+		case vk::DescriptorType::eStorageBuffer: return BindingType::STORAGE_BUFFER;
+		case vk::DescriptorType::eSampledImage: return BindingType::SAMPLED_IMAGE;
+		case vk::DescriptorType::eSampler: return BindingType::SAMPLER;
+		default: return BindingType::SAMPLED_IMAGE;
+	}
+}
+
+/// @brief Translate an @ref rhi::BindingType to its `vk::DescriptorType`.
+[[nodiscard]] constexpr vk::DescriptorType to_vk(BindingType type) noexcept
+{
+	switch (type)
+	{
+		case BindingType::UNIFORM_BUFFER: return vk::DescriptorType::eUniformBuffer;
+		case BindingType::STORAGE_BUFFER: return vk::DescriptorType::eStorageBuffer;
+		case BindingType::SAMPLED_IMAGE: return vk::DescriptorType::eSampledImage;
+		case BindingType::SAMPLER: return vk::DescriptorType::eSampler;
+	}
+	return vk::DescriptorType::eSampledImage; // unreachable
+}
 /// @brief Translate an @ref rhi::Format to its `vk::Format`.
 [[nodiscard]] constexpr vk::Format to_vk(Format format) noexcept
 {

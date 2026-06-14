@@ -240,9 +240,9 @@ class PbrRenderNode final : public gpu::GpuNode
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED);
 			}
-			light_buffers = LightBuffers{.lights = def.value()->buffer(),
-										 .grid	 = def.value()->buffer(),
-										 .index	 = def.value()->buffer(),
+			light_buffers = LightBuffers{.lights = def.value()->handle(),
+										 .grid	 = def.value()->handle(),
+										 .index	 = def.value()->handle(),
 										 .sizes	 = {16, 16, 16}};
 		}
 
@@ -250,7 +250,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
-		if (auto sets = write_descriptor_sets(ctx, frame.value()->buffer(), light_buffers); !sets.has_value())
+		if (auto sets = write_descriptor_sets(ctx, frame.value()->handle(), light_buffers); !sets.has_value())
 		{
 			return std::unexpected(sets.error());
 		}
@@ -372,9 +372,9 @@ class PbrRenderNode final : public gpu::GpuNode
 	// The buffers bound to the three light-SSBO bindings (7,8,9) this frame, with their byte ranges.
 	struct LightBuffers
 	{
-		vk::Buffer					  lights;
-		vk::Buffer					  grid;
-		vk::Buffer					  index;
+		rhi::BufferHandle			  lights;
+		rhi::BufferHandle			  grid;
+		rhi::BufferHandle			  index;
 		std::array<vk::DeviceSize, 3> sizes; // lights, grid, index
 	};
 
@@ -383,7 +383,7 @@ class PbrRenderNode final : public gpu::GpuNode
 	{
 		const std::array<graph::DataHandle, 3> handles{m_lights, m_light_grid, m_light_index};
 		LightBuffers						   out{};
-		std::array<vk::Buffer*, 3>			   targets{&out.lights, &out.grid, &out.index};
+		std::array<rhi::BufferHandle*, 3>	   targets{&out.lights, &out.grid, &out.index};
 		for (std::size_t i = 0; i < handles.size(); ++i)
 		{
 			const auto* ref = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(handles[i]));
@@ -395,7 +395,7 @@ class PbrRenderNode final : public gpu::GpuNode
 			// is cached when the lights are static, so without this the pool could recycle the buffer
 			// out from under our descriptor set (VUID-vkDestroyBuffer-buffer-00922).
 			ctx.pool().consume(ref->value());
-			*targets[i]	 = ctx.rhi().buffer(ref->value().buffer);
+			*targets[i]	 = ref->value().buffer;
 			out.sizes[i] = ref->value().size;
 		}
 		return out;
@@ -496,8 +496,9 @@ class PbrRenderNode final : public gpu::GpuNode
 	// uniform at binding 0, the material's five textures at 1..5, the node sampler at 6, and the three
 	// clustered-light SSBOs at 7..9. Per-slot sets are safe to rewrite — the slot's set was last used
 	// by a now-retired frame.
-	std::expected<void, graph::ExecError> write_descriptor_sets(gpu::GpuExecContext& ctx, vk::Buffer frame_buffer,
-																const LightBuffers& light_buffers)
+	std::expected<void, graph::ExecError> write_descriptor_sets(gpu::GpuExecContext& ctx,
+																rhi::BufferHandle	 frame_buffer,
+																const LightBuffers&	 light_buffers)
 	{
 		if (!m_descriptors.has_value())
 		{
@@ -505,34 +506,33 @@ class PbrRenderNode final : public gpu::GpuNode
 		}
 		const std::size_t slot = ctx.frame_slot();
 		m_sets.resize(m_materials.size());
+		m_cached_entries.resize(m_materials.size());
 
 		for (std::size_t m = 0; m < m_materials.size(); ++m)
 		{
 			if (slot >= m_sets[m].size())
 			{
-				m_sets[m].resize(slot + 1, vk::DescriptorSet{});
+				m_sets[m].resize(slot + 1);
 			}
-			if (!m_sets[m][slot])
+			if (!m_sets[m][slot].valid())
 			{
 				auto set = m_descriptors->allocate(m_pipeline->descriptor_set_layout());
 				if (!set.has_value())
 				{
 					return std::unexpected(graph::ExecError::NODE_FAILED);
 				}
-				m_sets[m][slot] = set.value();
+				m_sets[m][slot] = rhi::BindGroup{.set = set.value()};
 			}
-			const vk::DescriptorSet set = m_sets[m][slot];
 
-			const auto buffer_info =
-				vk::DescriptorBufferInfo().setBuffer(frame_buffer).setOffset(0).setRange(sizeof(PbrFrame));
-			std::array<vk::DescriptorImageInfo, TEXTURE_COUNT> image_infos{};
-			std::vector<vk::WriteDescriptorSet>				   writes;
-			writes.reserve(TEXTURE_COUNT + 2);
-			writes.push_back(vk::WriteDescriptorSet()
-								 .setDstSet(set)
-								 .setDstBinding(FRAME_BINDING)
-								 .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-								 .setBufferInfo(buffer_info));
+			// Describe the material's set in RHI vocabulary: frame uniform (0), the five PBR textures
+			// (1..5), the shared sampler (6), and the clustered-light SSBOs (7..9). The RHI resolves
+			// the handles and issues the single descriptor write — no vk write structs in the pass.
+			std::vector<rhi::BindGroupEntry> entries;
+			entries.reserve(TEXTURE_COUNT + 5);
+			entries.push_back(rhi::BindGroupEntry{.binding	   = FRAME_BINDING,
+												  .type		   = rhi::BindingType::UNIFORM_BUFFER,
+												  .buffer	   = frame_buffer,
+												  .buffer_size = sizeof(PbrFrame)});
 
 			for (std::size_t t = 0; t < TEXTURE_COUNT; ++t)
 			{
@@ -544,46 +544,38 @@ class PbrRenderNode final : public gpu::GpuNode
 				}
 				const gpu::ImageRef ref = slot_data->value();
 				ctx.pool().consume(ref); // no-op for a non-pooled (loaded) texture
-				image_infos[t] = vk::DescriptorImageInfo()
-									 .setImageView(ctx.rhi().view(ref.texture))
-									 .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-				writes.push_back(vk::WriteDescriptorSet()
-									 .setDstSet(set)
-									 .setDstBinding(TEXTURE_BINDING + static_cast<std::uint32_t>(t))
-									 .setDescriptorType(vk::DescriptorType::eSampledImage)
-									 .setImageInfo(image_infos[t]));
+				entries.push_back(rhi::BindGroupEntry{.binding = TEXTURE_BINDING + static_cast<std::uint32_t>(t),
+													  .type	   = rhi::BindingType::SAMPLED_IMAGE,
+													  .texture = ref.texture});
 			}
 
-			const auto sampler_info = vk::DescriptorImageInfo().setSampler(ctx.rhi().sampler(m_sampler_handle));
-			writes.push_back(vk::WriteDescriptorSet()
-								 .setDstSet(set)
-								 .setDstBinding(SAMPLER_BINDING)
-								 .setDescriptorType(vk::DescriptorType::eSampler)
-								 .setImageInfo(sampler_info));
+			entries.push_back(rhi::BindGroupEntry{
+				.binding = SAMPLER_BINDING, .type = rhi::BindingType::SAMPLER, .sampler = m_sampler_handle});
 
 			// Clustered-light SSBOs (7,8,9). Real buffers when clustered, else the shared default
 			// buffer (never read by the shader since cluster_dims.w is 0, but the set must be complete).
-			const std::array<vk::DescriptorBufferInfo, 3> ssbo_infos{
-				vk::DescriptorBufferInfo()
-					.setBuffer(light_buffers.lights)
-					.setOffset(0)
-					.setRange(light_buffers.sizes[0]),
-				vk::DescriptorBufferInfo().setBuffer(light_buffers.grid).setOffset(0).setRange(light_buffers.sizes[1]),
-				vk::DescriptorBufferInfo()
-					.setBuffer(light_buffers.index)
-					.setOffset(0)
-					.setRange(light_buffers.sizes[2])};
+			const std::array<rhi::BufferHandle, 3> ssbo_handles{light_buffers.lights, light_buffers.grid,
+																light_buffers.index};
 			const std::array<std::uint32_t, 3> ssbo_bindings{LIGHTS_BINDING, LIGHT_GRID_BINDING, LIGHT_INDEX_BINDING};
-			for (std::size_t i = 0; i < ssbo_infos.size(); ++i)
+			for (std::size_t i = 0; i < ssbo_handles.size(); ++i)
 			{
-				writes.push_back(vk::WriteDescriptorSet()
-									 .setDstSet(set)
-									 .setDstBinding(ssbo_bindings[i])
-									 .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-									 .setBufferInfo(ssbo_infos[i]));
+				entries.push_back(rhi::BindGroupEntry{.binding	   = ssbo_bindings[i],
+													  .type		   = rhi::BindingType::STORAGE_BUFFER,
+													  .buffer	   = ssbo_handles[i],
+													  .buffer_size = light_buffers.sizes[i]});
 			}
 
-			ctx.device().updateDescriptorSets(writes, {});
+			// Change-cached: rewrite this material's set only when its bound handles change (the
+			// per-frame resolve above still runs to retain the pooled copies in flight).
+			if (slot >= m_cached_entries[m].size())
+			{
+				m_cached_entries[m].resize(slot + 1);
+			}
+			if (m_cached_entries[m][slot] != entries)
+			{
+				ctx.rhi().update_bind_group(m_sets[m][slot], entries);
+				m_cached_entries[m][slot] = entries;
+			}
 		}
 		return {};
 	}
@@ -607,13 +599,15 @@ class PbrRenderNode final : public gpu::GpuNode
 	graph::DataHandle	 m_light_index;
 	culling::ClusterGrid m_cluster_grid;
 
-	std::optional<GraphicsPipeline>				m_pipeline;	  // opaque + MASK (depth write)
-	std::optional<GraphicsPipeline>				m_blend_far;  // BLEND far faces  (eFront cull, no depth write)
-	std::optional<GraphicsPipeline>				m_blend_near; // BLEND near faces (eBack cull,  no depth write)
-	std::optional<std::uint32_t>				m_expected_vertex_stride;
-	std::optional<DescriptorAllocator>			m_descriptors;
-	std::vector<std::vector<vk::DescriptorSet>> m_sets;			  // [material][frame slot]
-	rhi::SamplerHandle							m_sampler_handle; // device-owned sampler
+	std::optional<GraphicsPipeline>			 m_pipeline;   // opaque + MASK (depth write)
+	std::optional<GraphicsPipeline>			 m_blend_far;  // BLEND far faces  (eFront cull, no depth write)
+	std::optional<GraphicsPipeline>			 m_blend_near; // BLEND near faces (eBack cull,  no depth write)
+	std::optional<std::uint32_t>			 m_expected_vertex_stride;
+	std::optional<DescriptorAllocator>		 m_descriptors;
+	std::vector<std::vector<rhi::BindGroup>> m_sets; // [material][frame slot]
+	std::vector<std::vector<std::vector<rhi::BindGroupEntry>>>
+					   m_cached_entries; // [material][frame slot] -> last-written entries; rewrite only on change
+	rhi::SamplerHandle m_sampler_handle; // device-owned sampler
 
 	bool				 m_declared = false; // guards the per-frame buffer declares below
 	RenderTargetSet		 m_targets;			 // color (+ depth) render target, with MSAA resolve when configured

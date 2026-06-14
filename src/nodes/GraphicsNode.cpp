@@ -210,29 +210,26 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		{
 			m_descriptors.emplace(ctx.device());
 		}
-		if (slot >= m_descriptor_sets.size())
+		if (slot >= m_bind_groups.size())
 		{
-			m_descriptor_sets.resize(slot + 1, vk::DescriptorSet{});
+			m_bind_groups.resize(slot + 1);
 		}
-		if (!m_descriptor_sets[slot])
+		if (!m_bind_groups[slot].valid())
 		{
 			auto set = m_descriptors->allocate(m_pipeline->descriptor_set_layout());
 			if (!set.has_value())
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED);
 			}
-			m_descriptor_sets[slot] = set.value();
+			m_bind_groups[slot] = rhi::BindGroup{.set = set.value()};
 		}
-		const vk::DescriptorSet set = m_descriptor_sets[slot];
 
-		// Reserved so .back() addresses stay stable for the WriteDescriptorSet proxies.
-		std::vector<vk::DescriptorBufferInfo> buffer_infos;
-		std::vector<vk::DescriptorImageInfo>  image_infos;
-		std::vector<vk::WriteDescriptorSet>	  writes;
-		buffer_infos.reserve(m_uniforms.size() + m_storage_buffers.size());
-		image_infos.reserve(m_sampled_images.size() + m_descriptors_by_name.size());
-		writes.reserve(m_uniforms.size() + m_storage_buffers.size() + m_sampled_images.size() +
-					   m_descriptors_by_name.size());
+		// Describe the set in RHI vocabulary: each uniform / storage-buffer / sampled-image edge and
+		// the node's sampler becomes a BindGroupEntry matched to its reflected binding by name. The
+		// RHI resolves the handles and performs the single descriptor write — no vk write structs here.
+		std::vector<rhi::BindGroupEntry> entries;
+		entries.reserve(m_uniforms.size() + m_storage_buffers.size() + m_sampled_images.size() +
+						m_descriptors_by_name.size());
 
 		for (const graph::DataHandle handle : m_uniforms)
 		{
@@ -247,21 +244,16 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED); // no such reflected binding
 			}
-			buffer_infos.push_back(
-				vk::DescriptorBufferInfo().setBuffer(ctx.rhi().buffer(ref.buffer)).setOffset(0).setRange(ref.size));
-			writes.push_back(vk::WriteDescriptorSet()
-								 .setDstSet(set)
-								 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
-								 .setDstArrayElement(0)
-								 .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-								 .setBufferInfo(buffer_infos.back()));
+			entries.push_back(rhi::BindGroupEntry{.binding	   = static_cast<std::uint32_t>(it->second.binding),
+												  .type		   = rhi::BindingType::UNIFORM_BUFFER,
+												  .buffer	   = ref.buffer,
+												  .buffer_size = ref.size});
 		}
 
 		// Storage-buffer edges (SSBOs / StructuredBuffers): identical to the uniform path but
-		// the descriptor type is eStorageBuffer, and the published BufferRef carries the
-		// per-element stride + count (the count drives `instanceCount` of any draw that opts
-		// in via set_instances_from). The shader sees the raw array; we do not bind by stride
-		// here — std430 layout in the shader is the contract.
+		// the binding type is STORAGE_BUFFER, and the published BufferRef carries the per-element
+		// stride + count (the count drives `instanceCount` of any draw that opts in via
+		// set_instances_from). The shader sees the raw array; std430 layout is the contract.
 		for (const graph::DataHandle handle : m_storage_buffers)
 		{
 			const auto* storage = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(handle));
@@ -275,14 +267,10 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED); // no such reflected binding
 			}
-			buffer_infos.push_back(
-				vk::DescriptorBufferInfo().setBuffer(ctx.rhi().buffer(ref.buffer)).setOffset(0).setRange(ref.size));
-			writes.push_back(vk::WriteDescriptorSet()
-								 .setDstSet(set)
-								 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
-								 .setDstArrayElement(0)
-								 .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-								 .setBufferInfo(buffer_infos.back()));
+			entries.push_back(rhi::BindGroupEntry{.binding	   = static_cast<std::uint32_t>(it->second.binding),
+												  .type		   = rhi::BindingType::STORAGE_BUFFER,
+												  .buffer	   = ref.buffer,
+												  .buffer_size = ref.size});
 		}
 
 		for (const SampledBinding& binding : m_sampled_images)
@@ -302,34 +290,36 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			// Retain the pooled copy we sample so it is not recycled while this frame is in flight
 			// (the producer may be cached this frame, leaving us reading an older physical copy).
 			ctx.pool().consume(ref);
-			image_infos.push_back(vk::DescriptorImageInfo()
-									  .setImageView(ctx.rhi().view(ref.texture))
-									  .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal));
-			writes.push_back(vk::WriteDescriptorSet()
-								 .setDstSet(set)
-								 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
-								 .setDstArrayElement(0)
-								 .setDescriptorType(vk::DescriptorType::eSampledImage)
-								 .setImageInfo(image_infos.back()));
+			entries.push_back(rhi::BindGroupEntry{.binding = static_cast<std::uint32_t>(it->second.binding),
+												  .type	   = rhi::BindingType::SAMPLED_IMAGE,
+												  .texture = ref.texture});
 		}
 
 		// One node-owned sampler -> every reflected SamplerState binding.
 		for (const auto& [name, info] : m_descriptors_by_name)
 		{
-			if (info.type == vk::DescriptorType::eSampler)
+			if (rhi::to_binding_type(info.type) == rhi::BindingType::SAMPLER)
 			{
-				image_infos.push_back(vk::DescriptorImageInfo().setSampler(ctx.rhi().sampler(m_sampler_handle)));
-				writes.push_back(vk::WriteDescriptorSet()
-									 .setDstSet(set)
-									 .setDstBinding(static_cast<std::uint32_t>(info.binding))
-									 .setDstArrayElement(0)
-									 .setDescriptorType(vk::DescriptorType::eSampler)
-									 .setImageInfo(image_infos.back()));
+				entries.push_back(rhi::BindGroupEntry{.binding = static_cast<std::uint32_t>(info.binding),
+													  .type	   = rhi::BindingType::SAMPLER,
+													  .sampler = m_sampler_handle});
 			}
 		}
 
-		ctx.device().updateDescriptorSets(writes, {});
-		enc.bind_descriptor_set(m_pipeline->handle(), set);
+		// Immutable, change-cached: the set was written for this slot once and persists. Rewrite it only
+		// when the bound handles actually change (a rebind / resize) — an unchanged binding set already
+		// points at the right resources (their contents may change, but a descriptor binds the buffer,
+		// not its bytes). The per-frame resolve above still runs (it retains the pooled copies in flight).
+		if (slot >= m_cached_entries.size())
+		{
+			m_cached_entries.resize(slot + 1);
+		}
+		if (m_cached_entries[slot] != entries)
+		{
+			ctx.rhi().update_bind_group(m_bind_groups[slot], entries);
+			m_cached_entries[slot] = entries;
+		}
+		enc.bind_descriptor_set(m_pipeline->handle(), m_bind_groups[slot]);
 	}
 
 	// Record each draw: its push constants, then its geometry. All draws share the pipeline,
