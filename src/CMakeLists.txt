@@ -16,7 +16,7 @@ target_include_directories(veng_logging
 )
 
 target_add_library(veng_context)
-target_sources(veng_context PRIVATE context/Context.cpp context/VmaImpl.cpp rhi/Device.cpp)
+target_sources(veng_context PRIVATE context/Context.cpp context/VmaImpl.cpp rhi/Device.cpp rhi/Swapchain.cpp)
 target_link_libraries(veng_context
         PUBLIC Vulkan::Vulkan glfw veng_logging
                GPUOpen::VulkanMemoryAllocator
