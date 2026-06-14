@@ -11,6 +11,7 @@
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/nodes/ScreenshotNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rhi/Convert.hpp>
 
 namespace veng::nodes
 {
@@ -43,7 +44,7 @@ std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext
 		return std::unexpected(graph::ExecError::MISSING_INPUT);
 	}
 	const gpu::ImageRef image = src->value();
-	if (!image.image)
+	if (!image.texture.valid())
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}
@@ -54,23 +55,23 @@ std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext
 	const vk::DeviceSize size = static_cast<vk::DeviceSize>(image.extent.width) * image.extent.height * bytes_per_pixel;
 	if (!m_staging.has_value() || m_staging->size() < size)
 	{
-		auto buf =
-			Buffer::create(ctx.allocator(), size, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
-						   vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
+		auto buf = Buffer::create(
+			ctx.allocator(), ctx.rhi(), size, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
+			vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 		if (!buf.has_value() || buf->mapped() == nullptr)
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
 		m_staging = std::move(buf.value());
 	}
-	m_extent = image.extent;
+	m_extent = rhi::to_vk(image.extent);
 
 	// Retain the pool copy we read while this frame is in flight (the producer may be cached).
 	ctx.pool().consume(image);
 
 	const vk::CommandBuffer cmd = ctx.command_buffer();
 	const auto layers = vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);
-	cmd.copyImageToBuffer(image.image, vk::ImageLayout::eTransferSrcOptimal, m_staging->buffer(),
+	cmd.copyImageToBuffer(ctx.rhi().image(image.texture), vk::ImageLayout::eTransferSrcOptimal, m_staging->buffer(),
 						  vk::BufferImageCopy().setImageSubresource(layers).setImageExtent(
 							  vk::Extent3D{image.extent.width, image.extent.height, 1}));
 	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost, {},

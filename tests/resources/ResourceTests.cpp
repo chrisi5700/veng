@@ -28,7 +28,7 @@ TEST_CASE("Buffer allocates and reports its size", "[resources][buffer]")
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx = make_context();
 
-	auto buffer = veng::Buffer::create(ctx.allocator(), 256, vk::BufferUsageFlagBits::eStorageBuffer);
+	auto buffer = veng::Buffer::create(ctx.allocator(), ctx.rhi(), 256, vk::BufferUsageFlagBits::eStorageBuffer);
 	REQUIRE(buffer.has_value());
 	REQUIRE(buffer->buffer());
 	REQUIRE(buffer->allocation() != nullptr);
@@ -39,7 +39,7 @@ TEST_CASE("Buffer move transfers ownership without double free", "[resources][bu
 {
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx	= make_context();
-	auto buffer = veng::Buffer::create(ctx.allocator(), 64, vk::BufferUsageFlagBits::eUniformBuffer);
+	auto buffer = veng::Buffer::create(ctx.allocator(), ctx.rhi(), 64, vk::BufferUsageFlagBits::eUniformBuffer);
 	REQUIRE(buffer.has_value());
 
 	const vk::Buffer   raw	 = buffer->buffer();
@@ -53,7 +53,8 @@ TEST_CASE("Image allocates a 2D color target with a matching view", "[resources]
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx = make_context();
 
-	auto image = veng::Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{128, 128}, vk::Format::eR8G8B8A8Unorm,
+	auto image = veng::Image::create(ctx.allocator(), ctx.device(), ctx.rhi(), vk::Extent2D{128, 128},
+									 vk::Format::eR8G8B8A8Unorm,
 									 vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc);
 	REQUIRE(image.has_value());
 	REQUIRE(image->image());
@@ -67,8 +68,8 @@ TEST_CASE("Image move transfers ownership without double free", "[resources][ima
 {
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx   = make_context();
-	auto image = veng::Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{64, 64}, vk::Format::eR8G8B8A8Unorm,
-									 vk::ImageUsageFlagBits::eColorAttachment);
+	auto image = veng::Image::create(ctx.allocator(), ctx.device(), ctx.rhi(), vk::Extent2D{64, 64},
+									 vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eColorAttachment);
 	REQUIRE(image.has_value());
 
 	const vk::Image	  raw	= image->image();
@@ -87,7 +88,7 @@ TEST_CASE("Buffer::create surfaces an allocation failure as an error", "[resourc
 	const veng::test::FailingAllocator failing(ctx, veng::test::FailingAllocator::Fail::CreateBuffer);
 	REQUIRE(failing.get()); // the allocator itself built fine; only buffer creation will fail
 
-	const auto buffer = veng::Buffer::create(failing.get(), 256, vk::BufferUsageFlagBits::eStorageBuffer);
+	const auto buffer = veng::Buffer::create(failing.get(), ctx.rhi(), 256, vk::BufferUsageFlagBits::eStorageBuffer);
 	REQUIRE_FALSE(buffer.has_value());
 	REQUIRE(buffer.error() == vk::Result::eErrorOutOfDeviceMemory);
 }
@@ -99,7 +100,7 @@ TEST_CASE("Image::create surfaces an allocation failure as an error", "[resource
 	const veng::test::FailingAllocator failing(ctx, veng::test::FailingAllocator::Fail::CreateImage);
 	REQUIRE(failing.get());
 
-	const auto image = veng::Image::create(failing.get(), ctx.device(), vk::Extent2D{64, 64},
+	const auto image = veng::Image::create(failing.get(), ctx.device(), ctx.rhi(), vk::Extent2D{64, 64},
 										   vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eColorAttachment);
 	REQUIRE_FALSE(image.has_value());
 	REQUIRE(image.error() == vk::Result::eErrorOutOfDeviceMemory);
@@ -119,8 +120,8 @@ TEST_CASE("Image::create frees the image when view creation fails (no leak)", "[
 			VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateImageView,
 			+[](VkDevice, const VkImageViewCreateInfo*, const VkAllocationCallbacks*, VkImageView*) -> VkResult
 			{ return VK_ERROR_OUT_OF_DEVICE_MEMORY; }};
-		return veng::Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{64, 64}, vk::Format::eR8G8B8A8Unorm,
-								   vk::ImageUsageFlagBits::eColorAttachment);
+		return veng::Image::create(ctx.allocator(), ctx.device(), ctx.rhi(), vk::Extent2D{64, 64},
+								   vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eColorAttachment);
 	}();
 	REQUIRE_FALSE(image.has_value());
 	REQUIRE(image.error() == vk::Result::eErrorOutOfDeviceMemory);
@@ -134,8 +135,8 @@ TEST_CASE("Image with a transfer-only usage gets no view", "[resources][image]")
 	auto ctx = make_context();
 
 	// eTransferDst is not a view-capable usage, so Image::create skips view creation and view() is null.
-	auto image = veng::Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{32, 32}, vk::Format::eR8G8B8A8Unorm,
-									 vk::ImageUsageFlagBits::eTransferDst);
+	auto image = veng::Image::create(ctx.allocator(), ctx.device(), ctx.rhi(), vk::Extent2D{32, 32},
+									 vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eTransferDst);
 	REQUIRE(image.has_value());
 	REQUIRE(image->image());
 	REQUIRE_FALSE(image->view()); // transfer-only target carries no view
@@ -146,8 +147,9 @@ TEST_CASE("Image clamps a zero mip-level request to one", "[resources][image]")
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx = make_context();
 
-	auto image = veng::Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{16, 16}, vk::Format::eR8G8B8A8Unorm,
-									 vk::ImageUsageFlagBits::eColorAttachment, vk::ImageAspectFlagBits::eColor, 0);
+	auto image =
+		veng::Image::create(ctx.allocator(), ctx.device(), ctx.rhi(), vk::Extent2D{16, 16}, vk::Format::eR8G8B8A8Unorm,
+							vk::ImageUsageFlagBits::eColorAttachment, vk::ImageAspectFlagBits::eColor, 0);
 	REQUIRE(image.has_value());
 	REQUIRE(image->mip_levels() == 1); // 0 was normalised to a single level
 }
@@ -160,14 +162,15 @@ TEST_CASE("Buffer reports a mapped pointer only when created mapped", "[resource
 	SECTION("host-mapped staging buffer is persistently mapped")
 	{
 		auto mapped = veng::Buffer::create(
-			ctx.allocator(), 128, vk::BufferUsageFlagBits::eTransferSrc, vma::MemoryUsage::eAutoPreferHost,
+			ctx.allocator(), ctx.rhi(), 128, vk::BufferUsageFlagBits::eTransferSrc, vma::MemoryUsage::eAutoPreferHost,
 			vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessSequentialWrite);
 		REQUIRE(mapped.has_value());
 		REQUIRE(mapped->mapped() != nullptr);
 	}
 	SECTION("device-local buffer is not mapped")
 	{
-		auto device_local = veng::Buffer::create(ctx.allocator(), 128, vk::BufferUsageFlagBits::eStorageBuffer);
+		auto device_local =
+			veng::Buffer::create(ctx.allocator(), ctx.rhi(), 128, vk::BufferUsageFlagBits::eStorageBuffer);
 		REQUIRE(device_local.has_value());
 		REQUIRE(device_local->mapped() == nullptr);
 	}
@@ -180,8 +183,8 @@ TEST_CASE("Buffer move-assignment frees the overwritten target once", "[resource
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx = make_context();
 
-	auto first	= veng::Buffer::create(ctx.allocator(), 64, vk::BufferUsageFlagBits::eUniformBuffer);
-	auto second = veng::Buffer::create(ctx.allocator(), 128, vk::BufferUsageFlagBits::eStorageBuffer);
+	auto first	= veng::Buffer::create(ctx.allocator(), ctx.rhi(), 64, vk::BufferUsageFlagBits::eUniformBuffer);
+	auto second = veng::Buffer::create(ctx.allocator(), ctx.rhi(), 128, vk::BufferUsageFlagBits::eStorageBuffer);
 	REQUIRE(first.has_value());
 	REQUIRE(second.has_value());
 
@@ -202,10 +205,10 @@ TEST_CASE("Image move-assignment frees the overwritten target once", "[resources
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx = make_context();
 
-	auto first	= veng::Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{32, 32}, vk::Format::eR8G8B8A8Unorm,
-									  vk::ImageUsageFlagBits::eColorAttachment);
-	auto second = veng::Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{48, 48}, vk::Format::eR8G8B8A8Unorm,
-									  vk::ImageUsageFlagBits::eColorAttachment);
+	auto first	= veng::Image::create(ctx.allocator(), ctx.device(), ctx.rhi(), vk::Extent2D{32, 32},
+									  vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eColorAttachment);
+	auto second = veng::Image::create(ctx.allocator(), ctx.device(), ctx.rhi(), vk::Extent2D{48, 48},
+									  vk::Format::eR8G8B8A8Unorm, vk::ImageUsageFlagBits::eColorAttachment);
 	REQUIRE(first.has_value());
 	REQUIRE(second.has_value());
 

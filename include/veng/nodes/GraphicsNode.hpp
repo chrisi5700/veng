@@ -60,7 +60,9 @@
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Image.hpp>
+#include <veng/resources/RenderTargetSet.hpp>
 #include <veng/resources/SamplerConfig.hpp>
+#include <veng/rhi/Enums.hpp>
 #include <veng/shader/Shader.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -95,16 +97,17 @@ class GraphicsNode final : public gpu::GpuNode
 	 * @param screen_size     `ValueData<vk::Extent2D>` edge that sizes the render target.
 	 * @param output          `ImageData` edge this node publishes its color target on.
 	 */
-	GraphicsNode(std::string vertex_shader, std::string fragment_shader, vk::Format color_format,
-				 vk::Format depth_format, std::uint32_t vertex_count, graph::DataHandle screen_size,
+	GraphicsNode(std::string vertex_shader, std::string fragment_shader, rhi::Format color_format,
+				 rhi::Format depth_format, std::uint32_t vertex_count, graph::DataHandle screen_size,
 				 graph::DataHandle output) noexcept;
 
-	/// Owns a raw `vk::Sampler`, so it is non-copyable and non-movable; the destructor frees the sampler.
+	/// Holds reflected descriptor state + a pipeline; non-copyable and non-movable. Its sampler is
+	/// owned by @ref veng::rhi::Device (freed with the device), so no destructor work is needed.
 	GraphicsNode(const GraphicsNode&)			 = delete;
 	GraphicsNode& operator=(const GraphicsNode&) = delete;
 	GraphicsNode(GraphicsNode&&)				 = delete;
 	GraphicsNode& operator=(GraphicsNode&&)		 = delete;
-	~GraphicsNode();
+	~GraphicsNode()								 = default;
 
 	/**
 	 * @brief Bind a push-constant value edge to the default (first) draw.
@@ -120,7 +123,7 @@ class GraphicsNode final : public gpu::GpuNode
 	 * @return `*this` for chaining.
 	 */
 	template <class T>
-	GraphicsNode& push_constant(graph::DataHandle handle, vk::ShaderStageFlags stage = vk::ShaderStageFlagBits::eVertex,
+	GraphicsNode& push_constant(graph::DataHandle handle, rhi::ShaderStage stage = rhi::ShaderStage::VERTEX,
 								std::uint32_t offset = 0)
 	{
 		default_draw().push_constants.push_back(make_push<T>(handle, stage, offset));
@@ -176,9 +179,8 @@ class GraphicsNode final : public gpu::GpuNode
 		 * @return `*this` for chaining.
 		 */
 		template <class T>
-		DrawConfig& push_constant(graph::DataHandle	   handle,
-								  vk::ShaderStageFlags stage  = vk::ShaderStageFlagBits::eVertex,
-								  std::uint32_t		   offset = 0)
+		DrawConfig& push_constant(graph::DataHandle handle, rhi::ShaderStage stage = rhi::ShaderStage::VERTEX,
+								  std::uint32_t offset = 0)
 		{
 			m_node->m_draws[m_index].push_constants.push_back(GraphicsNode::make_push<T>(handle, stage, offset));
 			m_node->m_inputs.push_back(handle);
@@ -381,14 +383,14 @@ class GraphicsNode final : public gpu::GpuNode
 	/**
 	 * @brief Set the primitive topology for this pass's pipeline.
 	 *
-	 * Default is triangle list. Use `vk::PrimitiveTopology::eLineList` for debug-line
+	 * Default is triangle list. Use `rhi::Topology::LINE_LIST` for debug-line
 	 * rendering — the consuming mesh's vertex pairs are drawn as line segments. Call before the
 	 * first record (the pipeline is built lazily on first record).
 	 *
 	 * @param topology The desired primitive topology.
 	 * @return `*this` for chaining.
 	 */
-	GraphicsNode& topology(vk::PrimitiveTopology topology) noexcept
+	GraphicsNode& topology(rhi::Topology topology) noexcept
 	{
 		m_topology = topology;
 		mark_dirty();
@@ -407,6 +409,25 @@ class GraphicsNode final : public gpu::GpuNode
 	GraphicsNode& depth_write(bool enabled) noexcept
 	{
 		m_depth_write = enabled;
+		mark_dirty();
+		return *this;
+	}
+
+	/**
+	 * @brief Request MSAA at the given sample count for this pass (default: `e1`, off).
+	 *
+	 * The pass renders into a multisampled color + depth attachment and resolves to a
+	 * single-sample image that downstream consumers sample/blit unchanged. The request is clamped
+	 * to the device's supported framebuffer sample counts on first record, so asking for more than
+	 * the hardware offers degrades gracefully. Call before the first record (the pipeline and
+	 * targets are configured lazily).
+	 *
+	 * @param samples The desired sample count.
+	 * @return `*this` for chaining.
+	 */
+	GraphicsNode& samples(rhi::SampleCount samples) noexcept
+	{
+		m_samples = samples;
 		mark_dirty();
 		return *this;
 	}
@@ -461,7 +482,7 @@ class GraphicsNode final : public gpu::GpuNode
 	/// resolves the edge to raw bytes at record time.
 	struct PushBinding
 	{
-		vk::ShaderStageFlags							stage;
+		rhi::ShaderStage								stage;
 		std::uint32_t									offset;
 		std::uint32_t									size;
 		std::function<const void*(graph::ExecContext&)> read;
@@ -471,7 +492,7 @@ class GraphicsNode final : public gpu::GpuNode
 	// resolves `handle` to a ValueData<T> at record time. Shared by push_constant (first draw)
 	// and DrawConfig::push_constant (any draw).
 	template <class T>
-	static PushBinding make_push(graph::DataHandle handle, vk::ShaderStageFlags stage, std::uint32_t offset)
+	static PushBinding make_push(graph::DataHandle handle, rhi::ShaderStage stage, std::uint32_t offset)
 	{
 		return PushBinding{.stage  = stage,
 						   .offset = offset,
@@ -521,8 +542,8 @@ class GraphicsNode final : public gpu::GpuNode
 
 	std::string					   m_vertex_shader;
 	std::string					   m_fragment_shader;
-	vk::Format					   m_color_format;
-	vk::Format					   m_depth_format; ///< `eUndefined` => no depth attachment.
+	rhi::Format					   m_color_format;
+	rhi::Format					   m_depth_format; ///< `eUndefined` => no depth attachment.
 	std::uint32_t				   m_vertex_count;
 	graph::DataHandle			   m_output;
 	std::vector<graph::DataHandle> m_inputs; ///< `[screen_size, push-constant + mesh + uniform + sampled edges...]`
@@ -531,7 +552,7 @@ class GraphicsNode final : public gpu::GpuNode
 	std::vector<graph::DataHandle>	m_storage_buffers; ///< Descriptor-bound SSBO edges (`StructuredBuffer<T>`).
 	std::vector<SampledBinding>		m_sampled_images;  ///< Descriptor-bound sampled-image edges.
 	std::array<float, 4>			m_clear_color{0.0F, 0.0F, 0.0F, 1.0F};
-	vk::PrimitiveTopology			m_topology	  = vk::PrimitiveTopology::eTriangleList;
+	rhi::Topology					m_topology	  = rhi::Topology::TRIANGLE_LIST;
 	bool							m_depth_write = true; ///< Depth writes enabled (when depth attached).
 	std::optional<GraphicsPipeline> m_pipeline;			  ///< Built lazily on first record.
 
@@ -551,17 +572,16 @@ class GraphicsNode final : public gpu::GpuNode
 	std::optional<DescriptorAllocator> m_descriptors;
 	std::vector<vk::DescriptorSet>	   m_descriptor_sets; ///< One per frame slot, allocated lazily.
 	gpu::SamplerConfig m_sampler_config; ///< How the lazy sampler is configured (default: render target).
-	vk::Sampler		   m_sampler;		 ///< Lazily created when there are sampled images.
-	vk::Device		   m_device;		 ///< Captured to free `m_sampler` in the destructor.
+	rhi::SamplerHandle m_sampler_handle; ///< Device-owned sampler; created lazily when there are sampled images.
 
-	/// Targets live in the engine's @ref veng::ResourcePool (N-buffered), not in the node: declared
-	/// once, a physical copy acquired each record. `m_last_color` is the copy written this
-	/// record, kept for the @ref scene readback lens. `m_versioned` owns the per-produce version
+	/// Targets live in the engine's @ref veng::ResourcePool (N-buffered) via @ref veng::RenderTargetSet,
+	/// not in the node: declared once, a physical copy acquired each record, with the optional MSAA
+	/// resolve handled inside the set. `m_last_color` is the (resolved, single-sample) copy written
+	/// this record, kept for the @ref scene readback lens. `m_versioned` owns the per-produce version
 	/// bump so the published `ImageRef` compares unequal across re-renders (the change-cutoff
 	/// signal for consumers).
-	bool				 m_declared	  = false;
-	ImageId				 m_color_id	  = 0;
-	ImageId				 m_depth_id	  = 0;
+	rhi::SampleCount	 m_samples = rhi::SampleCount::X1; ///< Requested MSAA level (clamped at build).
+	RenderTargetSet		 m_targets;
 	const Image*		 m_last_color = nullptr;
 	gpu::VersionedOutput m_versioned;
 };

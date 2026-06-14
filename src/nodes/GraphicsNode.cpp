@@ -17,12 +17,14 @@
 #include <veng/logging/Logger.hpp>
 #include <veng/managers/CommandManager.hpp>
 #include <veng/nodes/GraphicsNode.hpp>
+#include <veng/resources/SamplerConvert.hpp>
+#include <veng/rhi/Convert.hpp>
 #include <veng/shader/Shader.hpp>
 
 namespace veng::nodes
 {
-GraphicsNode::GraphicsNode(std::string vertex_shader, std::string fragment_shader, vk::Format color_format,
-						   vk::Format depth_format, std::uint32_t vertex_count, graph::DataHandle screen_size,
+GraphicsNode::GraphicsNode(std::string vertex_shader, std::string fragment_shader, rhi::Format color_format,
+						   rhi::Format depth_format, std::uint32_t vertex_count, graph::DataHandle screen_size,
 						   graph::DataHandle output) noexcept
 	: m_vertex_shader(std::move(vertex_shader))
 	, m_fragment_shader(std::move(fragment_shader))
@@ -32,14 +34,6 @@ GraphicsNode::GraphicsNode(std::string vertex_shader, std::string fragment_shade
 	, m_output(output)
 	, m_inputs{screen_size}
 {
-}
-
-GraphicsNode::~GraphicsNode()
-{
-	if (m_device && m_sampler)
-	{
-		m_device.destroySampler(m_sampler);
-	}
 }
 
 std::vector<gpu::ImageUsage> GraphicsNode::image_usages(graph::ExecContext& ctx)
@@ -72,7 +66,7 @@ std::vector<gpu::ImageUsage> GraphicsNode::image_usages(graph::ExecContext& ctx)
 
 std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& ctx)
 {
-	const bool has_depth = m_depth_format != vk::Format::eUndefined;
+	const bool has_depth = m_depth_format != rhi::Format::UNDEFINED;
 
 	// Build the pipeline the first time we have a device. The node owns this entirely —
 	// graph construction never sees the L2 pipeline layer. A shader/build failure surfaces
@@ -85,11 +79,18 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
+		// Clamp the requested MSAA level to the device once, then configure both the pipeline and the
+		// render targets with the same sample count (Vulkan requires the pipeline match its attachments).
+		const vk::SampleCountFlagBits samples = clamp_sample_count(ctx.context(), rhi::to_vk(m_samples));
+		m_targets.configure(rhi::to_vk(m_color_format), has_depth ? rhi::to_vk(m_depth_format) : vk::Format::eUndefined,
+							samples);
+
 		const std::array		color_formats{m_color_format};
 		GraphicsPipelineBuilder builder(vert.value(), frag.value());
 		builder.color_formats(color_formats)
 			.topology(m_topology)
-			.rasterization(vk::PolygonMode::eFill, vk::CullModeFlagBits::eNone, vk::FrontFace::eCounterClockwise);
+			.sample_count(rhi::to_rhi(samples))
+			.rasterization(rhi::PolygonMode::FILL, rhi::CullMode::NONE, rhi::FrontFace::COUNTER_CLOCKWISE);
 		if (has_depth)
 		{
 			builder.depth_format(m_depth_format).depth_write(m_depth_write);
@@ -133,15 +134,14 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// A node that samples images needs a sampler; create one lazily (linear, clamp-to-edge —
 	// the right default for post-process passes reading a full-screen texture). Owned here and
 	// freed in the destructor; m_device is captured for that.
-	if (!m_sampled_images.empty() && !m_sampler)
+	if (!m_sampled_images.empty() && !m_sampler_handle.valid())
 	{
-		m_device		   = ctx.device();
-		const auto sampler = ctx.device().createSampler(m_sampler_config.to_create_info());
-		if (sampler.result != vk::Result::eSuccess)
+		auto sampler = ctx.rhi().create_sampler(gpu::to_create_info(m_sampler_config));
+		if (!sampler.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
-		m_sampler = sampler.value;
+		m_sampler_handle = sampler.value();
 	}
 
 	const auto* size = dynamic_cast<graph::ValueData<vk::Extent2D>*>(ctx.data(m_inputs[0]));
@@ -184,78 +184,19 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		}
 	}
 
-	// Declare the pool resources once, then acquire this frame's physical copies. The pool owns
-	// the targets and N-buffers them (a copy per in-flight frame), so the node holds no VkImage of
-	// its own — frame N+1 never stomps a target frame N's GPU work is still reading, and a resize
-	// is just the pool reallocating on a new extent.
-	if (!m_declared)
-	{
-		m_color_id = ctx.pool().declare_image(m_color_format, vk::ImageUsageFlagBits::eColorAttachment |
-																  vk::ImageUsageFlagBits::eTransferSrc |
-																  vk::ImageUsageFlagBits::eSampled);
-		if (has_depth)
-		{
-			m_depth_id = ctx.pool().declare_image(m_depth_format, vk::ImageUsageFlagBits::eDepthStencilAttachment,
-												  vk::ImageAspectFlagBits::eDepth);
-		}
-		m_declared = true;
-	}
-	auto color = ctx.pool().acquire_image(m_color_id, extent);
-	if (!color.has_value())
+	// The pool owns the render targets (N-buffered, a copy per in-flight frame), so the node holds
+	// no VkImage of its own — frame N+1 never stomps a target frame N's GPU work is still reading.
+	// The RenderTargetSet declares them once, acquires this frame's copies, and (under MSAA)
+	// resolves the multisampled attachment into the single-sample image consumers read.
+	if (auto acquired = m_targets.acquire(ctx.pool(), extent); !acquired.has_value())
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}
-	Image* const color_image = color.value();
+	Image* const color_image = m_targets.color();
 	m_last_color			 = color_image;
-	Image* depth_image		 = nullptr;
-	if (has_depth)
-	{
-		auto depth = ctx.pool().acquire_image(m_depth_id, extent);
-		if (!depth.has_value())
-		{
-			return std::unexpected(graph::ExecError::NODE_FAILED);
-		}
-		depth_image = depth.value();
-	}
 
 	const vk::CommandBuffer cmd = ctx.command_buffer();
-
-	// Auto-tracked transitions: the pool inserts the barrier and updates its tracker, so the
-	// CONSUMER side (prepare_for, for sampled inputs) can reason about layout correctly without
-	// a desync between actual GPU state and the pool's record.
-	ctx.pool().transition_image(m_color_id, cmd, vk::ImageLayout::eColorAttachmentOptimal,
-								vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-								vk::AccessFlagBits2::eColorAttachmentWrite);
-	if (has_depth)
-	{
-		ctx.pool().transition_image(m_depth_id, cmd, vk::ImageLayout::eDepthStencilAttachmentOptimal,
-									vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-									vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
-	}
-
-	const auto color_clear		= vk::ClearValue().setColor(vk::ClearColorValue(m_clear_color));
-	const auto color_attachment = vk::RenderingAttachmentInfo()
-									  .setImageView(color_image->view())
-									  .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-									  .setLoadOp(vk::AttachmentLoadOp::eClear)
-									  .setStoreOp(vk::AttachmentStoreOp::eStore)
-									  .setClearValue(color_clear);
-	const auto depth_clear		= vk::ClearValue().setDepthStencil(vk::ClearDepthStencilValue(1.0F, 0));
-	const auto depth_attachment = vk::RenderingAttachmentInfo()
-									  .setImageView(has_depth ? depth_image->view() : vk::ImageView{})
-									  .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-									  .setLoadOp(vk::AttachmentLoadOp::eClear)
-									  .setStoreOp(vk::AttachmentStoreOp::eDontCare)
-									  .setClearValue(depth_clear);
-	auto	   rendering		= vk::RenderingInfo()
-									  .setRenderArea(vk::Rect2D({0, 0}, extent))
-									  .setLayerCount(1)
-									  .setColorAttachments(color_attachment);
-	if (has_depth)
-	{
-		rendering.setPDepthAttachment(&depth_attachment);
-	}
-	cmd.beginRendering(rendering);
+	m_targets.begin(ctx.pool(), cmd, extent, m_clear_color);
 
 	cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline->pipeline());
 	cmd.setViewport(
@@ -311,7 +252,8 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED); // no such reflected binding
 			}
-			buffer_infos.push_back(vk::DescriptorBufferInfo().setBuffer(ref.buffer).setOffset(0).setRange(ref.size));
+			buffer_infos.push_back(
+				vk::DescriptorBufferInfo().setBuffer(ctx.rhi().buffer(ref.buffer)).setOffset(0).setRange(ref.size));
 			writes.push_back(vk::WriteDescriptorSet()
 								 .setDstSet(set)
 								 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
@@ -338,7 +280,8 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED); // no such reflected binding
 			}
-			buffer_infos.push_back(vk::DescriptorBufferInfo().setBuffer(ref.buffer).setOffset(0).setRange(ref.size));
+			buffer_infos.push_back(
+				vk::DescriptorBufferInfo().setBuffer(ctx.rhi().buffer(ref.buffer)).setOffset(0).setRange(ref.size));
 			writes.push_back(vk::WriteDescriptorSet()
 								 .setDstSet(set)
 								 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
@@ -357,15 +300,16 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
 			}
 			const gpu::ImageRef ref = sampled->value();
-			if (it == m_descriptors_by_name.end() || !ref.view)
+			if (it == m_descriptors_by_name.end() || !ctx.rhi().view(ref.texture))
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED);
 			}
 			// Retain the pooled copy we sample so it is not recycled while this frame is in flight
 			// (the producer may be cached this frame, leaving us reading an older physical copy).
 			ctx.pool().consume(ref);
-			image_infos.push_back(vk::DescriptorImageInfo().setImageView(ref.view).setImageLayout(
-				vk::ImageLayout::eShaderReadOnlyOptimal));
+			image_infos.push_back(vk::DescriptorImageInfo()
+									  .setImageView(ctx.rhi().view(ref.texture))
+									  .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal));
 			writes.push_back(vk::WriteDescriptorSet()
 								 .setDstSet(set)
 								 .setDstBinding(static_cast<std::uint32_t>(it->second.binding))
@@ -379,7 +323,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		{
 			if (info.type == vk::DescriptorType::eSampler)
 			{
-				image_infos.push_back(vk::DescriptorImageInfo().setSampler(m_sampler));
+				image_infos.push_back(vk::DescriptorImageInfo().setSampler(ctx.rhi().sampler(m_sampler_handle)));
 				writes.push_back(vk::WriteDescriptorSet()
 									 .setDstSet(set)
 									 .setDstBinding(static_cast<std::uint32_t>(info.binding))
@@ -405,7 +349,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			if (const void* bytes = push.read(ctx); bytes != nullptr)
 			{
 				cmd.pushConstants<std::byte>(
-					m_pipeline->layout(), push.stage, push.offset,
+					m_pipeline->layout(), rhi::to_vk(push.stage), push.offset,
 					vk::ArrayProxy<const std::byte>(push.size, static_cast<const std::byte*>(bytes)));
 			}
 		}
@@ -439,10 +383,10 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			}
 			const gpu::MeshRef	 mesh	= mesh_data->value();
 			const vk::DeviceSize offset = 0;
-			cmd.bindVertexBuffers(0, mesh.vertex_buffer, offset);
-			if (mesh.index_buffer)
+			cmd.bindVertexBuffers(0, ctx.rhi().buffer(mesh.vertex_buffer), offset);
+			if (mesh.index_buffer.valid())
 			{
-				cmd.bindIndexBuffer(mesh.index_buffer, 0, mesh.index_type);
+				cmd.bindIndexBuffer(ctx.rhi().buffer(mesh.index_buffer), 0, mesh.index_type);
 				cmd.drawIndexed(mesh.index_count, instance_count, 0, 0, 0);
 			}
 			else
@@ -485,11 +429,11 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// physical copy while in flight. Non-comparable, so each produce is a change — a consumer
 	// re-evaluates whenever we re-render, and caches when we do not.
 	m_versioned.publish(ctx, m_output,
-						gpu::ImageRef{.image   = color_image->image(),
-									  .view	   = color_image->view(),
-									  .extent  = extent,
-									  .format  = m_color_format,
-									  .pool_id = m_color_id});
+						gpu::ImageRef{.texture		= color_image->handle(),
+									  .extent		= rhi::to_rhi(extent),
+									  .format		= m_color_format,
+									  .sample_count = rhi::to_rhi(color_image->sample_count()),
+									  .pool_id		= m_targets.color_id()});
 	return true;
 }
 } // namespace veng::nodes

@@ -165,9 +165,12 @@ int main(int argc, char** argv)
 	veng::passes::PbrConfig config;
 	// load_stl's repair pass unifies winding and orients the shell outward, so backface culling is
 	// safe (and the normals are trustworthy) — no need to fall back to eNone for unknown STL winding.
-	config.cull_mode	   = vk::CullModeFlagBits::eBack;
+	config.cull_mode	   = veng::rhi::CullMode::BACK;
 	config.light_intensity = 2.0F;
 	config.ambient		   = glm::vec3(0.06F, 0.06F, 0.07F);
+	// The screw's hard machined edges alias badly without MSAA; 4x is clamped to the device max on
+	// first record, and the pass resolves to a single-sample image so the rest of the graph is unchanged.
+	config.samples = veng::rhi::SampleCount::X4;
 	veng::passes::PbrPass pass(graph, app.scene_color_format(), app.depth_format(), app.screen(), app.scene_image(),
 							   app.view_proj(), app.camera().eye_pos(), config);
 	const std::uint32_t	  mat_index = pass.add_material(material);

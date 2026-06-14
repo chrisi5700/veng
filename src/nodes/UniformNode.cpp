@@ -36,7 +36,7 @@ std::expected<bool, graph::ExecError> UniformNode::record(gpu::GpuExecContext& c
 	std::memcpy(buffer.value()->mapped(), bytes, m_size);
 
 	m_versioned.publish(ctx, m_output,
-						gpu::UniformRef{.buffer = buffer.value()->buffer(), .size = m_size, .name = m_name});
+						gpu::UniformRef{.buffer = buffer.value()->handle(), .size = m_size, .name = m_name});
 	return true;
 }
 } // namespace veng::nodes

@@ -95,7 +95,7 @@ std::expected<Texture, TextureError> Texture::from_pixels(const Context& ctx, st
 	const vk::Format format = color_space == ColorSpace::Srgb ? vk::Format::eR8G8B8A8Srgb : vk::Format::eR8G8B8A8Unorm;
 
 	// Sampled + transfer-dst (upload + blit destination) + transfer-src (mip blit source).
-	auto image = Image::create(ctx.allocator(), ctx.device(), vk::Extent2D{width, height}, format,
+	auto image = Image::create(ctx.allocator(), ctx.device(), ctx.rhi(), vk::Extent2D{width, height}, format,
 							   vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst |
 								   vk::ImageUsageFlagBits::eTransferSrc,
 							   vk::ImageAspectFlagBits::eColor, levels);
@@ -105,7 +105,7 @@ std::expected<Texture, TextureError> Texture::from_pixels(const Context& ctx, st
 	}
 
 	auto staging = Buffer::create(
-		ctx.allocator(), rgba8.size(), vk::BufferUsageFlagBits::eTransferSrc, vma::MemoryUsage::eAuto,
+		ctx.allocator(), ctx.rhi(), rgba8.size(), vk::BufferUsageFlagBits::eTransferSrc, vma::MemoryUsage::eAuto,
 		vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessSequentialWrite);
 	if (!staging.has_value() || staging->mapped() == nullptr)
 	{

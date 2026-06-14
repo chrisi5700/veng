@@ -27,6 +27,7 @@
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/Image.hpp>
 #include <veng/resources/ResourcePool.hpp>
+#include <veng/rhi/Convert.hpp>
 
 using namespace veng::graph;
 
@@ -51,8 +52,8 @@ bool plan_contains(const FramePlan& plan, NodeHandle node)
 	return false;
 }
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE  = 64;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE  = 64;
 } // namespace
 
 TEST_CASE("a static scene caches the raster node while the blit runs every frame", "[nodes][slice][driver]")
@@ -62,10 +63,11 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	const vk::Device device = ctx.device();
 
 	// The blit destination (offscreen stand-in for a swapchain image).
-	auto target = veng::Image::create(ctx.allocator(), device, vk::Extent2D{SIDE, SIDE}, COLOR,
-									  vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc);
+	auto target =
+		veng::Image::create(ctx.allocator(), device, ctx.rhi(), vk::Extent2D{SIDE, SIDE}, veng::rhi::to_vk(COLOR),
+							vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc);
 	REQUIRE(target.has_value());
-	const veng::gpu::ImageRef target_ref{.image = target->image(), .extent = {SIDE, SIDE}, .format = COLOR};
+	const veng::gpu::ImageRef target_ref{.texture = target->handle(), .extent = {SIDE, SIDE}, .format = COLOR};
 
 	// Graph: ScreenSize -> raster -> scene image; blit depends on the scene image + a
 	// destination image fed in (and re-dirtied) every frame.
@@ -76,9 +78,10 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	const DataHandle presented_image =
 		graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 
-	auto  raster = std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
-															   COLOR, vk::Format::eUndefined, 3, screen, scene_image);
-	auto* raster_ptr			 = raster.get();
+	auto raster =
+		std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag", COLOR,
+													veng::rhi::Format::UNDEFINED, 3, screen, scene_image);
+	auto*			 raster_ptr	 = raster.get();
 	const NodeHandle raster_node = graph.add(std::move(raster));
 	graph.set_producer(scene_image, raster_node);
 
@@ -89,7 +92,7 @@ TEST_CASE("a static scene caches the raster node while the blit runs every frame
 	graph.set_producer(presented_image, blit_node);
 
 	veng::CommandManager commands(ctx);
-	veng::ResourcePool	 res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool	 res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	std::uint64_t		 frame_index = 0;
 	const auto			 fence		 = device.createFence({});
 	REQUIRE(fence.result == vk::Result::eSuccess);
@@ -160,12 +163,13 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 	auto			 ctx	= make_context();
 	const vk::Device device = ctx.device();
 
-	auto target = veng::Image::create(ctx.allocator(), device, vk::Extent2D{SIDE, SIDE}, COLOR,
-									  vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc);
+	auto target =
+		veng::Image::create(ctx.allocator(), device, ctx.rhi(), vk::Extent2D{SIDE, SIDE}, veng::rhi::to_vk(COLOR),
+							vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc);
 	REQUIRE(target.has_value());
-	const veng::gpu::ImageRef target_ref{.image = target->image(), .extent = {SIDE, SIDE}, .format = COLOR};
+	const veng::gpu::ImageRef target_ref{.texture = target->handle(), .extent = {SIDE, SIDE}, .format = COLOR};
 	auto					  staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -176,8 +180,9 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	const DataHandle presented_image =
 		graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
-	auto raster = std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
-															  COLOR, vk::Format::eUndefined, 3, screen, scene_image);
+	auto raster =
+		std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag", COLOR,
+													veng::rhi::Format::UNDEFINED, 3, screen, scene_image);
 	graph.set_producer(scene_image, graph.add(std::move(raster)));
 	auto blit = std::make_unique<veng::nodes::BlitNode>(scene_image, dst, presented_image,
 														vk::ImageLayout::eTransferSrcOptimal);
@@ -195,7 +200,7 @@ TEST_CASE("the blit destination receives the rendered triangle", "[nodes][slice]
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;

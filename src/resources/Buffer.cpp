@@ -10,7 +10,7 @@
 
 namespace veng
 {
-std::expected<Buffer, vk::Result> Buffer::create(vma::Allocator allocator, vk::DeviceSize size,
+std::expected<Buffer, vk::Result> Buffer::create(vma::Allocator allocator, rhi::Device& rhi, vk::DeviceSize size,
 												 vk::BufferUsageFlags usage, vma::MemoryUsage memory,
 												 vma::AllocationCreateFlags flags)
 {
@@ -30,12 +30,15 @@ std::expected<Buffer, vk::Result> Buffer::create(vma::Allocator allocator, vk::D
 		return std::unexpected(result);
 	}
 	// pMappedData is non-null only when the eMapped flag was set on a host-visible heap.
-	return Buffer(allocator, buffer, allocation, size, allocation_info.pMappedData);
+	const rhi::BufferHandle handle = rhi.register_buffer(buffer);
+	return Buffer(allocator, rhi, handle, buffer, allocation, size, allocation_info.pMappedData);
 }
 
-Buffer::Buffer(vma::Allocator allocator, vk::Buffer buffer, vma::Allocation allocation, vk::DeviceSize size,
-			   void* mapped) noexcept
+Buffer::Buffer(vma::Allocator allocator, rhi::Device& rhi, rhi::BufferHandle handle, vk::Buffer buffer,
+			   vma::Allocation allocation, vk::DeviceSize size, void* mapped) noexcept
 	: m_allocator(allocator)
+	, m_rhi(&rhi)
+	, m_handle(handle)
 	, m_buffer(buffer)
 	, m_allocation(allocation)
 	, m_size(size)
@@ -45,10 +48,16 @@ Buffer::Buffer(vma::Allocator allocator, vk::Buffer buffer, vma::Allocation allo
 
 void Buffer::destroy() noexcept
 {
+	if (m_rhi != nullptr && m_handle.valid())
+	{
+		m_rhi->release_buffer(m_handle);
+	}
 	if (m_buffer)
 	{
 		m_allocator.destroyBuffer(m_buffer, m_allocation);
 	}
+	m_handle	 = {};
+	m_rhi		 = nullptr;
 	m_buffer	 = nullptr;
 	m_allocation = nullptr;
 	m_allocator	 = nullptr;
@@ -58,11 +67,15 @@ void Buffer::destroy() noexcept
 
 Buffer::Buffer(Buffer&& other) noexcept
 	: m_allocator(other.m_allocator)
+	, m_rhi(other.m_rhi)
+	, m_handle(other.m_handle)
 	, m_buffer(other.m_buffer)
 	, m_allocation(other.m_allocation)
 	, m_size(other.m_size)
 	, m_mapped(other.m_mapped)
 {
+	other.m_handle	   = {};
+	other.m_rhi		   = nullptr;
 	other.m_buffer	   = nullptr;
 	other.m_allocation = nullptr;
 	other.m_allocator  = nullptr;
@@ -76,10 +89,14 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept
 	{
 		destroy();
 		m_allocator		   = other.m_allocator;
+		m_rhi			   = other.m_rhi;
+		m_handle		   = other.m_handle;
 		m_buffer		   = other.m_buffer;
 		m_allocation	   = other.m_allocation;
 		m_size			   = other.m_size;
 		m_mapped		   = other.m_mapped;
+		other.m_handle	   = {};
+		other.m_rhi		   = nullptr;
 		other.m_buffer	   = nullptr;
 		other.m_allocation = nullptr;
 		other.m_allocator  = nullptr;

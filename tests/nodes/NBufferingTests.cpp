@@ -35,9 +35,9 @@ veng::Context make_context()
 	return std::move(result.value());
 }
 
-constexpr vk::Format	COLOR			 = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE			 = 64;
-constexpr std::size_t	FRAMES_IN_FLIGHT = 2;
+constexpr veng::rhi::Format COLOR			 = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE			 = 64;
+constexpr std::size_t		FRAMES_IN_FLIGHT = 2;
 } // namespace
 
 TEST_CASE("frames in flight render into distinct N-buffered target copies", "[nodes][nbuffering][slice]")
@@ -54,13 +54,13 @@ TEST_CASE("frames in flight render into distinct N-buffered target copies", "[no
 	const DataHandle token	= graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 
 	auto node = std::make_unique<veng::nodes::GraphicsNode>("demo/fullscreen.vert", "tests/slice/solid.frag", COLOR,
-															vk::Format::eUndefined, 3, screen, token);
-	node->push_constant<glm::vec4>(color, vk::ShaderStageFlagBits::eFragment); // default final layout: TRANSFER_SRC
+															veng::rhi::Format::UNDEFINED, 3, screen, token);
+	node->push_constant<glm::vec4>(color, veng::rhi::ShaderStage::FRAGMENT); // default final layout: TRANSFER_SRC
 	auto*			 node_ptr	 = node.get();
 	const NodeHandle node_handle = graph.add(std::move(node));
 	graph.set_producer(token, node_handle);
 
-	veng::ResourcePool pool(ctx.device(), ctx.allocator(), FRAMES_IN_FLIGHT);
+	veng::ResourcePool pool(ctx.device(), ctx.rhi(), ctx.allocator(), FRAMES_IN_FLIGHT);
 	InlineScheduler	   scheduler;
 
 	const auto cmd_pool = device.createCommandPool(vk::CommandPoolCreateInfo().setQueueFamilyIndex(
@@ -81,12 +81,13 @@ TEST_CASE("frames in flight render into distinct N-buffered target copies", "[no
 
 	for (std::size_t i = 0; i < FRAMES_IN_FLIGHT; ++i)
 	{
-		staging[i]		= std::move(veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
-														 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
-														 vma::AllocationCreateFlagBits::eMapped |
-															 vma::AllocationCreateFlagBits::eHostAccessRandom)
-										.value());
-		staging_ptrs[i] = &staging[i].value();
+		staging[i] =
+			std::move(veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+										   vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
+										   vma::AllocationCreateFlagBits::eMapped |
+											   vma::AllocationCreateFlagBits::eHostAccessRandom)
+						  .value());
+		staging_ptrs[i]	 = &staging[i].value();
 		const auto fence = device.createFence({});
 		REQUIRE(fence.result == vk::Result::eSuccess);
 		fences[i] = fence.value;
@@ -158,7 +159,7 @@ TEST_CASE("ResourcePool defers buffer-resize frees past the in-flight window", "
 	// last_use has aged past the in-flight window. Pure bookkeeping — no GPU work needed.
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto				 ctx = make_context();
-	veng::ResourcePool	 pool(ctx.device(), ctx.allocator(), 2); // two frames in flight
+	veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), 2); // two frames in flight
 	const veng::BufferId id = pool.declare_buffer(vk::BufferUsageFlagBits::eStorageBuffer);
 
 	// Frame 0: acquire size A and mark it read by an in-flight consumer this frame.

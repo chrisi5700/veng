@@ -26,6 +26,7 @@
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/ResourcePool.hpp>
+#include <veng/rhi/Convert.hpp>
 
 namespace veng::passes
 {
@@ -90,7 +91,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
 		}
 		const gpu::ImageRef image = src->value();
-		if (!image.image)
+		if (!image.texture.valid())
 		{
 			return false; // the id render hasn't produced anything yet — nothing to capture
 		}
@@ -123,7 +124,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 		if (!s.staging.has_value() || s.staging->size() < size)
 		{
 			auto buf = Buffer::create(
-				ctx.allocator(), size, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
+				ctx.allocator(), ctx.rhi(), size, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 				vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 			if (!buf.has_value() || buf->mapped() == nullptr)
 			{
@@ -131,7 +132,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 			}
 			s.staging = std::move(buf.value());
 		}
-		s.extent	= image.extent;
+		s.extent	= rhi::to_vk(image.extent);
 		s.row_pitch = image.extent.width * bytes_per_pixel;
 
 		// The id render may be cached (its output unchanged) — retain the pool copy we read while
@@ -141,7 +142,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 		const vk::CommandBuffer cmd = ctx.command_buffer();
 		const auto				layers =
 			vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1);
-		cmd.copyImageToBuffer(image.image, vk::ImageLayout::eTransferSrcOptimal, s.staging->buffer(),
+		cmd.copyImageToBuffer(ctx.rhi().image(image.texture), vk::ImageLayout::eTransferSrcOptimal, s.staging->buffer(),
 							  vk::BufferImageCopy().setImageSubresource(layers).setImageExtent(
 								  vk::Extent3D{image.extent.width, image.extent.height, 1}));
 		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost, {},
@@ -215,7 +216,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 	std::atomic<int> m_outstanding{0};			  // queued-but-not-yet-delivered picks; drives PickingPass::pending
 };
 
-PickingPass::PickingPass(graph::Graph& graph, graph::TypedHandle<vk::Extent2D> screen, vk::Format depth_format)
+PickingPass::PickingPass(graph::Graph& graph, graph::TypedHandle<vk::Extent2D> screen, rhi::Format depth_format)
 	: m_graph(&graph)
 {
 	using graph::ValueData;
@@ -227,8 +228,8 @@ PickingPass::PickingPass(graph::Graph& graph, graph::TypedHandle<vk::Extent2D> s
 	// Id render: one draw per object, each a flat id-color, depth-tested so the frontmost wins.
 	// R8G8B8A8_UNORM (linear) so the encoded id bytes survive the round-trip exactly; cleared to
 	// 0 so background decodes to id 0 (no hit).
-	auto render = std::make_unique<GraphicsNode>("passes/picking.vert", "passes/picking.frag",
-												 vk::Format::eR8G8B8A8Unorm, depth_format, 0, screen, m_id_image);
+	auto render = std::make_unique<GraphicsNode>("passes/picking.vert", "passes/picking.frag", rhi::Format::RGBA8_UNORM,
+												 depth_format, 0, screen, m_id_image);
 	render->clear_color({0.0F, 0.0F, 0.0F, 0.0F});
 	m_render	  = render.get();
 	m_render_node = graph.add(std::move(render));
@@ -246,8 +247,8 @@ void PickingPass::add_object(graph::DataHandle mesh, graph::DataHandle mvp, std:
 	// id as a constant source for the push constant (offset 64, after the mat4 mvp at 0).
 	const graph::TypedHandle<std::uint32_t> id_src = m_graph->add_source<std::uint32_t>(id);
 	m_render->add_draw(mesh)
-		.push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex, 0)
-		.push_constant<std::uint32_t>(id_src, vk::ShaderStageFlagBits::eVertex, 64);
+		.push_constant<glm::mat4>(mvp, rhi::ShaderStage::VERTEX, 0)
+		.push_constant<std::uint32_t>(id_src, rhi::ShaderStage::VERTEX, 64);
 }
 
 void PickingPass::pick(std::uint32_t x, std::uint32_t y, std::function<void(PickResult)> on_result)

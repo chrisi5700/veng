@@ -75,7 +75,7 @@ TEST_CASE("DynamicMeshNode uploads an indexed mesh and grows across frames", "[n
 	graph.set_producer(mesh, graph.add(std::make_unique<veng::nodes::DynamicMeshNode>(verts_src, indices_src, mesh)));
 
 	veng::CommandManager commands(ctx);
-	veng::ResourcePool	 pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	InlineScheduler		 scheduler;
 	const auto*			 mesh_slot = dynamic_cast<ValueData<veng::gpu::MeshRef>*>(graph.get_data(mesh));
 	REQUIRE(mesh_slot != nullptr);
@@ -98,8 +98,8 @@ TEST_CASE("DynamicMeshNode uploads an indexed mesh and grows across frames", "[n
 	{
 		run(0);
 		const veng::gpu::MeshRef ref = mesh_slot->value();
-		REQUIRE(ref.vertex_buffer);
-		REQUIRE(ref.index_buffer); // the index edge was provided -> indexed draw
+		REQUIRE(ref.vertex_buffer.valid());
+		REQUIRE(ref.index_buffer.valid()); // the index edge was provided -> indexed draw
 		REQUIRE(ref.vertex_count == 3);
 		REQUIRE(ref.index_count == 3);
 		REQUIRE(ref.vertex_stride == sizeof(Vertex));
@@ -114,8 +114,8 @@ TEST_CASE("DynamicMeshNode uploads an indexed mesh and grows across frames", "[n
 		const veng::gpu::MeshRef ref = mesh_slot->value();
 		REQUIRE(ref.vertex_count == 64);
 		REQUIRE(ref.index_count == 96);
-		REQUIRE(ref.vertex_buffer);
-		REQUIRE(ref.index_buffer);
+		REQUIRE(ref.vertex_buffer.valid());
+		REQUIRE(ref.index_buffer.valid());
 	}
 
 	SECTION("a zero-element mesh is legal (rounded up to one stride, no zero-size alloc)")
@@ -126,7 +126,7 @@ TEST_CASE("DynamicMeshNode uploads an indexed mesh and grows across frames", "[n
 		const veng::gpu::MeshRef ref = mesh_slot->value();
 		REQUIRE(ref.vertex_count == 0);
 		REQUIRE(ref.index_count == 0);
-		REQUIRE(ref.vertex_buffer); // a (one-stride) buffer was still allocated, never zero-size
+		REQUIRE(ref.vertex_buffer.valid()); // a (one-stride) buffer was still allocated, never zero-size
 	}
 
 	(void)ctx.device().waitIdle();

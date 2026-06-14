@@ -10,9 +10,10 @@
 
 namespace veng
 {
-std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Device device, vk::Extent2D extent,
-											   vk::Format format, vk::ImageUsageFlags usage,
-											   vk::ImageAspectFlags aspect, std::uint32_t mip_levels)
+std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Device device, rhi::Device& rhi,
+											   vk::Extent2D extent, vk::Format format, vk::ImageUsageFlags usage,
+											   vk::ImageAspectFlags aspect, std::uint32_t mip_levels,
+											   vk::SampleCountFlagBits samples)
 {
 	const std::uint32_t levels	   = mip_levels == 0 ? 1 : mip_levels;
 	const auto			image_info = vk::ImageCreateInfo()
@@ -21,7 +22,7 @@ std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Dev
 										 .setExtent(vk::Extent3D{extent.width, extent.height, 1})
 										 .setMipLevels(levels)
 										 .setArrayLayers(1)
-										 .setSamples(vk::SampleCountFlagBits::e1)
+										 .setSamples(samples)
 										 .setTiling(vk::ImageTiling::eOptimal)
 										 .setUsage(usage)
 										 .setSharingMode(vk::SharingMode::eExclusive)
@@ -68,24 +69,34 @@ std::expected<Image, vk::Result> Image::create(vma::Allocator allocator, vk::Dev
 		view = view_result.value;
 	}
 
-	return Image(allocator, device, image, allocation, view, format, extent, levels);
+	// Register the image + its view so an ImageRef can flow as an opaque handle; released on destroy.
+	const rhi::TextureHandle handle = rhi.register_texture(image, view);
+	return Image(allocator, device, rhi, handle, image, allocation, view, format, extent, levels, samples);
 }
 
-Image::Image(vma::Allocator allocator, vk::Device device, vk::Image image, vma::Allocation allocation,
-			 vk::ImageView view, vk::Format format, vk::Extent2D extent, std::uint32_t mip_levels) noexcept
+Image::Image(vma::Allocator allocator, vk::Device device, rhi::Device& rhi, rhi::TextureHandle handle, vk::Image image,
+			 vma::Allocation allocation, vk::ImageView view, vk::Format format, vk::Extent2D extent,
+			 std::uint32_t mip_levels, vk::SampleCountFlagBits samples) noexcept
 	: m_allocator(allocator)
 	, m_device(device)
+	, m_rhi(&rhi)
+	, m_handle(handle)
 	, m_image(image)
 	, m_allocation(allocation)
 	, m_view(view)
 	, m_format(format)
 	, m_extent(extent)
 	, m_mip_levels(mip_levels)
+	, m_sample_count(samples)
 {
 }
 
 void Image::destroy() noexcept
 {
+	if (m_rhi != nullptr && m_handle.valid())
+	{
+		m_rhi->release_texture(m_handle);
+	}
 	if (m_image)
 	{
 		if (m_view)
@@ -94,6 +105,8 @@ void Image::destroy() noexcept
 		}
 		m_allocator.destroyImage(m_image, m_allocation);
 	}
+	m_handle	 = {};
+	m_rhi		 = nullptr;
 	m_image		 = nullptr;
 	m_view		 = nullptr;
 	m_allocation = nullptr;
@@ -104,13 +117,18 @@ void Image::destroy() noexcept
 Image::Image(Image&& other) noexcept
 	: m_allocator(other.m_allocator)
 	, m_device(other.m_device)
+	, m_rhi(other.m_rhi)
+	, m_handle(other.m_handle)
 	, m_image(other.m_image)
 	, m_allocation(other.m_allocation)
 	, m_view(other.m_view)
 	, m_format(other.m_format)
 	, m_extent(other.m_extent)
 	, m_mip_levels(other.m_mip_levels)
+	, m_sample_count(other.m_sample_count)
 {
+	other.m_handle	   = {};
+	other.m_rhi		   = nullptr;
 	other.m_image	   = nullptr;
 	other.m_view	   = nullptr;
 	other.m_allocation = nullptr;
@@ -125,12 +143,17 @@ Image& Image::operator=(Image&& other) noexcept
 		destroy();
 		m_allocator		   = other.m_allocator;
 		m_device		   = other.m_device;
+		m_rhi			   = other.m_rhi;
+		m_handle		   = other.m_handle;
 		m_image			   = other.m_image;
 		m_allocation	   = other.m_allocation;
 		m_view			   = other.m_view;
 		m_format		   = other.m_format;
 		m_extent		   = other.m_extent;
 		m_mip_levels	   = other.m_mip_levels;
+		m_sample_count	   = other.m_sample_count;
+		other.m_handle	   = {};
+		other.m_rhi		   = nullptr;
 		other.m_image	   = nullptr;
 		other.m_view	   = nullptr;
 		other.m_allocation = nullptr;

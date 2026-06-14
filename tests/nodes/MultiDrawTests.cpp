@@ -70,8 +70,8 @@ std::vector<Vertex> triangle(glm::vec3 color)
 	};
 }
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE  = 64;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE  = 64;
 } // namespace
 
 TEST_CASE("one GraphicsNode draws two meshes with per-draw push constants", "[nodes][graphics][multidraw][slice]")
@@ -102,15 +102,15 @@ TEST_CASE("one GraphicsNode draws two meshes with per-draw push constants", "[no
 						   std::span<const Vertex>(blue), std::span<const std::uint32_t>(index), mesh_blue)));
 
 	auto node = std::make_unique<veng::nodes::GraphicsNode>("demo/mesh.vert", "tests/slice/mesh_triangle.frag", COLOR,
-															vk::Format::eUndefined, 0, screen, token);
-	node->add_draw(mesh_red).push_constant<glm::mat4>(left, vk::ShaderStageFlagBits::eVertex);
-	node->add_draw(mesh_blue).push_constant<glm::mat4>(right, vk::ShaderStageFlagBits::eVertex);
+															veng::rhi::Format::UNDEFINED, 0, screen, token);
+	node->add_draw(mesh_red).push_constant<glm::mat4>(left, veng::rhi::ShaderStage::VERTEX);
+	node->add_draw(mesh_blue).push_constant<glm::mat4>(right, veng::rhi::ShaderStage::VERTEX);
 	auto*			 node_ptr	 = node.get();
 	const NodeHandle node_handle = graph.add(std::move(node));
 	graph.set_producer(token, node_handle);
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -127,7 +127,7 @@ TEST_CASE("one GraphicsNode draws two meshes with per-draw push constants", "[no
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;

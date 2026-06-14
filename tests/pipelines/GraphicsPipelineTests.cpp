@@ -30,7 +30,7 @@ veng::Shader load(const veng::Context& context, std::string_view name)
 	return std::move(result.value());
 }
 
-constexpr vk::Format COLOR = vk::Format::eR8G8B8A8Unorm;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
 } // namespace
 
 TEST_CASE("GraphicsPipelineBuilder builds a dynamic-rendering pipeline from vert+frag", "[pipeline][graphics]")

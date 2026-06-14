@@ -44,6 +44,7 @@
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rendergraph/nodes/Node.hpp>
 #include <veng/resources/ResourcePool.hpp>
+#include <veng/rhi/Enums.hpp>
 #include <vulkan/vulkan.hpp>
 
 #include "OrbitCamera.hpp"
@@ -60,7 +61,7 @@ struct AppConfig
 	float		camera_distance	 = 6.0F;
 	float		camera_yaw		 = 0.6F;
 	float		camera_pitch	 = 0.45F;
-	vk::Format	depth_format	 = vk::Format::eD32Sfloat;
+	veng::rhi::Format	depth_format	 = veng::rhi::Format::D32_SFLOAT;
 	std::size_t frames_in_flight = 2;
 	/// Render the scene into a linear-light HDR target (R16G16B16A16_SFLOAT) and resolve it to
 	/// the swapchain through an ACES tonemap pass, instead of rendering straight into the
@@ -93,8 +94,8 @@ class AppLoop
 	[[nodiscard]] veng::graph::TypedHandle<vk::Extent2D> screen() const noexcept { return m_screen; }
 	[[nodiscard]] veng::graph::TypedHandle<glm::mat4>	 view_proj() const noexcept { return m_camera->view_proj(); }
 	[[nodiscard]] veng::graph::DataHandle				 scene_image() const noexcept { return m_scene_image; }
-	[[nodiscard]] vk::Format scene_color_format() const noexcept { return m_scene_color_format; }
-	[[nodiscard]] vk::Format depth_format() const noexcept { return m_depth_format; }
+	[[nodiscard]] veng::rhi::Format scene_color_format() const noexcept { return m_scene_color_format; }
+	[[nodiscard]] veng::rhi::Format depth_format() const noexcept { return m_depth_format; }
 
 	// --- Driving graph mutations from a sim / writer thread --------------------------
 
@@ -141,8 +142,8 @@ class AppLoop
 	Window										  m_window;
 	std::unique_ptr<veng::Context>				  m_ctx;
 	std::unique_ptr<veng::SwapchainManager>		  m_swap;
-	vk::Format									  m_depth_format;
-	vk::Format									  m_scene_color_format; // HDR when config.hdr, else the swapchain format
+	veng::rhi::Format									  m_depth_format;
+	veng::rhi::Format									  m_scene_color_format; // HDR when config.hdr, else the swapchain format
 	std::unique_ptr<veng::ResourcePool>			  m_pool;
 	std::unique_ptr<veng::CommandManager>		  m_commands;
 	veng::graph::InlineScheduler				  m_scheduler;

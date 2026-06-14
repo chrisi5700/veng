@@ -22,6 +22,7 @@
 #define VENG_MESHREF_HPP
 
 #include <cstdint>
+#include <veng/rhi/Handles.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
@@ -40,8 +41,8 @@ namespace veng::gpu
  */
 struct MeshRef
 {
-	vk::Buffer vertex_buffer{}; ///< Vertex buffer handle.
-	vk::Buffer index_buffer{};	///< Index buffer handle; null means draw non-indexed using `vertex_count`.
+	rhi::BufferHandle vertex_buffer{}; ///< Vertex buffer handle.
+	rhi::BufferHandle index_buffer{};  ///< Index buffer handle; invalid means draw non-indexed using `vertex_count`.
 
 	std::uint32_t vertex_count = 0;						 ///< Vertices in the vertex buffer (non-indexed draw count).
 	std::uint32_t index_count  = 0;						 ///< Indices in the index buffer (indexed draw count).

@@ -89,6 +89,10 @@ target_link_libraries(ResourceTests PRIVATE veng_resources veng_test_support Cat
 add_executable(ResourcePoolTests resources/ResourcePoolTests.cpp)
 target_link_libraries(ResourcePoolTests PRIVATE veng_resources Catch2::Catch2WithMain)
 
+# The shared RenderTargetSet + clamp_sample_count (MSAA plumbing): device-clamp + resolve-target invariants.
+add_executable(RenderTargetSetTests resources/RenderTargetSetTests.cpp)
+target_link_libraries(RenderTargetSetTests PRIVATE veng_resources Catch2::Catch2WithMain)
+
 # GPU bridge tests — GpuExecContext/GpuNode seam, command recorded + executed on-GPU.
 add_executable(GpuBridgeTests gpu/GpuBridgeTests.cpp)
 target_link_libraries(GpuBridgeTests PRIVATE veng_gpu Catch2::Catch2WithMain)
@@ -216,7 +220,7 @@ target_link_libraries(FrameExecutorTests PRIVATE veng_managers veng_nodes veng_r
 # Most tests are device-agnostic and run on the default driver. Discover them plainly.
 foreach(test_target
         ContextTests ShaderLoadingTests ShaderValidationTests GraphTests SchedulerTests TemporalTests
-        ComputePipelineTests GraphicsPipelineTests DescriptorAllocatorTests ResourceTests ResourcePoolTests
+        ComputePipelineTests GraphicsPipelineTests DescriptorAllocatorTests ResourceTests ResourcePoolTests RenderTargetSetTests
         GpuBridgeTests ManagerTests RasterTriangleTests SliceDriverTests GraphicsNodeTests MeshNodeTests LodNodesTests
         MeshStrideTests TextureTests PbrPassTests PickingOutlineTests GltfLoaderTests StlLoaderTests MeshProcessingTests UniformNodeTests StorageBufferNodeTests
         ObjLoaderTests PlyLoaderTests ThreemfLoaderTests

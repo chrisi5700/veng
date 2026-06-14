@@ -77,6 +77,12 @@ class SwapchainManager
 	 */
 	[[nodiscard]] vk::Image image(std::uint32_t index) const noexcept { return m_images[index]; }
 
+	/// @brief The RHI texture handle for the swapchain image at @p index (resolves to its `vk::Image`).
+	[[nodiscard]] rhi::TextureHandle texture_handle(std::uint32_t index) const noexcept
+	{
+		return m_texture_handles[index];
+	}
+
 	/**
 	 * @brief Acquire the next swapchain image for @p frame_slot.
 	 *
@@ -115,18 +121,20 @@ class SwapchainManager
 	[[nodiscard]] std::expected<void, vk::Result> build_swapchain(vk::Extent2D extent, vk::SwapchainKHR old);
 	void										  destroy() noexcept;
 
-	vk::Device				   m_device;
-	vk::PhysicalDevice		   m_physical;
-	vk::SurfaceKHR			   m_surface; ///< Borrowed from @ref veng::Context; not destroyed here.
-	std::uint32_t			   m_graphics_family{};
-	std::size_t				   m_frames_in_flight{};
-	vk::SwapchainKHR		   m_swapchain;
-	std::vector<vk::Image>	   m_images;
-	vk::Format				   m_format = vk::Format::eUndefined;
-	vk::Extent2D			   m_extent{};
-	std::vector<vk::Semaphore> m_image_available; ///< One per frame-in-flight slot.
-	std::vector<vk::Semaphore> m_render_finished; ///< One per swapchain image.
-	std::vector<vk::Fence>	   m_in_flight;		  ///< One per frame-in-flight slot; created signalled.
+	vk::Device						m_device;
+	rhi::Device*					m_rhi = nullptr; ///< Registry the swapchain images register their handles with.
+	vk::PhysicalDevice				m_physical;
+	vk::SurfaceKHR					m_surface; ///< Borrowed from @ref veng::Context; not destroyed here.
+	std::uint32_t					m_graphics_family{};
+	std::size_t						m_frames_in_flight{};
+	vk::SwapchainKHR				m_swapchain;
+	std::vector<vk::Image>			m_images;
+	std::vector<rhi::TextureHandle> m_texture_handles; ///< One per swapchain image; re-registered on rebuild.
+	vk::Format						m_format = vk::Format::eUndefined;
+	vk::Extent2D					m_extent{};
+	std::vector<vk::Semaphore>		m_image_available; ///< One per frame-in-flight slot.
+	std::vector<vk::Semaphore>		m_render_finished; ///< One per swapchain image.
+	std::vector<vk::Fence>			m_in_flight;	   ///< One per frame-in-flight slot; created signalled.
 };
 } // namespace veng
 

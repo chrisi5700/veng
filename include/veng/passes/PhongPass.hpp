@@ -46,6 +46,7 @@
 #include <array>
 #include <glm/glm.hpp>
 #include <veng/rendergraph/Graph.hpp>
+#include <veng/rhi/Enums.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::passes
@@ -59,6 +60,9 @@ struct PhongConfig
 	float shininess = 48.0F; ///< Default Blinn-Phong specular exponent (gloss). Overridden per-object when >= 0.
 	std::array<float, 4> clear_color = {0.02F, 0.03F, 0.05F,
 										1.0F}; ///< RGBA background the colour target is cleared to.
+	/// MSAA sample count, clamped to the device on first record (`e1` = off). The pass renders into
+	/// a multisampled target and resolves to the single-sample image the output edge carries.
+	rhi::SampleCount samples = rhi::SampleCount::X1;
 };
 
 /// @cond INTERNAL
@@ -97,7 +101,7 @@ class PhongPass
 	 * @param eye          Reactive camera position edge (xyz = world-space eye; w unused).
 	 * @param config       Shininess and clear-color tunables.
 	 */
-	PhongPass(graph::Graph& graph, vk::Format color_format, vk::Format depth_format,
+	PhongPass(graph::Graph& graph, rhi::Format color_format, rhi::Format depth_format,
 			  graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
 			  graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye,
 			  const PhongConfig& config = {});

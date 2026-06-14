@@ -55,8 +55,8 @@ struct MeshVertex
 };
 static_assert(sizeof(MeshVertex) == 36);
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE  = 32;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE  = 32;
 
 // A triangle (identity MVP, so positions are NDC) that covers the centre pixel but leaves the
 // top corners clear — so a centre pick hits it and a corner pick hits the background.
@@ -102,7 +102,7 @@ TEST_CASE("PickingPass decodes the object under a pixel and reports no-hit on th
 	constexpr std::uint32_t	  OBJECT_ID = 7;
 	picking.add_object(mesh, mvp, OBJECT_ID);
 
-	veng::ResourcePool	 pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	veng::CommandManager commands(ctx);
 	InlineScheduler		 scheduler;
 
@@ -187,7 +187,7 @@ TEST_CASE("OutlinePass renders the silhouette->blur->ring chain and re-runs only
 	veng::passes::OutlinePass outline(graph, COLOR, screen, glow);
 	outline.add_mesh(mesh, mvp);
 
-	veng::ResourcePool	 pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	veng::CommandManager commands(ctx);
 	InlineScheduler		 scheduler;
 

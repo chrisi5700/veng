@@ -119,7 +119,7 @@ int main()
 
 	veng::passes::PbrConfig config;
 	config.light_intensity = 1.5F; // dimmed so the clustered point lights read as coloured highlights
-	config.cull_mode	   = vk::CullModeFlagBits::eNone; // closed spheres: depth handles occlusion, no winding worry
+	config.cull_mode	   = veng::rhi::CullMode::NONE; // closed spheres: depth handles occlusion, no winding worry
 	veng::passes::PbrPass pass(graph, app.scene_color_format(), app.depth_format(), app.screen(), app.scene_image(),
 							   app.view_proj(), app.camera().eye_pos(), config);
 

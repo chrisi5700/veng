@@ -27,6 +27,7 @@
 #include <utility>
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/resources/Image.hpp>
+#include <veng/rhi/Convert.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng
@@ -156,10 +157,9 @@ class Texture
 	 */
 	[[nodiscard]] gpu::ImageRef ref() const noexcept
 	{
-		return gpu::ImageRef{.image	  = m_image.image(),
-							 .view	  = m_image.view(),
-							 .extent  = m_image.extent(),
-							 .format  = m_image.format(),
+		return gpu::ImageRef{.texture = m_image.handle(),
+							 .extent  = rhi::to_rhi(m_image.extent()),
+							 .format  = rhi::to_rhi(m_image.format()),
 							 .pool_id = gpu::ImageRef::INVALID_POOL_ID,
 							 .version = 1};
 	}

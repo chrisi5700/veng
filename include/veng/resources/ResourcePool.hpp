@@ -96,7 +96,7 @@ class ResourcePool
 	 * @param allocator        The VMA allocator (used to allocate/free images and buffers).
 	 * @param frames_in_flight Number of frames that may be in flight simultaneously.
 	 */
-	ResourcePool(vk::Device device, vma::Allocator allocator, std::size_t frames_in_flight) noexcept;
+	ResourcePool(vk::Device device, rhi::Device& rhi, vma::Allocator allocator, std::size_t frames_in_flight) noexcept;
 
 	ResourcePool(const ResourcePool&)			 = delete;
 	ResourcePool& operator=(const ResourcePool&) = delete;
@@ -121,13 +121,15 @@ class ResourcePool
 	 * The extent is supplied per @ref acquire_image call (it tracks a screen-size edge); a
 	 * change reallocates all physical copies (do this only when the device is idle).
 	 *
-	 * @param format The pixel format of the image.
-	 * @param usage  Vulkan image-usage flags.
-	 * @param aspect View aspect mask for the auto-created image view (colour or depth).
+	 * @param format  The pixel format of the image.
+	 * @param usage   Vulkan image-usage flags.
+	 * @param aspect  View aspect mask for the auto-created image view (colour or depth).
+	 * @param samples Sample count; `e1` for a normal target, higher for an MSAA attachment.
 	 * @return A stable @ref ImageId valid for the lifetime of this pool.
 	 */
 	[[nodiscard]] ImageId declare_image(vk::Format format, vk::ImageUsageFlags usage,
-										vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor);
+										vk::ImageAspectFlags	aspect	= vk::ImageAspectFlagBits::eColor,
+										vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1);
 
 	/**
 	 * @brief Declare a transient host-visible buffer logical resource.
@@ -342,10 +344,11 @@ class ResourcePool
 	};
 	struct ImageResource
 	{
-		vk::Format			 format{};
-		vk::ImageUsageFlags	 usage{};
-		vk::ImageAspectFlags aspect{};
-		vk::Extent2D		 extent{};
+		vk::Format				format{};
+		vk::ImageUsageFlags		usage{};
+		vk::ImageAspectFlags	aspect{};
+		vk::SampleCountFlagBits sample_count = vk::SampleCountFlagBits::e1;
+		vk::Extent2D			extent{};
 		// unique_ptr so a returned Image* stays valid when the copy list grows.
 		std::vector<std::unique_ptr<ImageCopy>> copies{};
 		std::size_t								current		= NONE;
@@ -366,6 +369,7 @@ class ResourcePool
 	[[nodiscard]] std::int64_t retired_through() const noexcept { return m_frame - m_frames_in_flight; }
 
 	vk::Device					m_device;
+	rhi::Device*				m_rhi = nullptr; ///< Registry threaded into the Image/Buffer copies this pool creates.
 	vma::Allocator				m_allocator;
 	std::int64_t				m_frames_in_flight;
 	std::int64_t				m_frame = 0;

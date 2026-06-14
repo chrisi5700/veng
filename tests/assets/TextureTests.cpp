@@ -33,8 +33,8 @@ using veng::assets::Texture;
 
 namespace
 {
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm; // linear target: sampled values written as-is
-constexpr std::uint32_t SIDE  = 32;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM; // linear target: sampled values written as-is
+constexpr std::uint32_t		SIDE  = 32;
 
 veng::Context make_context()
 {
@@ -61,7 +61,7 @@ std::array<std::uint8_t, 4> sample_center(veng::Context& ctx, const Texture& tex
 	const DataHandle token	 = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 
 	auto node = std::make_unique<veng::nodes::GraphicsNode>("demo/fullscreen.vert", "tests/slice/sample.frag", COLOR,
-															vk::Format::eUndefined, 3, screen, token);
+															veng::rhi::Format::UNDEFINED, 3, screen, token);
 	node->add_sampled_image(tex_src, "source");
 	node->set_sampler(sampler);
 	auto*			 node_ptr	 = node.get();
@@ -69,7 +69,7 @@ std::array<std::uint8_t, 4> sample_center(veng::Context& ctx, const Texture& tex
 	graph.set_producer(token, node_handle);
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -86,7 +86,7 @@ std::array<std::uint8_t, 4> sample_center(veng::Context& ctx, const Texture& tex
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(device, ctx.allocator(), 1);
+	veng::ResourcePool res_pool(device, ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;

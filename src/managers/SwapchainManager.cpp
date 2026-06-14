@@ -21,6 +21,7 @@ constexpr vk::Result result_of(VkResult raw)
 
 SwapchainManager::SwapchainManager(const Context& context, std::size_t frames_in_flight) noexcept
 	: m_device(context.device())
+	, m_rhi(&context.rhi())
 	, m_physical(context.physical_device())
 	, m_surface(context.surface())
 	, m_graphics_family(context.queue_indices().graphics)
@@ -103,6 +104,19 @@ std::expected<void, vk::Result> SwapchainManager::build_swapchain(vk::Extent2D e
 	{
 		m_images.emplace_back(handle);
 	}
+
+	// Register each swapchain image as an RHI texture so the frame's ImageRef flows as a handle. The
+	// swapchain has no views (blit/present work on the image), so register a null view. Old handles
+	// (from the previous swapchain on a rebuild) are released first.
+	for (const rhi::TextureHandle handle : m_texture_handles)
+	{
+		m_rhi->release_texture(handle);
+	}
+	m_texture_handles.clear();
+	for (const vk::Image image : m_images)
+	{
+		m_texture_handles.push_back(m_rhi->register_texture(image, vk::ImageView{}));
+	}
 	for (std::size_t i = 0; i < m_images.size(); ++i)
 	{
 		const auto semaphore = m_device.createSemaphore({});
@@ -180,6 +194,11 @@ void SwapchainManager::destroy() noexcept
 	{
 		return;
 	}
+	for (const rhi::TextureHandle handle : m_texture_handles)
+	{
+		m_rhi->release_texture(handle);
+	}
+	m_texture_handles.clear();
 	for (const vk::Semaphore semaphore : m_render_finished)
 	{
 		if (semaphore)
@@ -214,12 +233,14 @@ void SwapchainManager::destroy() noexcept
 
 SwapchainManager::SwapchainManager(SwapchainManager&& other) noexcept
 	: m_device(std::exchange(other.m_device, nullptr))
+	, m_rhi(other.m_rhi)
 	, m_physical(other.m_physical)
 	, m_surface(other.m_surface)
 	, m_graphics_family(other.m_graphics_family)
 	, m_frames_in_flight(other.m_frames_in_flight)
 	, m_swapchain(std::exchange(other.m_swapchain, nullptr))
 	, m_images(std::move(other.m_images))
+	, m_texture_handles(std::move(other.m_texture_handles))
 	, m_format(other.m_format)
 	, m_extent(other.m_extent)
 	, m_image_available(std::move(other.m_image_available))
@@ -227,6 +248,7 @@ SwapchainManager::SwapchainManager(SwapchainManager&& other) noexcept
 	, m_in_flight(std::move(other.m_in_flight))
 {
 	other.m_images.clear();
+	other.m_texture_handles.clear();
 	other.m_image_available.clear();
 	other.m_render_finished.clear();
 	other.m_in_flight.clear();
@@ -238,18 +260,21 @@ SwapchainManager& SwapchainManager::operator=(SwapchainManager&& other) noexcept
 	{
 		destroy();
 		m_device		   = std::exchange(other.m_device, nullptr);
+		m_rhi			   = other.m_rhi;
 		m_physical		   = other.m_physical;
 		m_surface		   = other.m_surface;
 		m_graphics_family  = other.m_graphics_family;
 		m_frames_in_flight = other.m_frames_in_flight;
 		m_swapchain		   = std::exchange(other.m_swapchain, nullptr);
 		m_images		   = std::move(other.m_images);
+		m_texture_handles  = std::move(other.m_texture_handles);
 		m_format		   = other.m_format;
 		m_extent		   = other.m_extent;
 		m_image_available  = std::move(other.m_image_available);
 		m_render_finished  = std::move(other.m_render_finished);
 		m_in_flight		   = std::move(other.m_in_flight);
 		other.m_images.clear();
+		other.m_texture_handles.clear();
 		other.m_image_available.clear();
 		other.m_render_finished.clear();
 		other.m_in_flight.clear();

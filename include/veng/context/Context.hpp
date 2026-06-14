@@ -19,8 +19,10 @@
 #define VENG_CONTEXT_HPP
 
 #include <functional>
+#include <memory>
 #include <span>
 #include <string_view>
+#include <veng/rhi/Device.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -99,6 +101,8 @@ class Context
 	[[nodiscard]] vma::Allocator allocator() const { return m_allocator; }
 	/** @return The window surface, or a null handle for a headless context. */
 	[[nodiscard]] vk::SurfaceKHR surface() const { return m_surface; }
+	/** @return The RHI handle registry (texture/buffer handle ↔ vk-object indirection). */
+	[[nodiscard]] rhi::Device& rhi() const noexcept { return *m_rhi; }
 
 	/**
 	 * @brief Execute GPU work synchronously on the graphics queue.
@@ -127,6 +131,7 @@ class Context
 		, m_allocator(m_allocator)
 		, m_surface(m_surface)
 	{
+		m_rhi = std::make_unique<rhi::Device>(m_device);
 		Logger::instance().info("VulkanContext VK_HEADER_VERSION: {}", VK_HEADER_VERSION);
 		Logger::instance().info("VulkanContext initialized");
 	}
@@ -139,6 +144,8 @@ class Context
 	vk::Queue				   m_compute_queue;
 	vma::Allocator			   m_allocator;
 	vk::SurfaceKHR			   m_surface; ///< Null for headless; owned and destroyed before the instance.
+	/// RHI handle registry; pure slot-map (owns no vk objects), so teardown order vs the device is moot.
+	std::unique_ptr<rhi::Device> m_rhi;
 };
 } // namespace veng
 #endif // VENG_CONTEXT_HPP

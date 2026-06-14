@@ -182,7 +182,7 @@ int main()
 	// demo/composite.frag (scene, ring, samp) simply adds it on top; with nothing selected the
 	// glow is black and the scene passes through unchanged.
 	auto composite = std::make_unique<veng::nodes::GraphicsNode>("demo/fullscreen.vert", "demo/composite.frag",
-																 app.scene_color_format(), vk::Format::eUndefined, 3,
+																 app.scene_color_format(), veng::rhi::Format::UNDEFINED, 3,
 																 app.screen(), app.scene_image());
 	composite->add_sampled_image(scene, "scene").add_sampled_image(glow, "ring");
 	graph.set_producer(app.scene_image(), graph.add(std::move(composite)));

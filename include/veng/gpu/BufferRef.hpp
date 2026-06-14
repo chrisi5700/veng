@@ -27,6 +27,7 @@
 
 #include <cstdint>
 #include <string>
+#include <veng/rhi/Handles.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
@@ -45,11 +46,11 @@ namespace veng::gpu
  */
 struct BufferRef
 {
-	vk::Buffer	   buffer{};
-	vk::DeviceSize size	  = 0; ///< Allocated byte range to bind (>= one stride; never 0, see `StorageBufferNode`).
-	std::uint32_t  stride = 0; ///< Bytes per element.
-	std::uint32_t  count  = 0; ///< Number of elements; drives `instanceCount` of consuming draws.
-	std::string	   name;	   ///< The reflected descriptor binding this fills.
+	rhi::BufferHandle buffer{};	  ///< Opaque handle to the storage buffer (resolve via rhi::Device).
+	vk::DeviceSize	  size	 = 0; ///< Allocated byte range to bind (>= one stride; never 0, see `StorageBufferNode`).
+	std::uint32_t	  stride = 0; ///< Bytes per element.
+	std::uint32_t	  count	 = 0; ///< Number of elements; drives `instanceCount` of consuming draws.
+	std::string		  name;		  ///< The reflected descriptor binding this fills.
 
 	/// Pool id of the backing buffer (like @ref veng::gpu::ImageRef::pool_id). A consumer reading this ref
 	/// while its producer is cached must call `pool.consume(ref)` so the N-buffered copy it

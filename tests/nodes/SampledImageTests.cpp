@@ -47,8 +47,8 @@ bool plan_contains(const FramePlan& plan, NodeHandle node)
 	return false;
 }
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE  = 64;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE  = 64;
 } // namespace
 
 TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[nodes][sampled][slice]")
@@ -70,8 +70,8 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 	const auto make_solid = [&](TypedHandle<glm::vec4> color, DataHandle out)
 	{
 		auto node = std::make_unique<veng::nodes::GraphicsNode>("demo/fullscreen.vert", "tests/slice/solid.frag", COLOR,
-																vk::Format::eUndefined, 3, screen, out);
-		node->push_constant<glm::vec4>(color, vk::ShaderStageFlagBits::eFragment);
+																veng::rhi::Format::UNDEFINED, 3, screen, out);
+		node->push_constant<glm::vec4>(color, veng::rhi::ShaderStage::FRAGMENT);
 		return node;
 	};
 	const NodeHandle green_node = graph.add(make_solid(green, green_image));
@@ -80,14 +80,14 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 	graph.set_producer(blue_image, blue_node);
 
 	auto sampler = std::make_unique<veng::nodes::GraphicsNode>("demo/fullscreen.vert", "tests/slice/sample.frag", COLOR,
-															   vk::Format::eUndefined, 3, screen, out_image);
+															   veng::rhi::Format::UNDEFINED, 3, screen, out_image);
 	sampler->add_sampled_image(green_image, "source"); // start sampling the green image
 	auto*			 sampler_ptr  = sampler.get();
 	const NodeHandle sampler_node = graph.add(std::move(sampler));
 	graph.set_producer(out_image, sampler_node);
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -102,7 +102,7 @@ TEST_CASE("a GraphicsNode samples another pass's output by reflected name", "[no
 
 	// One pool for the whole test (resources persist across both renders); the frame counter
 	// advances the pool's retirement window so the single-buffered copies recycle between renders.
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	std::uint64_t	   frame_counter = 0;
 
 	// Resolve + execute the demanded plan into a one-shot buffer, copy out_image to the staging

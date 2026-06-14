@@ -16,7 +16,7 @@ target_include_directories(veng_logging
 )
 
 target_add_library(veng_context)
-target_sources(veng_context PRIVATE context/Context.cpp context/VmaImpl.cpp)
+target_sources(veng_context PRIVATE context/Context.cpp context/VmaImpl.cpp rhi/Device.cpp)
 target_link_libraries(veng_context
         PUBLIC Vulkan::Vulkan glfw veng_logging
                GPUOpen::VulkanMemoryAllocator
@@ -65,7 +65,7 @@ target_link_libraries(veng_descriptors PUBLIC veng_context)
 
 # L1 GPU resources — RAII Buffer/Image over VMA, plus the versioned N-buffered ResourcePool.
 target_add_library(veng_resources)
-target_sources(veng_resources PRIVATE resources/Buffer.cpp resources/Image.cpp resources/ResourcePool.cpp)
+target_sources(veng_resources PRIVATE resources/Buffer.cpp resources/Image.cpp resources/ResourcePool.cpp resources/RenderTargetSet.cpp)
 target_link_libraries(veng_resources PUBLIC veng_context)
 
 # GPU bridge (L3 -> Vulkan seam): header-only GpuExecContext + GpuNode.

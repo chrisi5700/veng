@@ -71,8 +71,8 @@ struct Body
 	friend bool operator==(const Body&, const Body&) noexcept = default;
 };
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE  = 128;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE  = 128;
 } // namespace
 
 TEST_CASE("an instanced GraphicsNode reads its instance data + count from a StorageBufferNode",
@@ -116,7 +116,7 @@ TEST_CASE("an instanced GraphicsNode reads its instance data + count from a Stor
 	// published count. So a CPU resize of `bodies` propagates to one upload + one re-draw at
 	// the right instance count, all via one reactive source.
 	auto draw_node = std::make_unique<veng::nodes::GraphicsNode>(
-		"tests/slice/instanced.vert", "tests/slice/tinted.frag", COLOR, vk::Format::eUndefined, 0, screen, token);
+		"tests/slice/instanced.vert", "tests/slice/tinted.frag", COLOR, veng::rhi::Format::UNDEFINED, 0, screen, token);
 	draw_node->set_mesh(mesh).add_storage_buffer(ssbo).set_instances_from(ssbo);
 
 	// The "tinted" frag still wants a tint uniform — but we already proved that path in
@@ -132,7 +132,7 @@ TEST_CASE("an instanced GraphicsNode reads its instance data + count from a Stor
 	graph.set_producer(token, draw_handle);
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -149,7 +149,7 @@ TEST_CASE("an instanced GraphicsNode reads its instance data + count from a Stor
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;

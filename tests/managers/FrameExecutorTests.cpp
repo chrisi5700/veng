@@ -25,6 +25,7 @@
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/resources/ResourcePool.hpp>
+#include <veng/rhi/Convert.hpp>
 
 #include "support/Headless.hpp"
 #include "support/VkFault.hpp"
@@ -45,7 +46,7 @@ TEST_CASE("FrameExecutor drives the headless frame loop", "[managers][frameexecu
 	REQUIRE(swap_res.has_value());
 	veng::SwapchainManager swap = std::move(*swap_res);
 
-	veng::ResourcePool	 pool(ctx.device(), ctx.allocator(), FIF);
+	veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), FIF);
 	veng::CommandManager commands(ctx);
 	InlineScheduler		 scheduler;
 
@@ -59,9 +60,9 @@ TEST_CASE("FrameExecutor drives the headless frame loop", "[managers][frameexecu
 		graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	const DataHandle frame_done = graph.add(std::make_unique<ValueData<int>>(0));
 
-	auto raster =
-		std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
-													swap.format(), vk::Format::eUndefined, 3, screen, scene_image);
+	auto raster = std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
+															  veng::rhi::to_rhi(swap.format()),
+															  veng::rhi::Format::UNDEFINED, 3, screen, scene_image);
 	graph.set_producer(scene_image, graph.add(std::move(raster)));
 
 	auto blit = std::make_unique<veng::nodes::BlitNode>(scene_image, swapchain_image, presented_image,

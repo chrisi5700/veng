@@ -14,7 +14,7 @@
 
 namespace veng::passes
 {
-OutlinePass::OutlinePass(graph::Graph& graph, vk::Format color_format, graph::TypedHandle<vk::Extent2D> screen,
+OutlinePass::OutlinePass(graph::Graph& graph, rhi::Format color_format, graph::TypedHandle<vk::Extent2D> screen,
 						 graph::DataHandle output, const OutlineConfig& config)
 	: m_graph(&graph)
 {
@@ -44,17 +44,17 @@ OutlinePass::OutlinePass(graph::Graph& graph, vk::Format color_format, graph::Ty
 	// draw per outlined mesh. We keep a non-owning pointer to the live node for that extension
 	// (the graph owns the unique_ptr; the pointer stays valid while the graph lives).
 	auto silhouette = std::make_unique<GraphicsNode>("passes/outline_silhouette.vert", "passes/outline_silhouette.frag",
-													 color_format, vk::Format::eUndefined, 0, screen, silhouette_image);
+													 color_format, rhi::Format::UNDEFINED, 0, screen, silhouette_image);
 	m_silhouette	= silhouette.get();
 	m_silhouette_node = graph.add(std::move(silhouette));
 	graph.set_producer(silhouette_image, m_silhouette_node);
 
 	// Horizontal Gaussian of the mask. Fragment push layout: texel @0 (vec2), width @8 (float).
 	auto blur = std::make_unique<GraphicsNode>("passes/outline_fullscreen.vert", "passes/outline_blur.frag",
-											   color_format, vk::Format::eUndefined, 3, screen, blurred_image);
+											   color_format, rhi::Format::UNDEFINED, 3, screen, blurred_image);
 	blur->add_sampled_image(silhouette_image, "silhouette")
-		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment, 0)
-		.push_constant<float>(m_width_src, vk::ShaderStageFlagBits::eFragment, 8);
+		.push_constant<glm::vec2>(texel, rhi::ShaderStage::FRAGMENT, 0)
+		.push_constant<float>(m_width_src, rhi::ShaderStage::FRAGMENT, 8);
 	m_blur_node = graph.add(std::move(blur));
 	graph.set_producer(blurred_image, m_blur_node);
 
@@ -62,12 +62,12 @@ OutlinePass::OutlinePass(graph::Graph& graph, vk::Format color_format, graph::Ty
 	// texel @16 (vec2), width @24 (float) — color first so its 16-byte slot needs no interior
 	// padding (matches the shader's `Push` exactly).
 	auto ring = std::make_unique<GraphicsNode>("passes/outline_fullscreen.vert", "passes/outline_ring.frag",
-											   color_format, vk::Format::eUndefined, 3, screen, output);
+											   color_format, rhi::Format::UNDEFINED, 3, screen, output);
 	ring->add_sampled_image(blurred_image, "blurredH")
 		.add_sampled_image(silhouette_image, "silhouette")
-		.push_constant<glm::vec4>(m_color_src, vk::ShaderStageFlagBits::eFragment, 0)
-		.push_constant<glm::vec2>(texel, vk::ShaderStageFlagBits::eFragment, 16)
-		.push_constant<float>(m_width_src, vk::ShaderStageFlagBits::eFragment, 24);
+		.push_constant<glm::vec4>(m_color_src, rhi::ShaderStage::FRAGMENT, 0)
+		.push_constant<glm::vec2>(texel, rhi::ShaderStage::FRAGMENT, 16)
+		.push_constant<float>(m_width_src, rhi::ShaderStage::FRAGMENT, 24);
 	m_ring_node = graph.add(std::move(ring));
 	graph.set_producer(output, m_ring_node);
 }
@@ -76,7 +76,7 @@ void OutlinePass::add_mesh(graph::DataHandle mesh, graph::DataHandle mvp)
 {
 	// One draw per mesh, each pushing its own MVP (vertex stage, offset 0). add_draw marks the
 	// node dirty, so this is valid at runtime as well as during setup.
-	m_silhouette->add_draw(mesh).push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex, 0);
+	m_silhouette->add_draw(mesh).push_constant<glm::mat4>(mvp, rhi::ShaderStage::VERTEX, 0);
 }
 
 void OutlinePass::set_color(glm::vec3 color)

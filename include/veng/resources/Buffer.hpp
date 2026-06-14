@@ -14,6 +14,7 @@
 #define VENG_BUFFER_HPP
 
 #include <expected>
+#include <veng/rhi/Device.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
 
@@ -35,15 +36,16 @@ class Buffer
 	 * you intend to map.
 	 *
 	 * @param allocator The VMA allocator to allocate from.
+	 * @param rhi       The RHI registry the buffer registers its handle with (released on destroy).
 	 * @param size      Number of bytes to allocate.
 	 * @param usage     Vulkan buffer-usage flags (vertex, index, uniform, storage, …).
 	 * @param memory    VMA memory-usage hint controlling which heap to prefer.
 	 * @param flags     VMA allocation-create flags (e.g. `eMapped`, `eHostAccessSequentialWrite`).
 	 * @return The constructed @ref veng::Buffer on success, or the `vk::Result` error code on failure.
 	 */
-	[[nodiscard]] static std::expected<Buffer, vk::Result> create(vma::Allocator allocator, vk::DeviceSize size,
-																  vk::BufferUsageFlags usage,
-																  vma::MemoryUsage	   memory = vma::MemoryUsage::eAuto,
+	[[nodiscard]] static std::expected<Buffer, vk::Result> create(vma::Allocator allocator, rhi::Device& rhi,
+																  vk::DeviceSize size, vk::BufferUsageFlags usage,
+																  vma::MemoryUsage memory = vma::MemoryUsage::eAuto,
 																  vma::AllocationCreateFlags flags = {});
 
 	Buffer(const Buffer&)			 = delete;
@@ -69,16 +71,21 @@ class Buffer
 	 */
 	[[nodiscard]] void* mapped() const noexcept { return m_mapped; }
 
+	/// @brief The RHI handle this buffer is registered under (flows on `BufferRef`/`MeshRef`/`UniformRef`).
+	[[nodiscard]] rhi::BufferHandle handle() const noexcept { return m_handle; }
+
 	 private:
-	Buffer(vma::Allocator allocator, vk::Buffer buffer, vma::Allocation allocation, vk::DeviceSize size,
-		   void* mapped) noexcept;
+	Buffer(vma::Allocator allocator, rhi::Device& rhi, rhi::BufferHandle handle, vk::Buffer buffer,
+		   vma::Allocation allocation, vk::DeviceSize size, void* mapped) noexcept;
 	void destroy() noexcept;
 
-	vma::Allocator	m_allocator;
-	vk::Buffer		m_buffer;
-	vma::Allocation m_allocation;
-	vk::DeviceSize	m_size;
-	void*			m_mapped;
+	vma::Allocator	  m_allocator;
+	rhi::Device*	  m_rhi;	///< Registry to release @ref m_handle into on destroy.
+	rhi::BufferHandle m_handle; ///< This buffer's registered handle.
+	vk::Buffer		  m_buffer;
+	vma::Allocation	  m_allocation;
+	vk::DeviceSize	  m_size;
+	void*			  m_mapped;
 };
 } // namespace veng
 

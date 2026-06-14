@@ -36,9 +36,9 @@ using veng::assets::Texture;
 
 namespace
 {
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm; // linear target: read sampled radiance directly
-constexpr vk::Format	DEPTH = vk::Format::eD32Sfloat;
-constexpr std::uint32_t SIDE  = 48;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM; // linear target: read sampled radiance directly
+constexpr veng::rhi::Format DEPTH = veng::rhi::Format::D32_SFLOAT;
+constexpr std::uint32_t		SIDE  = 48;
 
 veng::Context make_context()
 {
@@ -72,6 +72,7 @@ struct PbrCase
 	float								 alpha_cutoff = 0.5F;  // base_color_factor.a is the alpha the cutoff/blend uses
 	bool								 light_off	  = false; // kill the directional light (isolate point lights)
 	std::vector<veng::culling::GpuLight> point_lights{};	   // clustered point lights (wired when non-empty)
+	veng::rhi::SampleCount				 samples = veng::rhi::SampleCount::X1; // MSAA level (clamped to device)
 };
 
 // Render the quad for `c` and return the centre pixel RGBA8.
@@ -122,7 +123,8 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, const PbrCase& c)
 
 	veng::passes::PbrConfig config;
 	config.light_direction = c.light_direction;
-	config.cull_mode	   = vk::CullModeFlagBits::eNone; // shading test, not a winding test
+	config.cull_mode	   = veng::rhi::CullMode::NONE; // shading test, not a winding test
+	config.samples		   = c.samples;
 	if (c.light_off)
 	{
 		config.light_intensity = 0.0F; // isolate the point lights: the directional term contributes nothing
@@ -152,7 +154,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, const PbrCase& c)
 	}
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -169,7 +171,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, const PbrCase& c)
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(device, ctx.allocator(), 1);
+	veng::ResourcePool res_pool(device, ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;
@@ -187,7 +189,8 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, const PbrCase& c)
 			.setImageSubresource(
 				vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1))
 			.setImageExtent(vk::Extent3D{SIDE, SIDE, 1});
-	cmd.copyImageToBuffer(out.image, vk::ImageLayout::eTransferSrcOptimal, staging->buffer(), region);
+	cmd.copyImageToBuffer(ctx.rhi().image(out.texture), vk::ImageLayout::eTransferSrcOptimal, staging->buffer(),
+						  region);
 	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost, {},
 						vk::MemoryBarrier()
 							.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
@@ -220,6 +223,22 @@ TEST_CASE("PbrPass lights a diffuse material in its base colour", "[passes][pbr]
 	REQUIRE(rgba[1] < 40);			  // little green
 	REQUIRE(rgba[2] < 40);			  // little blue
 	REQUIRE(rgba[0] > rgba[1] + 120); // unmistakably red-dominant
+}
+
+TEST_CASE("PbrPass renders with MSAA and resolves to a single-sample image", "[passes][pbr][msaa]")
+{
+	veng::Logger::instance().set_level(spdlog::level::warn);
+	auto ctx = make_context();
+
+	// 4x MSAA exercises the multisampled attachment + end-of-pass resolve through the real pass under
+	// the validation layer (the gate would flag any attachment/resolve/sample-count mismatch). The
+	// quad centre is interior, so the resolved colour matches the single-sample render: red reads red.
+	const auto rgba = render_center(
+		ctx, PbrCase{.base_color_factor = glm::vec4(1.0F, 0.0F, 0.0F, 1.0F), .samples = veng::rhi::SampleCount::X4});
+	REQUIRE(rgba[0] > 180);
+	REQUIRE(rgba[1] < 40);
+	REQUIRE(rgba[2] < 40);
+	REQUIRE(rgba[0] > rgba[1] + 120);
 }
 
 TEST_CASE("PbrPass emits emissive even with no incident light", "[passes][pbr]")
@@ -350,7 +369,7 @@ TEST_CASE("PbrPass caches a static multi-material scene", "[passes][pbr][caching
 																std::span<const std::uint32_t>(indices), mesh)));
 
 	veng::passes::PbrConfig config;
-	config.cull_mode = vk::CullModeFlagBits::eNone;
+	config.cull_mode = veng::rhi::CullMode::NONE;
 	veng::passes::PbrPass pass(graph, COLOR, DEPTH, screen, token, view_proj, eye, config);
 	for (int i = 0; i < 4; ++i)
 	{
@@ -377,7 +396,7 @@ TEST_CASE("PbrPass caches a static multi-material scene", "[passes][pbr][caching
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(device, ctx.allocator(), 1);
+	veng::ResourcePool res_pool(device, ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;

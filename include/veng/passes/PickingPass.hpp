@@ -46,6 +46,7 @@
 #include <cstdint>
 #include <functional>
 #include <veng/rendergraph/Graph.hpp>
+#include <veng/rhi/Enums.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::nodes
@@ -102,7 +103,7 @@ class PickingPass
 	 * @param depth_format Format of the owned depth buffer used for id-render depth testing.
 	 */
 	PickingPass(graph::Graph& graph, graph::TypedHandle<vk::Extent2D> screen,
-				vk::Format depth_format = vk::Format::eD32Sfloat);
+				rhi::Format depth_format = rhi::Format::D32_SFLOAT);
 
 	PickingPass(const PickingPass&)			   = delete;
 	PickingPass& operator=(const PickingPass&) = delete;

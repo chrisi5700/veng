@@ -49,10 +49,12 @@ std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 	}
 	const gpu::ImageRef source = src->value();
 	const gpu::ImageRef target = dst->value();
-	if (!source.image || !target.image)
+	if (!source.texture.valid() || !target.texture.valid())
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}
+	const vk::Image source_image = ctx.rhi().image(source.texture);
+	const vk::Image target_image = ctx.rhi().image(target.texture);
 
 	// Retain the pooled source copy we read while this frame is in flight (the dst is the
 	// swapchain / a test target — not pool-owned, so consume is a no-op for it).
@@ -62,7 +64,7 @@ std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 
 	// Target: undefined -> transfer dst. We overwrite the whole image, so its prior
 	// contents and layout are discarded (the swapchain image is fresh each acquire).
-	CommandManager::image_barrier(cmd, target.image, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+	CommandManager::image_barrier(cmd, target_image, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
 								  vk::PipelineStageFlagBits2::eTopOfPipe, vk::AccessFlagBits2::eNone,
 								  vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite);
 
@@ -77,14 +79,14 @@ std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 																static_cast<std::int32_t>(source.extent.height), 1}})
 			.setDstOffsets({vk::Offset3D{0, 0, 0}, vk::Offset3D{static_cast<std::int32_t>(target.extent.width),
 																static_cast<std::int32_t>(target.extent.height), 1}});
-	cmd.blitImage(source.image, vk::ImageLayout::eTransferSrcOptimal, target.image,
+	cmd.blitImage(source_image, vk::ImageLayout::eTransferSrcOptimal, target_image,
 				  vk::ImageLayout::eTransferDstOptimal, region, vk::Filter::eLinear);
 
 	// Leave the target ready for its consumer. For PRESENT_SRC the presentation engine is
 	// synced by the render-finished semaphore, so no dst access scope is needed; otherwise
 	// a transfer reader (a readback / a further blit) waits on the write.
 	const bool to_present = m_final_layout == vk::ImageLayout::ePresentSrcKHR;
-	CommandManager::image_barrier(cmd, target.image, vk::ImageLayout::eTransferDstOptimal, m_final_layout,
+	CommandManager::image_barrier(cmd, target_image, vk::ImageLayout::eTransferDstOptimal, m_final_layout,
 								  vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite,
 								  to_present ? vk::PipelineStageFlagBits2::eBottomOfPipe
 											 : vk::PipelineStageFlagBits2::eTransfer,

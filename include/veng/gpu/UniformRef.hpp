@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <string>
+#include <veng/rhi/Handles.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::gpu
@@ -42,9 +43,9 @@ namespace veng::gpu
  */
 struct UniformRef
 {
-	vk::Buffer	   buffer{}; ///< Uniform buffer handle.
-	vk::DeviceSize size = 0; ///< Byte size of the buffer.
-	std::string	   name;	 ///< The reflected descriptor binding this fills (`DescriptorInfo.name`).
+	rhi::BufferHandle buffer{}; ///< Opaque handle to the uniform buffer (resolve via rhi::Device).
+	vk::DeviceSize	  size = 0; ///< Byte size of the buffer.
+	std::string		  name;		///< The reflected descriptor binding this fills (`DescriptorInfo.name`).
 
 	/// Producer-bumped version. Incremented on every publish so two consecutive produces of the
 	/// same underlying buffer handle (whose contents changed in place) compare unequal and the

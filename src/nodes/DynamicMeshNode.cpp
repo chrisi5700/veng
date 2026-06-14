@@ -45,8 +45,8 @@ std::expected<bool, graph::ExecError> DynamicMeshNode::record(gpu::GpuExecContex
 		std::memcpy(vbuf.value()->mapped(), vertices.bytes, vertex_bytes);
 	}
 
-	vk::Buffer	  index_handle{};
-	std::uint32_t index_count = 0;
+	rhi::BufferHandle index_handle{};
+	std::uint32_t	  index_count = 0;
 	if (m_index_input.valid())
 	{
 		const Reading indices = m_read_indices(ctx);
@@ -65,12 +65,12 @@ std::expected<bool, graph::ExecError> DynamicMeshNode::record(gpu::GpuExecContex
 		{
 			std::memcpy(ibuf.value()->mapped(), indices.bytes, index_bytes);
 		}
-		index_handle = ibuf.value()->buffer();
+		index_handle = ibuf.value()->handle();
 		index_count	 = indices.count;
 	}
 
 	m_versioned.publish(ctx, m_output,
-						gpu::MeshRef{.vertex_buffer = vbuf.value()->buffer(),
+						gpu::MeshRef{.vertex_buffer = vbuf.value()->handle(),
 									 .index_buffer	= index_handle,
 									 .vertex_count	= vertices.count,
 									 .index_count	= index_count,

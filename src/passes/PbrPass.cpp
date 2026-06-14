@@ -6,6 +6,7 @@
  * @ingroup render_passes
  */
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -31,8 +32,11 @@
 #include <veng/pipelines/GraphicsPipeline.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/resources/Image.hpp>
+#include <veng/resources/RenderTargetSet.hpp>
 #include <veng/resources/ResourcePool.hpp>
 #include <veng/resources/SamplerConfig.hpp>
+#include <veng/resources/SamplerConvert.hpp>
+#include <veng/rhi/Convert.hpp>
 #include <veng/shader/Shader.hpp>
 
 namespace veng::passes
@@ -76,8 +80,9 @@ constexpr std::size_t	TEXTURE_COUNT		= 5;
 class PbrRenderNode final : public gpu::GpuNode
 {
 	 public:
-	PbrRenderNode(vk::Format color_format, vk::Format depth_format, graph::DataHandle screen, graph::DataHandle output,
-				  graph::DataHandle view_proj, graph::DataHandle eye, PbrConfig config) noexcept
+	PbrRenderNode(rhi::Format color_format, rhi::Format depth_format, graph::DataHandle screen,
+				  graph::DataHandle output, graph::DataHandle view_proj, graph::DataHandle eye,
+				  PbrConfig config) noexcept
 		: m_color_format(color_format)
 		, m_depth_format(depth_format)
 		, m_output(output)
@@ -166,27 +171,24 @@ class PbrRenderNode final : public gpu::GpuNode
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
 		}
 
-		// Declare pool-backed targets + the per-frame uniform once; acquire this frame's copies.
+		// Declare the per-frame uniform/SSBO once; the color + depth targets (and any MSAA resolve)
+		// live in the RenderTargetSet configured by ensure_pipelines. Acquire this frame's copies.
 		if (!m_declared)
 		{
-			m_color_id = ctx.pool().declare_image(m_color_format, vk::ImageUsageFlagBits::eColorAttachment |
-																	  vk::ImageUsageFlagBits::eTransferSrc |
-																	  vk::ImageUsageFlagBits::eSampled);
-			m_depth_id = ctx.pool().declare_image(m_depth_format, vk::ImageUsageFlagBits::eDepthStencilAttachment,
-												  vk::ImageAspectFlagBits::eDepth);
-			m_frame_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
+			m_frame_id		  = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
 			m_default_ssbo_id = ctx.pool().declare_buffer(vk::BufferUsageFlagBits::eStorageBuffer);
 			m_declared		  = true;
 		}
-		auto color = ctx.pool().acquire_image(m_color_id, extent);
-		auto depth = ctx.pool().acquire_image(m_depth_id, extent);
-		auto frame = ctx.pool().acquire_buffer(m_frame_id, sizeof(PbrFrame));
-		if (!color.has_value() || !depth.has_value() || !frame.has_value())
+		if (auto acquired = m_targets.acquire(ctx.pool(), extent); !acquired.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
-		Image* const color_image = color.value();
-		Image* const depth_image = depth.value();
+		auto frame = ctx.pool().acquire_buffer(m_frame_id, sizeof(PbrFrame));
+		if (!frame.has_value())
+		{
+			return std::unexpected(graph::ExecError::NODE_FAILED);
+		}
+		Image* const color_image = m_targets.color();
 
 		// Clustered point-light state: the view matrix (for the fragment's depth slice) + the grid
 		// dimensions/extent. Off by default — cluster_dims.w (the cluster count) stays 0, so the
@@ -254,33 +256,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		}
 
 		const vk::CommandBuffer cmd = ctx.command_buffer();
-		ctx.pool().transition_image(m_color_id, cmd, vk::ImageLayout::eColorAttachmentOptimal,
-									vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-									vk::AccessFlagBits2::eColorAttachmentWrite);
-		ctx.pool().transition_image(m_depth_id, cmd, vk::ImageLayout::eDepthStencilAttachmentOptimal,
-									vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-									vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
-
-		const auto color_clear		= vk::ClearValue().setColor(vk::ClearColorValue(m_config.clear_color));
-		const auto color_attachment = vk::RenderingAttachmentInfo()
-										  .setImageView(color_image->view())
-										  .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-										  .setLoadOp(vk::AttachmentLoadOp::eClear)
-										  .setStoreOp(vk::AttachmentStoreOp::eStore)
-										  .setClearValue(color_clear);
-		const auto depth_clear		= vk::ClearValue().setDepthStencil(vk::ClearDepthStencilValue(1.0F, 0));
-		const auto depth_attachment = vk::RenderingAttachmentInfo()
-										  .setImageView(depth_image->view())
-										  .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-										  .setLoadOp(vk::AttachmentLoadOp::eClear)
-										  .setStoreOp(vk::AttachmentStoreOp::eDontCare)
-										  .setClearValue(depth_clear);
-		const auto rendering		= vk::RenderingInfo()
-										  .setRenderArea(vk::Rect2D({0, 0}, extent))
-										  .setLayerCount(1)
-										  .setColorAttachments(color_attachment)
-										  .setPDepthAttachment(&depth_attachment);
-		cmd.beginRendering(rendering);
+		m_targets.begin(ctx.pool(), cmd, extent, m_config.clear_color);
 		cmd.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(extent.width), static_cast<float>(extent.height),
 										0.0F, 1.0F));
 		cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
@@ -301,7 +277,7 @@ class PbrRenderNode final : public gpu::GpuNode
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
 			}
 			const gpu::MeshRef mesh = mesh_d->value();
-			if (!mesh.vertex_buffer)
+			if (!mesh.vertex_buffer.valid())
 			{
 				return {}; // mesh not uploaded yet — skip until its MeshNode has produced
 			}
@@ -323,10 +299,10 @@ class PbrRenderNode final : public gpu::GpuNode
 				vk::ArrayProxy<const std::byte>(static_cast<std::uint32_t>(sizeof(PbrPush)),
 												static_cast<const std::byte*>(static_cast<const void*>(&push))));
 			const vk::DeviceSize offset = 0;
-			cmd.bindVertexBuffers(0, mesh.vertex_buffer, offset);
-			if (mesh.index_buffer)
+			cmd.bindVertexBuffers(0, ctx.rhi().buffer(mesh.vertex_buffer), offset);
+			if (mesh.index_buffer.valid())
 			{
-				cmd.bindIndexBuffer(mesh.index_buffer, 0, mesh.index_type);
+				cmd.bindIndexBuffer(ctx.rhi().buffer(mesh.index_buffer), 0, mesh.index_type);
 				cmd.drawIndexed(mesh.index_count, 1, 0, 0, 0);
 			}
 			else
@@ -373,11 +349,11 @@ class PbrRenderNode final : public gpu::GpuNode
 		}
 
 		m_versioned.publish(ctx, m_output,
-							gpu::ImageRef{.image   = color_image->image(),
-										  .view	   = color_image->view(),
-										  .extent  = extent,
-										  .format  = m_color_format,
-										  .pool_id = m_color_id});
+							gpu::ImageRef{.texture		= color_image->handle(),
+										  .extent		= rhi::to_rhi(extent),
+										  .format		= m_color_format,
+										  .sample_count = rhi::to_rhi(color_image->sample_count()),
+										  .pool_id		= m_targets.color_id()});
 		return true;
 	}
 
@@ -415,7 +391,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		for (std::size_t i = 0; i < handles.size(); ++i)
 		{
 			const auto* ref = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(handles[i]));
-			if (ref == nullptr || !ref->value().buffer)
+			if (ref == nullptr || !ref->value().buffer.valid())
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
 			}
@@ -423,7 +399,7 @@ class PbrRenderNode final : public gpu::GpuNode
 			// is cached when the lights are static, so without this the pool could recycle the buffer
 			// out from under our descriptor set (VUID-vkDestroyBuffer-buffer-00922).
 			ctx.pool().consume(ref->value());
-			*targets[i]	 = ref->value().buffer;
+			*targets[i]	 = ctx.rhi().buffer(ref->value().buffer);
 			out.sizes[i] = ref->value().size;
 		}
 		return out;
@@ -441,12 +417,17 @@ class PbrRenderNode final : public gpu::GpuNode
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
+		// Clamp the requested MSAA to the device and configure the targets + every pipeline with the
+		// same sample count (Vulkan requires the pipeline match its multisampled attachments).
+		const vk::SampleCountFlagBits samples = clamp_sample_count(ctx.context(), rhi::to_vk(m_config.samples));
+		m_targets.configure(rhi::to_vk(m_color_format), rhi::to_vk(m_depth_format), samples);
+
 		const std::array color_formats{m_color_format};
 		struct PipeState
 		{
-			vk::CullModeFlags cull;
-			bool			  depth_write;
-			bool			  blend;
+			rhi::CullMode cull;
+			bool		  depth_write;
+			bool		  blend;
 		};
 		const auto make = [&](const PipeState& state) -> std::expected<GraphicsPipeline, PipelineError>
 		{
@@ -462,7 +443,8 @@ class PbrRenderNode final : public gpu::GpuNode
 			builder.color_formats(color_formats)
 				.depth_format(m_depth_format)
 				.depth_write(state.depth_write)
-				.rasterization(vk::PolygonMode::eFill, state.cull, vk::FrontFace::eCounterClockwise)
+				.sample_count(rhi::to_rhi(samples))
+				.rasterization(rhi::PolygonMode::FILL, state.cull, rhi::FrontFace::COUNTER_CLOCKWISE)
 				.blend(state.blend);
 			return builder.build(ctx.context());
 		};
@@ -471,8 +453,8 @@ class PbrRenderNode final : public gpu::GpuNode
 		// convex-transparency trick as PhongPass. eBack keeps near faces here (it shows the outer shell
 		// in the opaque pass), so eFront selects the far faces drawn first.
 		auto opaque = make(PipeState{.cull = m_config.cull_mode, .depth_write = true, .blend = false});
-		auto far	= make(PipeState{.cull = vk::CullModeFlagBits::eFront, .depth_write = false, .blend = true});
-		auto near	= make(PipeState{.cull = vk::CullModeFlagBits::eBack, .depth_write = false, .blend = true});
+		auto far	= make(PipeState{.cull = rhi::CullMode::FRONT, .depth_write = false, .blend = true});
+		auto near	= make(PipeState{.cull = rhi::CullMode::BACK, .depth_write = false, .blend = true});
 		if (!opaque.has_value() || !far.has_value() || !near.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -497,17 +479,20 @@ class PbrRenderNode final : public gpu::GpuNode
 
 	bool ensure_sampler(gpu::GpuExecContext& ctx)
 	{
-		if (m_sampler)
+		if (m_sampler_handle.valid())
 		{
 			return true;
 		}
-		m_device		   = ctx.device();
-		const auto sampler = ctx.device().createSampler(gpu::SamplerConfig::texture().to_create_info());
-		if (sampler.result != vk::Result::eSuccess)
+		// Clamp the requested anisotropy to what the device actually supports: samplerAnisotropy is
+		// enabled, but maxSamplerAnisotropy varies by GPU and exceeding it is a validation error.
+		const float max_aniso =
+			std::min(8.0F, ctx.context().physical_device().getProperties().limits.maxSamplerAnisotropy);
+		auto sampler = ctx.rhi().create_sampler(gpu::to_create_info(gpu::SamplerConfig::texture(max_aniso)));
+		if (!sampler.has_value())
 		{
 			return false;
 		}
-		m_sampler = sampler.value;
+		m_sampler_handle = sampler.value();
 		return true;
 	}
 
@@ -557,14 +542,15 @@ class PbrRenderNode final : public gpu::GpuNode
 			{
 				const auto* slot_data =
 					dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_materials[m].textures[t]));
-				if (slot_data == nullptr || !slot_data->value().view)
+				if (slot_data == nullptr || !slot_data->value().texture.valid())
 				{
 					return std::unexpected(graph::ExecError::MISSING_INPUT); // every material slot needs a texture
 				}
 				const gpu::ImageRef ref = slot_data->value();
 				ctx.pool().consume(ref); // no-op for a non-pooled (loaded) texture
-				image_infos[t] = vk::DescriptorImageInfo().setImageView(ref.view).setImageLayout(
-					vk::ImageLayout::eShaderReadOnlyOptimal);
+				image_infos[t] = vk::DescriptorImageInfo()
+									 .setImageView(ctx.rhi().view(ref.texture))
+									 .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
 				writes.push_back(vk::WriteDescriptorSet()
 									 .setDstSet(set)
 									 .setDstBinding(TEXTURE_BINDING + static_cast<std::uint32_t>(t))
@@ -572,7 +558,7 @@ class PbrRenderNode final : public gpu::GpuNode
 									 .setImageInfo(image_infos[t]));
 			}
 
-			const auto sampler_info = vk::DescriptorImageInfo().setSampler(m_sampler);
+			const auto sampler_info = vk::DescriptorImageInfo().setSampler(ctx.rhi().sampler(m_sampler_handle));
 			writes.push_back(vk::WriteDescriptorSet()
 								 .setDstSet(set)
 								 .setDstBinding(SAMPLER_BINDING)
@@ -606,8 +592,8 @@ class PbrRenderNode final : public gpu::GpuNode
 		return {};
 	}
 
-	vk::Format					   m_color_format;
-	vk::Format					   m_depth_format;
+	rhi::Format					   m_color_format;
+	rhi::Format					   m_depth_format;
 	graph::DataHandle			   m_output;
 	graph::DataHandle			   m_view_proj;
 	graph::DataHandle			   m_eye;
@@ -630,32 +616,24 @@ class PbrRenderNode final : public gpu::GpuNode
 	std::optional<GraphicsPipeline>				m_blend_near; // BLEND near faces (eBack cull,  no depth write)
 	std::optional<std::uint32_t>				m_expected_vertex_stride;
 	std::optional<DescriptorAllocator>			m_descriptors;
-	std::vector<std::vector<vk::DescriptorSet>> m_sets; // [material][frame slot]
-	vk::Sampler									m_sampler;
-	vk::Device									m_device;
+	std::vector<std::vector<vk::DescriptorSet>> m_sets;			  // [material][frame slot]
+	rhi::SamplerHandle							m_sampler_handle; // device-owned sampler
 
-	bool				 m_declared		   = false;
-	ImageId				 m_color_id		   = 0;
-	ImageId				 m_depth_id		   = 0;
+	bool				 m_declared = false; // guards the per-frame buffer declares below
+	RenderTargetSet		 m_targets;			 // color (+ depth) render target, with MSAA resolve when configured
 	BufferId			 m_frame_id		   = 0;
 	BufferId			 m_default_ssbo_id = 0; // bound to the light SSBOs when no clustered lights are set
 	gpu::VersionedOutput m_versioned;
 
 	 public:
-	~PbrRenderNode() override
-	{
-		if (m_device && m_sampler)
-		{
-			m_device.destroySampler(m_sampler);
-		}
-	}
+	~PbrRenderNode() override					   = default; // sampler is owned by rhi::Device
 	PbrRenderNode(const PbrRenderNode&)			   = delete;
 	PbrRenderNode& operator=(const PbrRenderNode&) = delete;
 	PbrRenderNode(PbrRenderNode&&)				   = delete;
 	PbrRenderNode& operator=(PbrRenderNode&&)	   = delete;
 };
 
-PbrPass::PbrPass(graph::Graph& graph, vk::Format color_format, vk::Format depth_format,
+PbrPass::PbrPass(graph::Graph& graph, rhi::Format color_format, rhi::Format depth_format,
 				 graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
 				 graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye, const PbrConfig& config)
 	: m_output(output)

@@ -278,8 +278,8 @@ int main()
 	for (std::size_t i = 0; i < MESH_KINDS; ++i)
 	{
 		auto draw = scene->add_draw(mesh_refs[i]);
-		draw.push_constant<glm::mat4>(app.view_proj().handle, vk::ShaderStageFlagBits::eVertex, 0);
-		draw.push_constant<std::uint32_t>(mesh_kind_srcs[i].handle, vk::ShaderStageFlagBits::eVertex, 64);
+		draw.push_constant<glm::mat4>(app.view_proj().handle, veng::rhi::ShaderStage::VERTEX, 0);
+		draw.push_constant<std::uint32_t>(mesh_kind_srcs[i].handle, veng::rhi::ShaderStage::VERTEX, 64);
 		draw.set_instances_from(transform_refs[i]);
 	}
 	graph.set_producer(app.scene_image(), graph.add(std::move(scene)));

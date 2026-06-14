@@ -44,8 +44,8 @@ struct DebugVertex
 	friend bool operator==(const DebugVertex&, const DebugVertex&) noexcept = default;
 };
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE  = 64;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE  = 64;
 } // namespace
 
 TEST_CASE("a DynamicMeshNode + line-topology GraphicsNode renders dynamic line segments",
@@ -73,15 +73,15 @@ TEST_CASE("a DynamicMeshNode + line-topology GraphicsNode renders dynamic line s
 	// The line-list pass: no instancing, no descriptors. The view_proj push constant is an
 	// identity matrix so positions land in NDC verbatim — keeps the readback math trivial.
 	auto	   draw = std::make_unique<veng::nodes::GraphicsNode>("demo/debug_line.vert", "demo/debug_line.frag", COLOR,
-																  vk::Format::eUndefined, 0, screen, token);
+																  veng::rhi::Format::UNDEFINED, 0, screen, token);
 	const auto view_proj = graph.add_source<glm::mat4>(glm::mat4(1.0F));
-	draw->set_mesh(mesh).topology(vk::PrimitiveTopology::eLineList).push_constant<glm::mat4>(view_proj);
+	draw->set_mesh(mesh).topology(veng::rhi::Topology::LINE_LIST).push_constant<glm::mat4>(view_proj);
 	auto*			 draw_ptr	 = draw.get();
 	const NodeHandle draw_handle = graph.add(std::move(draw));
 	graph.set_producer(token, draw_handle);
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -98,7 +98,7 @@ TEST_CASE("a DynamicMeshNode + line-topology GraphicsNode renders dynamic line s
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;

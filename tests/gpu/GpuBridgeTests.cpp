@@ -81,9 +81,9 @@ TEST_CASE("a GpuNode records through the injected GpuExecContext and the command
 	constexpr std::uint32_t	 VALUE = 0xABCD1234U;
 
 	// Host-visible, persistently-mapped target so we can read the GPU's write back.
-	auto target =
-		veng::Buffer::create(ctx.allocator(), SIZE, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
-							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
+	auto target = veng::Buffer::create(
+		ctx.allocator(), ctx.rhi(), SIZE, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
+		vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(target.has_value());
 	REQUIRE(target->mapped() != nullptr);
 
@@ -109,7 +109,7 @@ TEST_CASE("a GpuNode records through the injected GpuExecContext and the command
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 
 	// Drive the graph with a GPU context: resolve the plan, then execute with the

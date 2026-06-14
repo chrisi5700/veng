@@ -19,6 +19,7 @@
 #include <expected>
 #include <span>
 #include <vector>
+#include <veng/rhi/Enums.hpp>
 #include <vulkan/vulkan.hpp>
 
 #include "veng/context/Context.hpp"
@@ -95,17 +96,17 @@ class GraphicsPipelineBuilder
 
 	/**
 	 * @brief Set the color attachment formats (required; at least one must be provided).
-	 * @param formats The `vk::Format` of each color attachment, in attachment order.
+	 * @param formats The `rhi::Format` of each color attachment, in attachment order.
 	 * @return `*this` for chaining.
 	 */
-	GraphicsPipelineBuilder& color_formats(std::span<const vk::Format> formats);
+	GraphicsPipelineBuilder& color_formats(std::span<const rhi::Format> formats);
 
 	/**
 	 * @brief Set the depth attachment format (default: `eUndefined` — no depth).
-	 * @param format The `vk::Format` of the depth attachment.
+	 * @param format The `rhi::Format` of the depth attachment.
 	 * @return `*this` for chaining.
 	 */
-	GraphicsPipelineBuilder& depth_format(vk::Format format);
+	GraphicsPipelineBuilder& depth_format(rhi::Format format);
 
 	/**
 	 * @brief Enable or disable depth writes (default: `true`).
@@ -115,11 +116,23 @@ class GraphicsPipelineBuilder
 	GraphicsPipelineBuilder& depth_write(bool enabled);
 
 	/**
+	 * @brief Set the rasterization sample count (default: `e1`, no MSAA).
+	 *
+	 * Must equal the sample count of the color and depth attachments the pipeline renders into
+	 * (the multisampled attachment, not the single-sample resolve target). Vulkan requires this
+	 * match.
+	 *
+	 * @param samples The MSAA sample count.
+	 * @return `*this` for chaining.
+	 */
+	GraphicsPipelineBuilder& sample_count(rhi::SampleCount samples);
+
+	/**
 	 * @brief Set the primitive topology (default: `eTriangleList`).
 	 * @param topology The desired primitive topology.
 	 * @return `*this` for chaining.
 	 */
-	GraphicsPipelineBuilder& topology(vk::PrimitiveTopology topology);
+	GraphicsPipelineBuilder& topology(rhi::Topology topology);
 
 	/**
 	 * @brief Override rasterizer state (defaults: fill / back-cull / CCW).
@@ -128,7 +141,7 @@ class GraphicsPipelineBuilder
 	 * @param front   The front-face winding order.
 	 * @return `*this` for chaining.
 	 */
-	GraphicsPipelineBuilder& rasterization(vk::PolygonMode polygon, vk::CullModeFlags cull, vk::FrontFace front);
+	GraphicsPipelineBuilder& rasterization(rhi::PolygonMode polygon, rhi::CullMode cull, rhi::FrontFace front);
 
 	/**
 	 * @brief Enable or disable straight-alpha blending on every color attachment
@@ -157,16 +170,17 @@ class GraphicsPipelineBuilder
 																	   vk::PipelineCache cache = {}) const;
 
 	 private:
-	const Shader*			m_vertex;
-	const Shader*			m_fragment;
-	std::vector<vk::Format> m_color_formats;
-	vk::Format				m_depth_format = vk::Format::eUndefined;
-	bool					m_depth_write  = true;
-	vk::PrimitiveTopology	m_topology	   = vk::PrimitiveTopology::eTriangleList;
-	vk::PolygonMode			m_polygon	   = vk::PolygonMode::eFill;
-	vk::CullModeFlags		m_cull		   = vk::CullModeFlagBits::eBack;
-	vk::FrontFace			m_front_face   = vk::FrontFace::eCounterClockwise;
-	bool					m_blend		   = false;
+	const Shader*			 m_vertex;
+	const Shader*			 m_fragment;
+	std::vector<rhi::Format> m_color_formats;
+	rhi::Format				 m_depth_format = rhi::Format::UNDEFINED;
+	bool					 m_depth_write	= true;
+	rhi::SampleCount		 m_samples		= rhi::SampleCount::X1;
+	rhi::Topology			 m_topology		= rhi::Topology::TRIANGLE_LIST;
+	rhi::PolygonMode		 m_polygon		= rhi::PolygonMode::FILL;
+	rhi::CullMode			 m_cull			= rhi::CullMode::BACK;
+	rhi::FrontFace			 m_front_face	= rhi::FrontFace::COUNTER_CLOCKWISE;
+	bool					 m_blend		= false;
 };
 } // namespace veng
 

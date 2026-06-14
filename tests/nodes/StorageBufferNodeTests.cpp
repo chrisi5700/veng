@@ -95,7 +95,7 @@ TEST_CASE("StorageBufferNode uploads a vector<T> and publishes a BufferRef", "[n
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;
@@ -116,7 +116,7 @@ TEST_CASE("StorageBufferNode uploads a vector<T> and publishes a BufferRef", "[n
 	const auto* slot = dynamic_cast<ValueData<veng::gpu::BufferRef>*>(graph.get_data(ref_slot));
 	REQUIRE(slot != nullptr);
 	const veng::gpu::BufferRef& ref = slot->value();
-	REQUIRE(ref.buffer);
+	REQUIRE(ref.buffer.valid());
 	REQUIRE(ref.stride == sizeof(Body));
 	REQUIRE(ref.count == bodies.size());
 	REQUIRE(ref.size == sizeof(Body) * bodies.size());
@@ -175,7 +175,7 @@ TEST_CASE("StorageBufferNode handles an empty vector without faulting", "[nodes]
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;
@@ -192,7 +192,7 @@ TEST_CASE("StorageBufferNode handles an empty vector without faulting", "[nodes]
 	const auto* slot = dynamic_cast<ValueData<veng::gpu::BufferRef>*>(graph.get_data(ref));
 	REQUIRE(slot != nullptr);
 	const veng::gpu::BufferRef& published = slot->value();
-	REQUIRE(published.buffer);
+	REQUIRE(published.buffer.valid());
 	REQUIRE(published.count == 0);
 	// size is the allocated range to bind, never 0 — a 0 descriptor range is invalid
 	// (VUID-VkDescriptorBufferInfo-range-00341). count=0 is what drives 0-instance draws, so the

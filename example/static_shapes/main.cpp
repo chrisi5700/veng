@@ -39,8 +39,8 @@ void add_shape(Graph& graph, nodes::GraphicsNode& node, DataHandle mesh, TypedHa
 {
 	const auto model	 = graph.add_source<glm::mat4>(glm::translate(glm::mat4(1.0F), position));
 	auto	   draw_cfg	 = node.add_draw(mesh);
-	draw_cfg.push_constant<glm::mat4>(model.handle, vk::ShaderStageFlagBits::eVertex, 0);
-	draw_cfg.push_constant<glm::mat4>(view_proj.handle, vk::ShaderStageFlagBits::eVertex, 64);
+	draw_cfg.push_constant<glm::mat4>(model.handle, veng::rhi::ShaderStage::VERTEX, 0);
+	draw_cfg.push_constant<glm::mat4>(view_proj.handle, veng::rhi::ShaderStage::VERTEX, 64);
 }
 } // namespace
 

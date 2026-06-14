@@ -57,8 +57,8 @@ struct Vertex
 	glm::vec3 color;
 };
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE  = 64;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE  = 64;
 } // namespace
 
 TEST_CASE("a MeshNode uploads real vertices an indexed GraphicsNode draws", "[nodes][mesh][slice]")
@@ -89,14 +89,14 @@ TEST_CASE("a MeshNode uploads real vertices an indexed GraphicsNode draws", "[no
 
 	auto node =
 		std::make_unique<veng::nodes::GraphicsNode>("tests/slice/mesh_triangle.vert", "tests/slice/mesh_triangle.frag",
-													COLOR, vk::Format::eUndefined, 0, screen, token);
+													COLOR, veng::rhi::Format::UNDEFINED, 0, screen, token);
 	node->set_mesh(mesh);
 	auto*			 node_ptr	 = node.get();
 	const NodeHandle node_handle = graph.add(std::move(node));
 	graph.set_producer(token, node_handle);
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -113,7 +113,7 @@ TEST_CASE("a MeshNode uploads real vertices an indexed GraphicsNode draws", "[no
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;

@@ -24,7 +24,8 @@
 #define VENG_IMAGEREF_HPP
 
 #include <cstdint>
-#include <vulkan/vulkan.hpp>
+#include <veng/rhi/Enums.hpp>
+#include <veng/rhi/Handles.hpp>
 
 namespace veng::gpu
 {
@@ -42,10 +43,14 @@ namespace veng::gpu
  */
 struct ImageRef
 {
-	vk::Image	  image{};						   ///< The underlying Vulkan image.
-	vk::ImageView view{};						   ///< Default view over the image.
-	vk::Extent2D  extent{};						   ///< Pixel dimensions.
-	vk::Format	  format = vk::Format::eUndefined; ///< Pixel format of the image.
+	rhi::TextureHandle texture{}; ///< Opaque handle to the image + default view (resolve via rhi::Device).
+	rhi::Extent2D	   extent{};  ///< Pixel dimensions.
+	rhi::Format		   format = rhi::Format::UNDEFINED; ///< Pixel format of the image.
+
+	/// Sample count of the referenced image. A render pass resolves its MSAA attachment down to a
+	/// single-sample image before publishing, so a ref that flows to a downstream sampler/blit is
+	/// expected to be `X1`; a consumer that cannot handle a multisampled source may assert on this.
+	rhi::SampleCount sample_count = rhi::SampleCount::X1;
 
 	/// The @ref veng::ResourcePool resource id this ref's physical image belongs to, or `INVALID_POOL_ID`
 	/// for an image the pool does not own (the swapchain, a test-owned target). A consumer that

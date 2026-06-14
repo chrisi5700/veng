@@ -18,6 +18,7 @@
 #include <veng/nodes/BlitNode.hpp>
 #include <veng/nodes/GraphicsNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rhi/Convert.hpp>
 
 namespace example
 {
@@ -51,12 +52,13 @@ AppLoop::AppLoop(const AppConfig& config)
 	}
 	m_swap = std::make_unique<veng::SwapchainManager>(std::move(swap_result.value()));
 
-	m_pool	   = std::make_unique<veng::ResourcePool>(m_ctx->device(), m_ctx->allocator(), m_config.frames_in_flight);
+	m_pool = std::make_unique<veng::ResourcePool>(m_ctx->device(), m_ctx->rhi(), m_ctx->allocator(),
+												  m_config.frames_in_flight);
 	m_commands = std::make_unique<veng::CommandManager>(*m_ctx);
 
 	// The scene renders into a linear-light HDR target when config.hdr is set (resolved to the
 	// swapchain through the tonemap pass below), otherwise straight into the swapchain's format.
-	m_scene_color_format = m_config.hdr ? vk::Format::eR16G16B16A16Sfloat : m_swap->format();
+	m_scene_color_format = m_config.hdr ? veng::rhi::Format::RGBA16_SFLOAT : veng::rhi::to_rhi(m_swap->format());
 
 	// --- Sources + frame closer (tonemap? + BlitNode + PresentNode) -------------------
 	using namespace veng::graph;
@@ -79,10 +81,10 @@ AppLoop::AppLoop(const AppConfig& config)
 		m_tonemapped_image = m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 		const TypedHandle<float> exposure = m_graph.add_source<float>(m_config.exposure);
 		auto tonemap = std::make_unique<veng::nodes::GraphicsNode>("passes/fullscreen.vert", "passes/tonemap.frag",
-																   m_swap->format(), vk::Format::eUndefined, 3,
+																   veng::rhi::to_rhi(m_swap->format()), veng::rhi::Format::UNDEFINED, 3,
 																   m_screen, m_tonemapped_image);
 		tonemap->add_sampled_image(m_scene_image, "hdr")
-			.push_constant<float>(exposure, vk::ShaderStageFlagBits::eFragment);
+			.push_constant<float>(exposure, veng::rhi::ShaderStage::FRAGMENT);
 		m_graph.set_producer(m_tonemapped_image, m_graph.add(std::move(tonemap)));
 		blit_source = m_tonemapped_image;
 	}

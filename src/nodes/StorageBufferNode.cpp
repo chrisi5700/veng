@@ -54,7 +54,7 @@ std::expected<bool, graph::ExecError> StorageBufferNode::record(gpu::GpuExecCont
 	// empty array therefore binds a one-stride range the shader never reads — `count` (0) is what tells
 	// the consuming draw to emit zero instances, so nothing accesses it.
 	m_versioned.publish(ctx, m_output,
-						gpu::BufferRef{.buffer	= buffer.value()->buffer(),
+						gpu::BufferRef{.buffer	= buffer.value()->handle(),
 									   .size	= alloc_bytes,
 									   .stride	= m_stride,
 									   .count	= reading.count,

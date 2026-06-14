@@ -31,9 +31,9 @@ using namespace veng::graph;
 
 namespace
 {
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr vk::Format	DEPTH = vk::Format::eD32Sfloat;
-constexpr std::uint32_t SIDE  = 64;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr veng::rhi::Format DEPTH = veng::rhi::Format::D32_SFLOAT;
+constexpr std::uint32_t		SIDE  = 64;
 
 veng::Context make_context()
 {
@@ -99,7 +99,7 @@ std::size_t render_and_count(veng::Context& ctx, Graph& graph, const veng::asset
 	}
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -116,7 +116,7 @@ std::size_t render_and_count(veng::Context& ctx, Graph& graph, const veng::asset
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(device, ctx.allocator(), 1);
+	veng::ResourcePool res_pool(device, ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;
@@ -134,7 +134,8 @@ std::size_t render_and_count(veng::Context& ctx, Graph& graph, const veng::asset
 			.setImageSubresource(
 				vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1))
 			.setImageExtent(vk::Extent3D{SIDE, SIDE, 1});
-	cmd.copyImageToBuffer(out.image, vk::ImageLayout::eTransferSrcOptimal, staging->buffer(), region);
+	cmd.copyImageToBuffer(ctx.rhi().image(out.texture), vk::ImageLayout::eTransferSrcOptimal, staging->buffer(),
+						  region);
 	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost, {},
 						vk::MemoryBarrier()
 							.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)

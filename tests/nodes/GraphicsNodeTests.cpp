@@ -61,9 +61,9 @@ glm::mat4 cube_mvp(const float& spin, const vk::Extent2D& size)
 	return proj * view * model;
 }
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr vk::Format	DEPTH = vk::Format::eD32Sfloat;
-constexpr std::uint32_t SIDE  = 128;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr veng::rhi::Format DEPTH = veng::rhi::Format::D32_SFLOAT;
+constexpr std::uint32_t		SIDE  = 128;
 } // namespace
 
 TEST_CASE("a generic GraphicsNode draws a centered cube from an MVP edge and caches a held angle",
@@ -83,13 +83,13 @@ TEST_CASE("a generic GraphicsNode draws a centered cube from an MVP edge and cac
 
 	auto node = std::make_unique<veng::nodes::GraphicsNode>("demo/cube.vert", "demo/cube.frag", COLOR, DEPTH, 36,
 															screen, token);
-	node->push_constant<glm::mat4>(mvp, vk::ShaderStageFlagBits::eVertex);
+	node->push_constant<glm::mat4>(mvp, veng::rhi::ShaderStage::VERTEX);
 	auto*			 node_ptr	 = node.get();
 	const NodeHandle node_handle = graph.add(std::move(node));
 	graph.set_producer(token, node_handle);
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -106,7 +106,7 @@ TEST_CASE("a generic GraphicsNode draws a centered cube from an MVP edge and cac
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;

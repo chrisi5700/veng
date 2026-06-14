@@ -33,6 +33,7 @@
 #include <veng/culling/Clusters.hpp>
 #include <veng/rendergraph/Graph.hpp>
 #include <veng/rendergraph/RenderGraphCommon.hpp>
+#include <veng/rhi/Enums.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng::passes
@@ -48,7 +49,11 @@ struct PbrConfig
 	float	  light_intensity = 3.0F;										  ///< Multiplier applied to `light_color`.
 	glm::vec3 ambient		  = glm::vec3(0.03F, 0.03F, 0.03F);				  ///< Constant ambient term (linear RGB).
 	std::array<float, 4> clear_color = {0.02F, 0.03F, 0.05F, 1.0F};			  ///< RGBA background clear value.
-	vk::CullModeFlags	 cull_mode	 = vk::CullModeFlagBits::eBack; ///< glTF assets use `eBack`; tests may use `eNone`.
+	rhi::CullMode		 cull_mode	 = rhi::CullMode::BACK; ///< glTF assets use `eBack`; tests may use `eNone`.
+	/// MSAA sample count, clamped to the device on first record (`e1` = off). The pass renders into
+	/// a multisampled color + depth target and resolves to the single-sample image the output edge
+	/// carries, so anti-aliasing is transparent to downstream consumers.
+	rhi::SampleCount samples = rhi::SampleCount::X1;
 };
 
 /**
@@ -131,7 +136,7 @@ class PbrPass
 	 * @param eye          Reactive camera position edge (xyz = world-space eye; w unused).
 	 * @param config       Directional light and pipeline tunables.
 	 */
-	PbrPass(graph::Graph& graph, vk::Format color_format, vk::Format depth_format,
+	PbrPass(graph::Graph& graph, rhi::Format color_format, rhi::Format depth_format,
 			graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output, graph::TypedHandle<glm::mat4> view_proj,
 			graph::TypedHandle<glm::vec4> eye, const PbrConfig& config = {});
 

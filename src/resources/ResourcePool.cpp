@@ -9,6 +9,7 @@
 #include <utility>
 #include <veng/context/Context.hpp>
 #include <veng/resources/ResourcePool.hpp>
+#include <veng/rhi/Convert.hpp>
 
 namespace veng
 {
@@ -45,8 +46,10 @@ void clear_to_shader_readonly(vk::CommandBuffer cmd, vk::Image image, std::array
 }
 } // namespace
 
-ResourcePool::ResourcePool(vk::Device device, vma::Allocator allocator, std::size_t frames_in_flight) noexcept
+ResourcePool::ResourcePool(vk::Device device, rhi::Device& rhi, vma::Allocator allocator,
+						   std::size_t frames_in_flight) noexcept
 	: m_device(device)
+	, m_rhi(&rhi)
 	, m_allocator(allocator)
 	, m_frames_in_flight(static_cast<std::int64_t>(frames_in_flight == 0 ? 1 : frames_in_flight))
 {
@@ -64,6 +67,7 @@ void ResourcePool::destroy() noexcept
 
 ResourcePool::ResourcePool(ResourcePool&& other) noexcept
 	: m_device(std::exchange(other.m_device, nullptr))
+	, m_rhi(std::exchange(other.m_rhi, nullptr))
 	, m_allocator(std::exchange(other.m_allocator, nullptr))
 	, m_frames_in_flight(other.m_frames_in_flight)
 	, m_frame(other.m_frame)
@@ -78,6 +82,7 @@ ResourcePool& ResourcePool::operator=(ResourcePool&& other) noexcept
 	{
 		destroy();
 		m_device		   = std::exchange(other.m_device, nullptr);
+		m_rhi			   = std::exchange(other.m_rhi, nullptr);
 		m_allocator		   = std::exchange(other.m_allocator, nullptr);
 		m_frames_in_flight = other.m_frames_in_flight;
 		m_frame			   = other.m_frame;
@@ -92,9 +97,10 @@ ResourcePool::~ResourcePool()
 	destroy();
 }
 
-ImageId ResourcePool::declare_image(vk::Format format, vk::ImageUsageFlags usage, vk::ImageAspectFlags aspect)
+ImageId ResourcePool::declare_image(vk::Format format, vk::ImageUsageFlags usage, vk::ImageAspectFlags aspect,
+									vk::SampleCountFlagBits samples)
 {
-	m_images.push_back(ImageResource{.format = format, .usage = usage, .aspect = aspect});
+	m_images.push_back(ImageResource{.format = format, .usage = usage, .aspect = aspect, .sample_count = samples});
 	return static_cast<ImageId>(m_images.size() - 1);
 }
 
@@ -130,7 +136,8 @@ std::expected<Image*, vk::Result> ResourcePool::acquire_image(ImageId id, vk::Ex
 	}
 	if (pick == NONE)
 	{
-		auto image = Image::create(m_allocator, m_device, extent, res.format, res.usage, res.aspect);
+		auto image = Image::create(m_allocator, m_device, *m_rhi, extent, res.format, res.usage, res.aspect, 1,
+								   res.sample_count);
 		if (!image.has_value())
 		{
 			return std::unexpected(image.error());
@@ -236,7 +243,7 @@ std::expected<gpu::ImageRef, vk::Result> ResourcePool::constant_image(const Cont
 	ImageResource& res = m_images[id];
 	res.is_constant	   = true;
 	res.extent		   = extent;
-	auto image		   = Image::create(m_allocator, m_device, extent, format, usage);
+	auto image		   = Image::create(m_allocator, m_device, *m_rhi, extent, format, usage);
 	if (!image.has_value())
 	{
 		return std::unexpected(image.error());
@@ -257,7 +264,8 @@ std::expected<gpu::ImageRef, vk::Result> ResourcePool::constant_image(const Cont
 	res.copies.back()->current_layout = vk::ImageLayout::eShaderReadOnlyOptimal;
 	res.copies.back()->last_stage	  = vk::PipelineStageFlagBits2::eFragmentShader;
 	res.copies.back()->last_access	  = vk::AccessFlagBits2::eShaderSampledRead;
-	return gpu::ImageRef{.image = img.image(), .view = img.view(), .extent = extent, .format = format, .pool_id = id};
+	return gpu::ImageRef{
+		.texture = img.handle(), .extent = rhi::to_rhi(extent), .format = rhi::to_rhi(format), .pool_id = id};
 }
 
 std::expected<Buffer*, vk::Result> ResourcePool::acquire_buffer(BufferId id, vk::DeviceSize size)
@@ -296,7 +304,7 @@ std::expected<Buffer*, vk::Result> ResourcePool::acquire_buffer(BufferId id, vk:
 	}
 	if (pick == NONE)
 	{
-		auto buffer = Buffer::create(m_allocator, size, res.usage, vma::MemoryUsage::eAuto,
+		auto buffer = Buffer::create(m_allocator, *m_rhi, size, res.usage, vma::MemoryUsage::eAuto,
 									 vma::AllocationCreateFlagBits::eMapped |
 										 vma::AllocationCreateFlagBits::eHostAccessSequentialWrite);
 		if (!buffer.has_value() || buffer->mapped() == nullptr)

@@ -95,6 +95,10 @@ class GpuExecContext final : public graph::ExecContext
 	/// @return The `vma::Allocator` from the engine @ref veng::Context.
 	[[nodiscard]] vma::Allocator allocator() const noexcept { return m_context->allocator(); }
 
+	/// @brief The RHI handle registry — resolves an edge's `TextureHandle`/`BufferHandle` to vk objects.
+	/// @return The @ref veng::rhi::Device from the engine @ref veng::Context.
+	[[nodiscard]] rhi::Device& rhi() const noexcept { return m_context->rhi(); }
+
 	/// @brief The in-flight frame slot index for this frame (0..N-1).
 	/// @return The slot index used to select the N-buffered copy of each resource.
 	[[nodiscard]] std::size_t frame_slot() const noexcept { return m_frame_slot; }

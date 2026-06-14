@@ -33,7 +33,7 @@ TEST_CASE("single-buffered ResourcePool reuses one copy every frame", "[resource
 {
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto				ctx = make_context();
-	veng::ResourcePool	pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool	pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	const veng::ImageId id = pool.declare_image(FORMAT, USAGE);
 
 	pool.begin_frame(0);
@@ -52,7 +52,7 @@ TEST_CASE("single-buffered ResourcePool reuses one copy every frame", "[resource
 TEST_CASE("a producer writing every frame settles at frames_in_flight copies", "[resources][pool]")
 {
 	auto				ctx = make_context();
-	veng::ResourcePool	pool(ctx.device(), ctx.allocator(), 2);
+	veng::ResourcePool	pool(ctx.device(), ctx.rhi(), ctx.allocator(), 2);
 	const veng::ImageId id = pool.declare_image(FORMAT, USAGE);
 
 	for (std::uint64_t frame = 0; frame < 6; ++frame)
@@ -68,7 +68,7 @@ TEST_CASE("a producer writing every frame settles at frames_in_flight copies", "
 TEST_CASE("a copy a consumer keeps reading is not recycled when the producer resumes", "[resources][pool]")
 {
 	auto				ctx = make_context();
-	veng::ResourcePool	pool(ctx.device(), ctx.allocator(), 2);
+	veng::ResourcePool	pool(ctx.device(), ctx.rhi(), ctx.allocator(), 2);
 	const veng::ImageId id = pool.declare_image(FORMAT, USAGE);
 
 	// Frame 0: the producer writes copy A; the consumer reads it.
@@ -97,7 +97,7 @@ TEST_CASE("a copy a consumer keeps reading is not recycled when the producer res
 TEST_CASE("a resize reallocates a logical image's copies", "[resources][pool]")
 {
 	auto				ctx = make_context();
-	veng::ResourcePool	pool(ctx.device(), ctx.allocator(), 2);
+	veng::ResourcePool	pool(ctx.device(), ctx.rhi(), ctx.allocator(), 2);
 	const veng::ImageId id = pool.declare_image(FORMAT, USAGE);
 
 	pool.begin_frame(0);
@@ -115,13 +115,13 @@ TEST_CASE("a resize reallocates a logical image's copies", "[resources][pool]")
 TEST_CASE("constant_image allocates one immutable copy that is never recycled", "[resources][pool][constant]")
 {
 	auto			   ctx = make_context();
-	veng::ResourcePool pool(ctx.device(), ctx.allocator(), 2);
+	veng::ResourcePool pool(ctx.device(), ctx.rhi(), ctx.allocator(), 2);
 
 	auto ref_result = pool.constant_image(ctx, vk::Extent2D{1, 1}, FORMAT, {0.0F, 0.0F, 0.0F, 1.0F});
 	REQUIRE(ref_result.has_value());
 	const veng::gpu::ImageRef ref = ref_result.value();
-	REQUIRE(ref.image);
-	REQUIRE(ref.view);
+	REQUIRE(ctx.rhi().image(ref.texture));
+	REQUIRE(ctx.rhi().view(ref.texture));
 	REQUIRE(ref.pool_id != veng::gpu::ImageRef::INVALID_POOL_ID);
 	REQUIRE(pool.image_copy_count(ref.pool_id) == 1);
 
@@ -137,7 +137,7 @@ TEST_CASE("constant_image allocates one immutable copy that is never recycled", 
 TEST_CASE("ResourcePool buffers reuse a copy once retired", "[resources][pool]")
 {
 	auto				 ctx = make_context();
-	veng::ResourcePool	 pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	const veng::BufferId id = pool.declare_buffer(vk::BufferUsageFlagBits::eUniformBuffer);
 
 	pool.begin_frame(0);

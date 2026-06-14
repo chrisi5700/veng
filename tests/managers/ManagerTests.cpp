@@ -41,11 +41,11 @@ TEST_CASE("CommandManager records a command buffer that executes on the GPU", "[
 	veng::Logger::instance().set_level(spdlog::level::warn);
 	auto ctx = make_context();
 
-	constexpr vk::DeviceSize SIZE  = 64;
-	constexpr std::uint32_t	 VALUE = 0x1234ABCDU;
-	auto					 target =
-		veng::Buffer::create(ctx.allocator(), SIZE, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
-							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
+	constexpr vk::DeviceSize SIZE	= 64;
+	constexpr std::uint32_t	 VALUE	= 0x1234ABCDU;
+	auto					 target = veng::Buffer::create(
+		ctx.allocator(), ctx.rhi(), SIZE, vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
+		vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(target.has_value());
 
 	veng::CommandManager commands(ctx);

@@ -9,6 +9,7 @@
 #include <map>
 #include <variant>
 #include <veng/pipelines/GraphicsPipeline.hpp>
+#include <veng/rhi/Convert.hpp>
 
 namespace veng
 {
@@ -72,13 +73,13 @@ GraphicsPipeline::~GraphicsPipeline()
 	destroy();
 }
 
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::color_formats(std::span<const vk::Format> formats)
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::color_formats(std::span<const rhi::Format> formats)
 {
 	m_color_formats.assign(formats.begin(), formats.end());
 	return *this;
 }
 
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::depth_format(vk::Format format)
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::depth_format(rhi::Format format)
 {
 	m_depth_format = format;
 	return *this;
@@ -90,14 +91,20 @@ GraphicsPipelineBuilder& GraphicsPipelineBuilder::depth_write(bool enabled)
 	return *this;
 }
 
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::topology(vk::PrimitiveTopology topology)
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::sample_count(rhi::SampleCount samples)
+{
+	m_samples = samples;
+	return *this;
+}
+
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::topology(rhi::Topology topology)
 {
 	m_topology = topology;
 	return *this;
 }
 
-GraphicsPipelineBuilder& GraphicsPipelineBuilder::rasterization(vk::PolygonMode polygon, vk::CullModeFlags cull,
-																vk::FrontFace front)
+GraphicsPipelineBuilder& GraphicsPipelineBuilder::rasterization(rhi::PolygonMode polygon, rhi::CullMode cull,
+																rhi::FrontFace front)
 {
 	m_polygon	 = polygon;
 	m_cull		 = cull;
@@ -214,17 +221,16 @@ std::expected<GraphicsPipeline, PipelineError> GraphicsPipelineBuilder::build(co
 								  .setVertexBindingDescriptions(vertex_bindings)
 								  .setVertexAttributeDescriptions(vertex_attributes);
 
-	const auto input_assembly = vk::PipelineInputAssemblyStateCreateInfo().setTopology(m_topology);
+	const auto input_assembly = vk::PipelineInputAssemblyStateCreateInfo().setTopology(rhi::to_vk(m_topology));
 	const auto viewport_state = vk::PipelineViewportStateCreateInfo().setViewportCount(1).setScissorCount(1);
 	const auto rasterization  = vk::PipelineRasterizationStateCreateInfo()
-									.setPolygonMode(m_polygon)
-									.setCullMode(m_cull)
-									.setFrontFace(m_front_face)
+									.setPolygonMode(rhi::to_vk(m_polygon))
+									.setCullMode(rhi::to_vk(m_cull))
+									.setFrontFace(rhi::to_vk(m_front_face))
 									.setLineWidth(1.0F);
-	const auto multisample =
-		vk::PipelineMultisampleStateCreateInfo().setRasterizationSamples(vk::SampleCountFlagBits::e1);
+	const auto multisample	  = vk::PipelineMultisampleStateCreateInfo().setRasterizationSamples(rhi::to_vk(m_samples));
 
-	const bool has_depth	 = m_depth_format != vk::Format::eUndefined;
+	const bool has_depth	 = m_depth_format != rhi::Format::UNDEFINED;
 	const auto depth_stencil = vk::PipelineDepthStencilStateCreateInfo()
 								   .setDepthTestEnable(static_cast<vk::Bool32>(has_depth))
 								   .setDepthWriteEnable(static_cast<vk::Bool32>(has_depth && m_depth_write))
@@ -252,11 +258,18 @@ std::expected<GraphicsPipeline, PipelineError> GraphicsPipelineBuilder::build(co
 	const std::array dynamic_states{vk::DynamicState::eViewport, vk::DynamicState::eScissor};
 	const auto		 dynamic_state = vk::PipelineDynamicStateCreateInfo().setDynamicStates(dynamic_states);
 
-	// Dynamic rendering: attachment formats instead of a VkRenderPass (Vulkan 1.3).
-	auto rendering = vk::PipelineRenderingCreateInfo().setColorAttachmentFormats(m_color_formats);
+	// Dynamic rendering: attachment formats instead of a VkRenderPass (Vulkan 1.3). The builder holds
+	// the formats in rhi vocabulary; translate to Vulkan here, at the one point they reach the driver.
+	std::vector<vk::Format> vk_color_formats;
+	vk_color_formats.reserve(m_color_formats.size());
+	for (const rhi::Format format : m_color_formats)
+	{
+		vk_color_formats.push_back(rhi::to_vk(format));
+	}
+	auto rendering = vk::PipelineRenderingCreateInfo().setColorAttachmentFormats(vk_color_formats);
 	if (has_depth)
 	{
-		rendering.setDepthAttachmentFormat(m_depth_format);
+		rendering.setDepthAttachmentFormat(rhi::to_vk(m_depth_format));
 	}
 
 	const auto info = vk::GraphicsPipelineCreateInfo()

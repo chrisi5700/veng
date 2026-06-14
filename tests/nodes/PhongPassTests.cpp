@@ -44,9 +44,9 @@ veng::Context make_context()
 	return std::move(result.value());
 }
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr vk::Format	DEPTH = vk::Format::eD32Sfloat;
-constexpr std::uint32_t SIDE  = 64;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr veng::rhi::Format DEPTH = veng::rhi::Format::D32_SFLOAT;
+constexpr std::uint32_t		SIDE  = 64;
 
 // The engine's standard vertex layout {position, normal, color} that phong.vert reflects.
 struct Vtx
@@ -105,7 +105,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, Graph& graph, Data
 	const vk::Device device = ctx.device();
 
 	auto staging =
-		veng::Buffer::create(ctx.allocator(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
+		veng::Buffer::create(ctx.allocator(), ctx.rhi(), static_cast<vk::DeviceSize>(SIDE) * SIDE * 4,
 							 vk::BufferUsageFlagBits::eTransferDst, vma::MemoryUsage::eAuto,
 							 vma::AllocationCreateFlagBits::eMapped | vma::AllocationCreateFlagBits::eHostAccessRandom);
 	REQUIRE(staging.has_value());
@@ -122,7 +122,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, Graph& graph, Data
 	REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 			vk::Result::eSuccess);
 
-	veng::ResourcePool res_pool(device, ctx.allocator(), 1);
+	veng::ResourcePool res_pool(device, ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::gpu::GpuExecContext gpu_ctx(graph, ctx, res_pool, cmd, 0);
 	InlineScheduler			  scheduler;
@@ -133,7 +133,7 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, Graph& graph, Data
 
 	const auto* ref = dynamic_cast<ValueData<veng::gpu::ImageRef>*>(graph.get_data(scene));
 	REQUIRE(ref != nullptr);
-	REQUIRE(ref->value().image);
+	REQUIRE(ctx.rhi().image(ref->value().texture));
 
 	// The pass leaves its output in eColorAttachmentOptimal; transition the pool copy to
 	// TRANSFER_SRC, copy it out, then host-sync.
@@ -144,7 +144,8 @@ std::array<std::uint8_t, 4> render_center(veng::Context& ctx, Graph& graph, Data
 			.setImageSubresource(
 				vk::ImageSubresourceLayers().setAspectMask(vk::ImageAspectFlagBits::eColor).setLayerCount(1))
 			.setImageExtent(vk::Extent3D{SIDE, SIDE, 1});
-	cmd.copyImageToBuffer(ref->value().image, vk::ImageLayout::eTransferSrcOptimal, staging->buffer(), region);
+	cmd.copyImageToBuffer(ctx.rhi().image(ref->value().texture), vk::ImageLayout::eTransferSrcOptimal,
+						  staging->buffer(), region);
 	cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eHost, {},
 						vk::MemoryBarrier()
 							.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)

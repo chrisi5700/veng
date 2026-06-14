@@ -41,8 +41,8 @@ veng::Context make_context()
 	return std::move(result.value());
 }
 
-constexpr vk::Format	COLOR = vk::Format::eR8G8B8A8Unorm;
-constexpr std::uint32_t SIDE  = 32;
+constexpr veng::rhi::Format COLOR = veng::rhi::Format::RGBA8_UNORM;
+constexpr std::uint32_t		SIDE  = 32;
 } // namespace
 
 TEST_CASE("ScreenshotNode captures a rendered image via on_retired (peer sink, no swapchain)",
@@ -61,8 +61,8 @@ TEST_CASE("ScreenshotNode captures a rendered image via on_retired (peer sink, n
 	const DataHandle shot_done	 = graph.add(std::make_unique<ValueData<int>>(0));
 
 	auto solid = std::make_unique<veng::nodes::GraphicsNode>("demo/fullscreen.vert", "tests/slice/solid.frag", COLOR,
-															 vk::Format::eUndefined, 3, screen, scene_image);
-	solid->push_constant<glm::vec4>(color, vk::ShaderStageFlagBits::eFragment);
+															 veng::rhi::Format::UNDEFINED, 3, screen, scene_image);
+	solid->push_constant<glm::vec4>(color, veng::rhi::ShaderStage::FRAGMENT);
 	graph.set_producer(scene_image, graph.add(std::move(solid)));
 
 	const std::string path = "/tmp/veng_screenshot_test.ppm";
@@ -71,7 +71,7 @@ TEST_CASE("ScreenshotNode captures a rendered image via on_retired (peer sink, n
 	auto* shot_ptr = shot.get();
 	graph.set_producer(shot_done, graph.add(std::move(shot)));
 
-	veng::ResourcePool res_pool(ctx.device(), ctx.allocator(), 1);
+	veng::ResourcePool res_pool(ctx.device(), ctx.rhi(), ctx.allocator(), 1);
 	res_pool.begin_frame(0);
 	veng::CommandManager commands(ctx);
 	InlineScheduler		 scheduler;

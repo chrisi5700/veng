@@ -24,7 +24,9 @@
 #include <veng/pipelines/GraphicsPipeline.hpp>
 #include <veng/rendergraph/data/Data.hpp>
 #include <veng/resources/Image.hpp>
+#include <veng/resources/RenderTargetSet.hpp>
 #include <veng/resources/ResourcePool.hpp>
+#include <veng/rhi/Convert.hpp>
 #include <veng/shader/Shader.hpp>
 
 namespace veng::passes
@@ -48,7 +50,7 @@ static_assert(sizeof(PhongPush) == 160, "PhongPush must match the shader's 160-b
 class PhongRenderNode final : public gpu::GpuNode
 {
 	 public:
-	PhongRenderNode(vk::Format color_format, vk::Format depth_format, graph::DataHandle screen,
+	PhongRenderNode(rhi::Format color_format, rhi::Format depth_format, graph::DataHandle screen,
 					graph::DataHandle output, graph::DataHandle view_proj, graph::DataHandle eye,
 					PhongConfig config) noexcept
 		: m_color_format(color_format)
@@ -101,53 +103,16 @@ class PhongRenderNode final : public gpu::GpuNode
 		const glm::mat4 view_proj = view_proj_d->value();
 		const glm::vec3 eye_pos	  = glm::vec3(eye_d->value());
 
-		// Declare the pool-backed color + depth targets once; acquire this frame's copies.
-		if (!m_declared)
-		{
-			m_color_id = ctx.pool().declare_image(m_color_format, vk::ImageUsageFlagBits::eColorAttachment |
-																	  vk::ImageUsageFlagBits::eTransferSrc |
-																	  vk::ImageUsageFlagBits::eSampled);
-			m_depth_id = ctx.pool().declare_image(m_depth_format, vk::ImageUsageFlagBits::eDepthStencilAttachment,
-												  vk::ImageAspectFlagBits::eDepth);
-			m_declared = true;
-		}
-		auto color = ctx.pool().acquire_image(m_color_id, extent);
-		auto depth = ctx.pool().acquire_image(m_depth_id, extent);
-		if (!color.has_value() || !depth.has_value())
+		// The RenderTargetSet (configured in ensure_pipelines) declares the color + depth targets
+		// once, acquires this frame's copies, and resolves the MSAA attachment when enabled.
+		if (auto acquired = m_targets.acquire(ctx.pool(), extent); !acquired.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
-		Image* const color_image = color.value();
-		Image* const depth_image = depth.value();
+		Image* const color_image = m_targets.color();
 
 		const vk::CommandBuffer cmd = ctx.command_buffer();
-		ctx.pool().transition_image(m_color_id, cmd, vk::ImageLayout::eColorAttachmentOptimal,
-									vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-									vk::AccessFlagBits2::eColorAttachmentWrite);
-		ctx.pool().transition_image(m_depth_id, cmd, vk::ImageLayout::eDepthStencilAttachmentOptimal,
-									vk::PipelineStageFlagBits2::eEarlyFragmentTests,
-									vk::AccessFlagBits2::eDepthStencilAttachmentWrite);
-
-		const auto color_clear		= vk::ClearValue().setColor(vk::ClearColorValue(m_config.clear_color));
-		const auto color_attachment = vk::RenderingAttachmentInfo()
-										  .setImageView(color_image->view())
-										  .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
-										  .setLoadOp(vk::AttachmentLoadOp::eClear)
-										  .setStoreOp(vk::AttachmentStoreOp::eStore)
-										  .setClearValue(color_clear);
-		const auto depth_clear		= vk::ClearValue().setDepthStencil(vk::ClearDepthStencilValue(1.0F, 0));
-		const auto depth_attachment = vk::RenderingAttachmentInfo()
-										  .setImageView(depth_image->view())
-										  .setImageLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-										  .setLoadOp(vk::AttachmentLoadOp::eClear)
-										  .setStoreOp(vk::AttachmentStoreOp::eDontCare)
-										  .setClearValue(depth_clear);
-		const auto rendering		= vk::RenderingInfo()
-										  .setRenderArea(vk::Rect2D({0, 0}, extent))
-										  .setLayerCount(1)
-										  .setColorAttachments(color_attachment)
-										  .setPDepthAttachment(&depth_attachment);
-		cmd.beginRendering(rendering);
+		m_targets.begin(ctx.pool(), cmd, extent, m_config.clear_color);
 		cmd.setViewport(0, vk::Viewport(0.0F, 0.0F, static_cast<float>(extent.width), static_cast<float>(extent.height),
 										0.0F, 1.0F));
 		cmd.setScissor(0, vk::Rect2D({0, 0}, extent));
@@ -175,7 +140,7 @@ class PhongRenderNode final : public gpu::GpuNode
 					return std::unexpected(graph::ExecError::MISSING_INPUT);
 				}
 				const gpu::MeshRef mesh = mesh_d->value();
-				if (!mesh.vertex_buffer)
+				if (!mesh.vertex_buffer.valid())
 				{
 					continue; // mesh not uploaded yet — skip until its MeshNode has produced
 				}
@@ -190,10 +155,10 @@ class PhongRenderNode final : public gpu::GpuNode
 					vk::ArrayProxy<const std::byte>(static_cast<std::uint32_t>(sizeof(PhongPush)),
 													static_cast<const std::byte*>(static_cast<const void*>(&push))));
 				const vk::DeviceSize offset = 0;
-				cmd.bindVertexBuffers(0, mesh.vertex_buffer, offset);
-				if (mesh.index_buffer)
+				cmd.bindVertexBuffers(0, ctx.rhi().buffer(mesh.vertex_buffer), offset);
+				if (mesh.index_buffer.valid())
 				{
-					cmd.bindIndexBuffer(mesh.index_buffer, 0, mesh.index_type);
+					cmd.bindIndexBuffer(ctx.rhi().buffer(mesh.index_buffer), 0, mesh.index_type);
 					cmd.drawIndexed(mesh.index_count, 1, 0, 0, 0);
 				}
 				else
@@ -222,11 +187,11 @@ class PhongRenderNode final : public gpu::GpuNode
 		// Publish the lit-scene ref (version-bumped so consumers see the change). Left in
 		// eColorAttachmentOptimal; the consumer's image_usages drives the transition it needs.
 		m_versioned.publish(ctx, m_output,
-							gpu::ImageRef{.image   = color_image->image(),
-										  .view	   = color_image->view(),
-										  .extent  = extent,
-										  .format  = m_color_format,
-										  .pool_id = m_color_id});
+							gpu::ImageRef{.texture		= color_image->handle(),
+										  .extent		= rhi::to_rhi(extent),
+										  .format		= m_color_format,
+										  .sample_count = rhi::to_rhi(color_image->sample_count()),
+										  .pool_id		= m_targets.color_id()});
 		return true;
 	}
 
@@ -252,13 +217,18 @@ class PhongRenderNode final : public gpu::GpuNode
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
+		// Clamp the requested MSAA to the device and configure the targets + every pipeline with the
+		// same sample count (Vulkan requires the pipeline match its multisampled attachments).
+		const vk::SampleCountFlagBits samples = clamp_sample_count(ctx.context(), rhi::to_vk(m_config.samples));
+		m_targets.configure(rhi::to_vk(m_color_format), rhi::to_vk(m_depth_format), samples);
+
 		const std::array color_formats{m_color_format};
 		// All three pipelines share the shader pair; only cull / depth-write / blend differ.
 		struct PipeState
 		{
-			vk::CullModeFlags cull;
-			bool			  depth_write;
-			bool			  blend;
+			rhi::CullMode cull;
+			bool		  depth_write;
+			bool		  blend;
 		};
 		const auto make = [&](const PipeState& state) -> std::expected<GraphicsPipeline, PipelineError>
 		{
@@ -272,14 +242,15 @@ class PhongRenderNode final : public gpu::GpuNode
 			builder.color_formats(color_formats)
 				.depth_format(m_depth_format)
 				.depth_write(state.depth_write)
-				.rasterization(vk::PolygonMode::eFill, state.cull, vk::FrontFace::eClockwise)
+				.sample_count(rhi::to_rhi(samples))
+				.rasterization(rhi::PolygonMode::FILL, state.cull, rhi::FrontFace::CLOCKWISE)
 				.blend(state.blend);
 			return builder.build(ctx.context());
 		};
 		// front faces, write depth | far faces of glass | near faces of glass
-		auto opaque = make(PipeState{.cull = vk::CullModeFlagBits::eBack, .depth_write = true, .blend = false});
-		auto back	= make(PipeState{.cull = vk::CullModeFlagBits::eFront, .depth_write = false, .blend = true});
-		auto front	= make(PipeState{.cull = vk::CullModeFlagBits::eBack, .depth_write = false, .blend = true});
+		auto opaque = make(PipeState{.cull = rhi::CullMode::BACK, .depth_write = true, .blend = false});
+		auto back	= make(PipeState{.cull = rhi::CullMode::FRONT, .depth_write = false, .blend = true});
+		auto front	= make(PipeState{.cull = rhi::CullMode::BACK, .depth_write = false, .blend = true});
 		if (!opaque.has_value() || !back.has_value() || !front.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);
@@ -290,8 +261,8 @@ class PhongRenderNode final : public gpu::GpuNode
 		return {};
 	}
 
-	vk::Format					   m_color_format;
-	vk::Format					   m_depth_format;
+	rhi::Format					   m_color_format;
+	rhi::Format					   m_depth_format;
 	graph::DataHandle			   m_output;
 	graph::DataHandle			   m_view_proj;
 	graph::DataHandle			   m_eye;
@@ -303,13 +274,11 @@ class PhongRenderNode final : public gpu::GpuNode
 	std::optional<GraphicsPipeline> m_transparent_back;
 	std::optional<GraphicsPipeline> m_transparent_front;
 
-	bool				 m_declared = false;
-	ImageId				 m_color_id = 0;
-	ImageId				 m_depth_id = 0;
+	RenderTargetSet		 m_targets; // color + depth render target, with MSAA resolve when configured
 	gpu::VersionedOutput m_versioned;
 };
 
-PhongPass::PhongPass(graph::Graph& graph, vk::Format color_format, vk::Format depth_format,
+PhongPass::PhongPass(graph::Graph& graph, rhi::Format color_format, rhi::Format depth_format,
 					 graph::TypedHandle<vk::Extent2D> screen, graph::DataHandle output,
 					 graph::TypedHandle<glm::mat4> view_proj, graph::TypedHandle<glm::vec4> eye,
 					 const PhongConfig& config)

@@ -138,7 +138,7 @@ int main()
 		.add_uniform(light_ref)
 		.set_instances_from(instances_ref)
 		.clear_color({0.04F, 0.05F, 0.08F, 1.0F})
-		.push_constant<glm::mat4>(app.view_proj(), vk::ShaderStageFlagBits::eVertex);
+		.push_constant<glm::mat4>(app.view_proj(), veng::rhi::ShaderStage::VERTEX);
 	graph.set_producer(app.scene_image(), graph.add(std::move(cube)));
 
 	// --- Sim thread: 60Hz model-matrix re-upload ------------------------------------

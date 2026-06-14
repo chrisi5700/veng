@@ -334,6 +334,9 @@ std::expected<Context, ContextCreationError> Context::create(
 
 Context::~Context()
 {
+	// The RHI device owns samplers it destroys with m_device, so it must die before m_device does.
+	m_rhi.reset();
+
 	if (m_allocator)
 	{
 		m_allocator.destroy();
@@ -370,6 +373,7 @@ Context::Context(Context&& other) noexcept
 	, m_compute_queue(other.m_compute_queue)
 	, m_allocator(std::exchange(other.m_allocator, nullptr))
 	, m_surface(std::exchange(other.m_surface, nullptr))
+	, m_rhi(std::move(other.m_rhi))
 {
 }
 Context& Context::operator=(Context&& other) noexcept
@@ -377,7 +381,8 @@ Context& Context::operator=(Context&& other) noexcept
 	if (this == &other)
 		return *this;
 
-	// Clean up
+	// Clean up — release the RHI device (and its owned samplers) before m_device is destroyed.
+	m_rhi.reset();
 	if (m_allocator)
 	{
 		m_allocator.destroy();
@@ -406,6 +411,7 @@ Context& Context::operator=(Context&& other) noexcept
 	m_compute_queue	  = other.m_compute_queue;
 	m_allocator		  = std::exchange(other.m_allocator, nullptr);
 	m_surface		  = std::exchange(other.m_surface, nullptr);
+	m_rhi			  = std::move(other.m_rhi);
 	return *this;
 }
 
