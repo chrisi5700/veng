@@ -45,7 +45,8 @@ AppLoop::AppLoop(const AppConfig& config)
 	}
 	m_ctx = std::make_unique<veng::Context>(std::move(ctx_result.value()));
 
-	auto swap_result = veng::SwapchainManager::create(*m_ctx, m_window.framebuffer_extent(), m_config.frames_in_flight);
+	auto swap_result = veng::SwapchainManager::create(*m_ctx, veng::rhi::to_rhi(m_window.framebuffer_extent()),
+													  m_config.frames_in_flight);
 	if (!swap_result.has_value())
 	{
 		throw std::runtime_error("AppLoop: failed to create swapchain");
@@ -58,12 +59,12 @@ AppLoop::AppLoop(const AppConfig& config)
 
 	// The scene renders into a linear-light HDR target when config.hdr is set (resolved to the
 	// swapchain through the tonemap pass below), otherwise straight into the swapchain's format.
-	m_scene_color_format = m_config.hdr ? veng::rhi::Format::RGBA16_SFLOAT : veng::rhi::to_rhi(m_swap->format());
+	m_scene_color_format = m_config.hdr ? veng::rhi::Format::RGBA16_SFLOAT : m_swap->format();
 
 	// --- Sources + frame closer (tonemap? + BlitNode + PresentNode) -------------------
 	using namespace veng::graph;
 
-	m_screen		  = m_graph.add_source<veng::rhi::Extent2D>(veng::rhi::to_rhi(m_swap->extent()));
+	m_screen		  = m_graph.add_source<veng::rhi::Extent2D>(m_swap->extent());
 	m_swapchain_image = m_graph.add_source<veng::gpu::ImageRef>(veng::gpu::ImageRef{});
 	m_scene_image	  = m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	m_presented_image = m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
@@ -80,9 +81,9 @@ AppLoop::AppLoop(const AppConfig& config)
 	{
 		m_tonemapped_image = m_graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 		const TypedHandle<float> exposure = m_graph.add_source<float>(m_config.exposure);
-		auto					 tonemap  = std::make_unique<veng::nodes::GraphicsNode>(
-			"passes/fullscreen.vert", "passes/tonemap.frag", veng::rhi::to_rhi(m_swap->format()),
-			veng::rhi::Format::UNDEFINED, 3, m_screen, m_tonemapped_image);
+		auto tonemap = std::make_unique<veng::nodes::GraphicsNode>("passes/fullscreen.vert", "passes/tonemap.frag",
+																   m_swap->format(), veng::rhi::Format::UNDEFINED, 3,
+																   m_screen, m_tonemapped_image);
 		tonemap->add_sampled_image(m_scene_image, "hdr")
 			.push_constant<float>(exposure, veng::rhi::ShaderStage::FRAGMENT);
 		m_graph.set_producer(m_tonemapped_image, m_graph.add(std::move(tonemap)));
@@ -100,7 +101,7 @@ AppLoop::AppLoop(const AppConfig& config)
 	m_executor = std::make_unique<veng::FrameExecutor>(*m_ctx, *m_swap, *m_pool, *m_commands, m_scheduler,
 													   m_swapchain_image, m_config.frames_in_flight);
 
-	m_camera = std::make_unique<OrbitCamera>(m_graph, m_swap->extent(), m_config.camera_target,
+	m_camera = std::make_unique<OrbitCamera>(m_graph, veng::rhi::to_vk(m_swap->extent()), m_config.camera_target,
 											 m_config.camera_distance, m_config.camera_yaw, m_config.camera_pitch);
 }
 
@@ -115,13 +116,13 @@ AppLoop::~AppLoop()
 void AppLoop::rebuild_swapchain(vk::Extent2D extent)
 {
 	(void)m_ctx->device().waitIdle();
-	if (!m_swap->rebuild(extent).has_value())
+	if (!m_swap->rebuild(veng::rhi::to_rhi(extent)).has_value())
 	{
 		return;
 	}
 	const std::scoped_lock lock(m_graph_mutex);
-	m_graph.set(m_screen, veng::rhi::to_rhi(m_swap->extent()));
-	m_camera->publish(m_swap->extent());
+	m_graph.set(m_screen, m_swap->extent());
+	m_camera->publish(veng::rhi::to_vk(m_swap->extent()));
 }
 
 void AppLoop::run(std::function<void(const veng::graph::FramePlan&)> on_frame, std::function<void()> on_poll)
@@ -160,7 +161,7 @@ void AppLoop::run(std::function<void(const veng::graph::FramePlan&)> on_frame, s
 		if (orbit_step != 0.0F)
 		{
 			const std::scoped_lock lock(m_graph_mutex);
-			m_camera->orbit(orbit_step, m_swap->extent());
+			m_camera->orbit(orbit_step, veng::rhi::to_vk(m_swap->extent()));
 			m_wake.notify_one();
 		}
 
@@ -178,7 +179,7 @@ void AppLoop::run(std::function<void(const veng::graph::FramePlan&)> on_frame, s
 
 		{
 			const std::scoped_lock lock(m_graph_mutex);
-			if (m_camera->tick(m_window, m_swap->extent()))
+			if (m_camera->tick(m_window, veng::rhi::to_vk(m_swap->extent())))
 			{
 				m_wake.notify_one();
 			}

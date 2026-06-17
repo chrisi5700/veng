@@ -61,8 +61,8 @@
 #include <veng/rendergraph/RenderGraphCommon.hpp>
 #include <veng/resources/Image.hpp>
 #include <veng/resources/RenderTargetSet.hpp>
-#include <veng/rhi/SamplerDesc.hpp>
 #include <veng/rhi/Enums.hpp>
+#include <veng/rhi/SamplerDesc.hpp>
 #include <veng/shader/Shader.hpp>
 
 namespace veng::nodes
@@ -397,6 +397,23 @@ class GraphicsNode final : public gpu::GpuNode
 	}
 
 	/**
+	 * @brief Enable straight-alpha blending on this pass's color output.
+	 *
+	 * Off by default (writes overwrite). Enable for passes that composite over existing
+	 * contents — sprite/text/UI layers, glow overlays. Call before the first record (the
+	 * pipeline is built lazily on first record).
+	 *
+	 * @param enabled `true` to enable alpha blending, `false` to overwrite.
+	 * @return `*this` for chaining.
+	 */
+	GraphicsNode& blend(bool enabled) noexcept
+	{
+		m_blend = enabled;
+		mark_dirty();
+		return *this;
+	}
+
+	/**
 	 * @brief Enable or disable depth writes for this pass.
 	 *
 	 * Depth writes are on by default when a depth format is configured. Disable for debug
@@ -552,8 +569,9 @@ class GraphicsNode final : public gpu::GpuNode
 	std::vector<SampledBinding>		m_sampled_images;  ///< Descriptor-bound sampled-image edges.
 	std::array<float, 4>			m_clear_color{0.0F, 0.0F, 0.0F, 1.0F};
 	rhi::Topology					m_topology	  = rhi::Topology::TRIANGLE_LIST;
-	bool							m_depth_write = true; ///< Depth writes enabled (when depth attached).
-	std::optional<GraphicsPipeline> m_pipeline;			  ///< Built lazily on first record.
+	bool							m_depth_write = true;  ///< Depth writes enabled (when depth attached).
+	bool							m_blend		  = false; ///< Straight-alpha blending on the color output.
+	std::optional<GraphicsPipeline> m_pipeline;			   ///< Built lazily on first record.
 
 	/// Byte stride of vertex binding 0, reflected from the vertex shader at pipeline build.
 	/// Empty when the shader declares no vertex inputs (the `SV_VertexID` fullscreen path).
@@ -572,7 +590,7 @@ class GraphicsNode final : public gpu::GpuNode
 	std::vector<rhi::BindGroup>		   m_bind_groups; ///< One per frame slot, allocated lazily.
 	std::vector<std::vector<rhi::BindGroupEntry>>
 					   m_cached_entries; ///< Last-written entries per slot; a rewrite happens only when these change.
-	rhi::SamplerDesc m_sampler_config; ///< How the lazy sampler is configured (default: render target).
+	rhi::SamplerDesc   m_sampler_config; ///< How the lazy sampler is configured (default: render target).
 	rhi::SamplerHandle m_sampler_handle; ///< Device-owned sampler; created lazily when there are sampled images.
 
 	/// Targets live in the engine's @ref veng::ResourcePool (N-buffered) via @ref veng::RenderTargetSet,

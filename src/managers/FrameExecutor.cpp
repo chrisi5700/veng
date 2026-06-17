@@ -89,8 +89,8 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 	// and we leak acquired images (vkAcquireNextImageKHR eventually deadlocks at UINT64_MAX
 	// because every swap image is already acquired).
 	const gpu::ImageRef ref{.texture = m_swap->texture_handle(frame.image_index),
-							.extent	 = rhi::to_rhi(m_swap->extent()),
-							.format	 = rhi::to_rhi(m_swap->format()),
+							.extent	 = m_swap->extent(),
+							.format	 = m_swap->format(),
 							.version = m_frame_index};
 
 	if (pacing == Pacing::OnDemand)

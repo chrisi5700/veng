@@ -24,6 +24,7 @@
 #include <optional>
 #include <vector>
 #include <veng/context/Context.hpp>
+#include <veng/rhi/Convert.hpp>
 #include <vulkan/vulkan.hpp>
 
 namespace veng
@@ -58,8 +59,9 @@ class SwapchainManager
 	 * @param frames_in_flight Number of in-flight frame slots (defaults to 1).
 	 * @return A ready manager, or a `vk::Result` error on failure.
 	 */
-	[[nodiscard]] static std::expected<SwapchainManager, vk::Result> create(const Context& context, vk::Extent2D extent,
-																			std::size_t frames_in_flight = 1);
+	[[nodiscard]] static std::expected<SwapchainManager, vk::Result> create(const Context& context,
+																			rhi::Extent2D  extent,
+																			std::size_t	   frames_in_flight = 1);
 
 	SwapchainManager(const SwapchainManager&)			 = delete;
 	SwapchainManager& operator=(const SwapchainManager&) = delete;
@@ -68,9 +70,9 @@ class SwapchainManager
 	~SwapchainManager();
 
 	/** @return The current swapchain extent in pixels. */
-	[[nodiscard]] vk::Extent2D extent() const noexcept { return m_extent; }
+	[[nodiscard]] rhi::Extent2D extent() const noexcept { return rhi::to_rhi(m_extent); }
 	/** @return The swapchain surface format. */
-	[[nodiscard]] vk::Format format() const noexcept { return m_format; }
+	[[nodiscard]] rhi::Format format() const noexcept { return rhi::to_rhi(m_format); }
 	/**
 	 * @brief Return the swapchain `vk::Image` at @p index.
 	 * @param index Swapchain image index as returned by `acquire`.
@@ -121,7 +123,7 @@ class SwapchainManager
 	 * @param extent The new swapchain extent in pixels.
 	 * @return `void` on success, or a `vk::Result` error.
 	 */
-	[[nodiscard]] std::expected<void, vk::Result> rebuild(vk::Extent2D extent);
+	[[nodiscard]] std::expected<void, vk::Result> rebuild(rhi::Extent2D extent);
 
 	 private:
 	SwapchainManager(const Context& context, std::size_t frames_in_flight) noexcept;

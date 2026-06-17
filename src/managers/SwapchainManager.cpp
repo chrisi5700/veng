@@ -30,11 +30,11 @@ SwapchainManager::SwapchainManager(const Context& context, std::size_t frames_in
 {
 }
 
-std::expected<SwapchainManager, vk::Result> SwapchainManager::create(const Context& context, vk::Extent2D extent,
+std::expected<SwapchainManager, vk::Result> SwapchainManager::create(const Context& context, rhi::Extent2D extent,
 																	 std::size_t frames_in_flight)
 {
 	SwapchainManager manager(context, frames_in_flight);
-	if (auto built = manager.build_swapchain(extent, nullptr); !built.has_value())
+	if (auto built = manager.build_swapchain(rhi::to_vk(extent), nullptr); !built.has_value())
 	{
 		return std::unexpected(built.error());
 	}
@@ -184,10 +184,10 @@ std::expected<bool, vk::Result> SwapchainManager::present(vk::Queue queue, std::
 	return false;
 }
 
-std::expected<void, vk::Result> SwapchainManager::rebuild(vk::Extent2D extent)
+std::expected<void, vk::Result> SwapchainManager::rebuild(rhi::Extent2D extent)
 {
 	const vk::SwapchainKHR old	 = m_swapchain;
-	auto				   built = build_swapchain(extent, old);
+	auto				   built = build_swapchain(rhi::to_vk(extent), old);
 	if (built.has_value() && old)
 	{
 		m_device.destroySwapchainKHR(old);

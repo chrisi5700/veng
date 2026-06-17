@@ -76,13 +76,18 @@ target_include_directories(veng_gpu INTERFACE ${veng_SOURCE_DIR}/include)
 # L2.4 device-side managers — command pools (per queue/slot/thread) + the windowed
 # swapchain (over vk-bootstrap) + the per-frame FrameExecutor driving the GPU loop.
 target_add_library(veng_managers)
-target_sources(veng_managers PRIVATE managers/CommandManager.cpp managers/SwapchainManager.cpp managers/FrameExecutor.cpp)
+target_sources(veng_managers PRIVATE managers/CommandManager.cpp managers/SwapchainManager.cpp managers/FrameExecutor.cpp managers/HeadlessExecutor.cpp)
 target_link_libraries(veng_managers PUBLIC veng_context veng_gpu PRIVATE vk-bootstrap::vk-bootstrap)
 
-# L4 nodes — concrete GPU graph nodes for the rendering slice.
+# L4 nodes — concrete GPU graph nodes for the rendering slice. ScreenshotNode encodes PNG via
+# stb_image_write (its own impl TU below); stb is header-only so we put its include on this target.
+find_package(Stb REQUIRED)
 target_add_library(veng_nodes)
-target_sources(veng_nodes PRIVATE nodes/BlitNode.cpp nodes/PresentNode.cpp nodes/GraphicsNode.cpp nodes/MeshNode.cpp nodes/DynamicMeshNode.cpp nodes/UniformNode.cpp nodes/StorageBufferNode.cpp nodes/ScreenshotNode.cpp nodes/MeshSelectorNode.cpp nodes/CoverageLodNode.cpp)
+target_sources(veng_nodes PRIVATE nodes/BlitNode.cpp nodes/PresentNode.cpp nodes/GraphicsNode.cpp nodes/MeshNode.cpp nodes/DynamicMeshNode.cpp nodes/UniformNode.cpp nodes/StorageBufferNode.cpp nodes/ScreenshotNode.cpp nodes/StbWriteImpl.cpp nodes/MeshSelectorNode.cpp nodes/CoverageLodNode.cpp)
 target_link_libraries(veng_nodes PUBLIC veng_gpu veng_pipelines veng_managers veng_descriptors)
+target_include_directories(veng_nodes PRIVATE ${Stb_INCLUDE_DIR})
+# stb_image_write is third-party and not -Wall/-Werror clean; silence warnings for its one impl TU.
+set_source_files_properties(nodes/StbWriteImpl.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
 # Clustered-shading culling math — pure glm, no Vulkan (unit-tests on the CPU without a device, the
 # same discipline as veng_render_graph). Froxel AABB build + light-to-cluster assignment; the graph

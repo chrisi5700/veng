@@ -10,8 +10,8 @@
  * in-flight fence has signalled, guaranteeing the staging buffer is fully populated. The driver
  * never special-cases screenshots; the same mechanism would carry a video-encode sink.
  *
- * File format: PPM (P6 binary RGB), no external library required. Input is assumed to be RGBA8;
- * RGB is written and the alpha channel is dropped.
+ * File format (@ref veng::nodes::ImageFormat): PNG by default (RGBA8 via stb_image_write), or PPM
+ * (P6 binary RGB, no library, alpha dropped). Input is assumed to be RGBA8.
  *
  * @ingroup graph_nodes
  * @see PresentNode
@@ -22,6 +22,7 @@
 #define VENG_SCREENSHOTNODE_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <optional>
 #include <span>
@@ -36,9 +37,16 @@
 
 namespace veng::nodes
 {
+/// @brief On-disk format @ref ScreenshotNode writes. @ingroup graph_nodes
+enum class ImageFormat : std::uint8_t
+{
+	Ppm, ///< P6 binary RGB, no external library; alpha dropped.
+	Png	 ///< RGBA8 PNG via stb_image_write (the default).
+};
+
 /**
- * @brief Concrete @ref veng::gpu::GpuNode and @ref veng::gpu::Sink that reads back a rendered image and writes a PPM
- * file.
+ * @brief Concrete @ref veng::gpu::GpuNode and @ref veng::gpu::Sink that reads back a rendered image and writes it to
+ * disk (PNG or PPM).
  *
  * @ingroup graph_nodes
  * @see PresentNode
@@ -56,15 +64,17 @@ class ScreenshotNode final : public gpu::GpuNode, public gpu::Sink
 	 *
 	 * @param source  Data handle for the source @ref veng::gpu::ImageRef edge (must be in `TRANSFER_SRC`).
 	 * @param output  Data handle for the done-token sink.
-	 * @param path    Filesystem path at which the PPM file will be written.
+	 * @param path    Filesystem path at which the image file will be written.
+	 * @param format  On-disk @ref ImageFormat (default: PNG).
 	 */
-	ScreenshotNode(graph::DataHandle source, graph::DataHandle output, std::string path) noexcept;
+	ScreenshotNode(graph::DataHandle source, graph::DataHandle output, std::string path,
+				   ImageFormat format = ImageFormat::Png) noexcept;
 
 	[[nodiscard]] std::span<const graph::DataHandle> inputs() const override { return {&m_input, 1}; }
 	[[nodiscard]] std::span<const graph::DataHandle> outputs() const override { return {&m_output, 1}; }
 
 	/**
-	 * @brief Number of PPM files this node has successfully written.
+	 * @brief Number of image files this node has successfully written.
 	 *
 	 * Useful as a test lens: a value that does not advance after a capture request indicates
 	 * a failed file write.
@@ -82,6 +92,7 @@ class ScreenshotNode final : public gpu::GpuNode, public gpu::Sink
 	graph::DataHandle	  m_input;
 	graph::DataHandle	  m_output;
 	std::string			  m_path;
+	ImageFormat			  m_format;
 	std::optional<Buffer> m_staging;
 	rhi::Extent2D		  m_extent{};
 	bool				  m_pending_write = false;

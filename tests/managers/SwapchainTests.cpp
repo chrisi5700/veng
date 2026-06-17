@@ -17,7 +17,7 @@
 
 namespace
 {
-constexpr vk::Extent2D START{64, 64};
+constexpr veng::rhi::Extent2D START{64, 64};
 } // namespace
 
 TEST_CASE("SwapchainManager builds a headless swapchain with images", "[managers][swapchain][headless]")
@@ -29,7 +29,7 @@ TEST_CASE("SwapchainManager builds a headless swapchain with images", "[managers
 	REQUIRE(swap.has_value());
 	REQUIRE(swap->extent().width == START.width);
 	REQUIRE(swap->extent().height == START.height);
-	REQUIRE(swap->format() != vk::Format::eUndefined);
+	REQUIRE(swap->format() != veng::rhi::Format::UNDEFINED);
 	REQUIRE(swap->image(0)); // at least one swapchain image was retrieved
 }
 
@@ -57,7 +57,7 @@ TEST_CASE("SwapchainManager rebuilds at a new extent", "[managers][swapchain][he
 	REQUIRE(swap.has_value());
 
 	REQUIRE(ctx.device().waitIdle() == vk::Result::eSuccess);
-	const vk::Extent2D bigger{128, 96};
+	const veng::rhi::Extent2D bigger{128, 96};
 	REQUIRE(swap->rebuild(bigger).has_value());
 	REQUIRE(swap->extent().width == bigger.width);
 	REQUIRE(swap->extent().height == bigger.height);

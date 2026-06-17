@@ -6,6 +6,7 @@
  */
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <span>
 #include <utility>
@@ -86,6 +87,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		builder.color_formats(color_formats)
 			.topology(m_topology)
 			.sample_count(samples)
+			.blend(m_blend)
 			.rasterization(rhi::PolygonMode::FILL, rhi::CullMode::NONE, rhi::FrontFace::COUNTER_CLOCKWISE);
 		if (has_depth)
 		{
@@ -97,6 +99,34 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
 		m_pipeline = std::move(pipeline.value());
+
+#ifndef NDEBUG
+		// Catch a push_constant<T> whose byte range overruns the shader's reflected push-constant
+		// block — the silent struct mismatch (a uniforms struct disagreeing with the shader's
+		// PushData) that otherwise strides garbage into the draw. The reflected block is the larger
+		// of the two stages' blocks (a single block may be declared by only one stage). Debug-only.
+		std::size_t reflected_block = 0;
+		if (const auto& vpc = vert.value().get_push_constant_info(); vpc.has_value())
+		{
+			reflected_block = vpc->offset + vpc->size;
+		}
+		if (const auto& fpc = frag.value().get_push_constant_info();
+			fpc.has_value() && fpc->offset + fpc->size > reflected_block)
+		{
+			reflected_block = fpc->offset + fpc->size;
+		}
+		if (reflected_block > 0)
+		{
+			for (const Draw& draw : m_draws)
+			{
+				for (const PushBinding& push : draw.push_constants)
+				{
+					assert(static_cast<std::size_t>(push.offset) + push.size <= reflected_block &&
+						   "push_constant<T> overruns the shader's reflected push-constant block");
+				}
+			}
+		}
+#endif
 
 		// Remember each descriptor by its reflected name (binding + type), so add_uniform /
 		// add_sampled_image edges can be matched to a binding by name and written with the

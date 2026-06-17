@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <stb_image_write.h>
+#include <string>
 #include <utility>
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/nodes/ScreenshotNode.hpp>
@@ -16,10 +18,34 @@
 
 namespace veng::nodes
 {
-ScreenshotNode::ScreenshotNode(graph::DataHandle source, graph::DataHandle output, std::string path) noexcept
+namespace
+{
+// Write RGBA8 `pixels` as a P6 binary PPM (RGB, alpha dropped). Returns false on a file error.
+bool write_ppm(const std::string& path, std::uint32_t width, std::uint32_t height, const std::uint8_t* pixels)
+{
+	std::FILE* file = std::fopen(path.c_str(), "wb");
+	if (file == nullptr)
+	{
+		return false;
+	}
+	(void)std::fprintf(file, "P6\n%u %u\n255\n", width, height);
+	for (std::uint32_t i = 0; i < width * height; ++i)
+	{
+		(void)std::fputc(static_cast<int>(pixels[(i * 4) + 0]), file);
+		(void)std::fputc(static_cast<int>(pixels[(i * 4) + 1]), file);
+		(void)std::fputc(static_cast<int>(pixels[(i * 4) + 2]), file);
+	}
+	(void)std::fclose(file);
+	return true;
+}
+} // namespace
+
+ScreenshotNode::ScreenshotNode(graph::DataHandle source, graph::DataHandle output, std::string path,
+							   ImageFormat format) noexcept
 	: m_input(source)
 	, m_output(output)
 	, m_path(std::move(path))
+	, m_format(format)
 {
 }
 
@@ -75,28 +101,30 @@ std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext
 
 void ScreenshotNode::on_retired(gpu::SubmitContext& /*ctx*/) noexcept
 {
-	// The slot's fence has signalled by the time the driver calls this, so the staging buffer
-	// is fully populated. Write a PPM (P6 binary RGB), dropping alpha. Errors are swallowed —
-	// a failed file write is logged through capture_count not advancing.
+	// The slot's fence has signalled by the time the driver calls this, so the staging buffer is
+	// fully populated. Write the file in the configured format. Errors are swallowed — a failed
+	// write surfaces through capture_count not advancing.
 	if (!m_pending_write || !m_staging.has_value())
 	{
 		return;
 	}
-	m_pending_write = false;
-	std::FILE* file = std::fopen(m_path.c_str(), "wb");
-	if (file == nullptr)
-	{
-		return;
-	}
-	(void)std::fprintf(file, "P6\n%u %u\n255\n", m_extent.width, m_extent.height);
+	m_pending_write	   = false;
 	const auto* pixels = static_cast<const std::uint8_t*>(m_staging->mapped());
-	for (std::uint32_t i = 0; i < m_extent.width * m_extent.height; ++i)
+
+	bool ok = false;
+	if (m_format == ImageFormat::Png)
 	{
-		(void)std::fputc(static_cast<int>(pixels[(i * 4) + 0]), file);
-		(void)std::fputc(static_cast<int>(pixels[(i * 4) + 1]), file);
-		(void)std::fputc(static_cast<int>(pixels[(i * 4) + 2]), file);
+		// RGBA8 straight through — stb encodes the alpha channel too.
+		ok = stbi_write_png(m_path.c_str(), static_cast<int>(m_extent.width), static_cast<int>(m_extent.height), 4,
+							pixels, static_cast<int>(m_extent.width) * 4) != 0;
 	}
-	(void)std::fclose(file);
-	++m_capture_count;
+	else
+	{
+		ok = write_ppm(m_path, m_extent.width, m_extent.height, pixels);
+	}
+	if (ok)
+	{
+		++m_capture_count;
+	}
 }
 } // namespace veng::nodes

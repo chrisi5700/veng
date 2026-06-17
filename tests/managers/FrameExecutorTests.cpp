@@ -34,8 +34,8 @@ using namespace veng::graph;
 
 namespace
 {
-constexpr vk::Extent2D EXTENT{64, 64};
-constexpr std::size_t  FIF = 2;
+constexpr veng::rhi::Extent2D EXTENT{64, 64};
+constexpr std::size_t		  FIF = 2;
 } // namespace
 
 TEST_CASE("FrameExecutor drives the headless frame loop", "[managers][frameexecutor][headless]")
@@ -53,7 +53,7 @@ TEST_CASE("FrameExecutor drives the headless frame loop", "[managers][frameexecu
 	// Frame tail: screen-sized triangle -> scene image -> blit into the acquired swapchain image
 	// (left in PRESENT_SRC) -> present. The swapchain source is fed by the executor each frame.
 	Graph			 graph;
-	auto			 screen			 = graph.add_source<veng::rhi::Extent2D>(veng::rhi::to_rhi(swap.extent()));
+	auto			 screen			 = graph.add_source<veng::rhi::Extent2D>(swap.extent());
 	auto			 swapchain_image = graph.add_source<veng::gpu::ImageRef>(veng::gpu::ImageRef{});
 	const DataHandle scene_image = graph.add(std::make_unique<ValueData<veng::gpu::ImageRef>>(veng::gpu::ImageRef{}));
 	const DataHandle presented_image =
@@ -61,8 +61,8 @@ TEST_CASE("FrameExecutor drives the headless frame loop", "[managers][frameexecu
 	const DataHandle frame_done = graph.add(std::make_unique<ValueData<int>>(0));
 
 	auto raster = std::make_unique<veng::nodes::GraphicsNode>("tests/slice/triangle.vert", "tests/slice/triangle.frag",
-															  veng::rhi::to_rhi(swap.format()),
-															  veng::rhi::Format::UNDEFINED, 3, screen, scene_image);
+															  swap.format(), veng::rhi::Format::UNDEFINED, 3, screen,
+															  scene_image);
 	graph.set_producer(scene_image, graph.add(std::move(raster)));
 
 	auto blit = std::make_unique<veng::nodes::BlitNode>(scene_image, swapchain_image, presented_image,
