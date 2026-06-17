@@ -12,6 +12,7 @@
 #include <utility>
 #include <veng/nodes/CoverageLodNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rendergraph/Resolve.hpp>
 
 namespace veng::nodes
 {
@@ -26,10 +27,10 @@ CoverageLodNode::CoverageLodNode(graph::DataHandle view, graph::DataHandle proj,
 
 std::expected<bool, graph::ExecError> CoverageLodNode::execute(graph::ExecContext& ctx)
 {
-	auto* view	 = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(m_inputs[0]));
-	auto* proj	 = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(m_inputs[1]));
-	auto* sphere = dynamic_cast<graph::ValueData<glm::vec4>*>(ctx.data(m_inputs[2]));
-	auto* out	 = dynamic_cast<graph::ValueData<std::uint32_t>*>(ctx.data(m_output));
+	auto* view	 = graph::resolve<glm::mat4>(ctx, m_inputs[0]);
+	auto* proj	 = graph::resolve<glm::mat4>(ctx, m_inputs[1]);
+	auto* sphere = graph::resolve<glm::vec4>(ctx, m_inputs[2]);
+	auto* out	 = graph::resolve<std::uint32_t>(ctx, m_output);
 	if (view == nullptr || proj == nullptr || sphere == nullptr || out == nullptr)
 	{
 		return std::unexpected(graph::ExecError::MISSING_INPUT);

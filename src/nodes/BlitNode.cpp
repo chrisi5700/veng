@@ -9,6 +9,7 @@
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/nodes/BlitNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rendergraph/Resolve.hpp>
 
 namespace veng::nodes
 {
@@ -25,7 +26,7 @@ std::vector<gpu::ImageUsage> BlitNode::image_usages(graph::ExecContext& ctx)
 	// Read-side dependency for the executor: the source must be in TRANSFER_SRC before the blit
 	// runs. The destination is the swapchain (or a test-owned image) — not pool-backed — and is
 	// transitioned manually in record(), because nothing else in the engine tracks its layout.
-	const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[0]));
+	const auto* src = graph::resolve<gpu::ImageRef>(ctx, m_inputs[0]);
 	if (src == nullptr || src->value().pool_id == gpu::ImageRef::INVALID_POOL_ID)
 	{
 		return {};
@@ -35,9 +36,9 @@ std::vector<gpu::ImageUsage> BlitNode::image_usages(graph::ExecContext& ctx)
 
 std::expected<bool, graph::ExecError> BlitNode::record(gpu::GpuExecContext& ctx)
 {
-	const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[0]));
-	const auto* dst = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[1]));
-	auto*		out = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_output));
+	const auto* src = graph::resolve<gpu::ImageRef>(ctx, m_inputs[0]);
+	const auto* dst = graph::resolve<gpu::ImageRef>(ctx, m_inputs[1]);
+	auto*		out = graph::resolve<gpu::ImageRef>(ctx, m_output);
 	if (src == nullptr || dst == nullptr || out == nullptr)
 	{
 		return std::unexpected(graph::ExecError::MISSING_INPUT);

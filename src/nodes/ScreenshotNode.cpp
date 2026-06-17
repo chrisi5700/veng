@@ -11,6 +11,7 @@
 #include <veng/gpu/ImageRef.hpp>
 #include <veng/nodes/ScreenshotNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rendergraph/Resolve.hpp>
 #include <veng/rhi/Convert.hpp>
 
 namespace veng::nodes
@@ -25,7 +26,7 @@ ScreenshotNode::ScreenshotNode(graph::DataHandle source, graph::DataHandle outpu
 std::vector<gpu::ImageUsage> ScreenshotNode::image_usages(graph::ExecContext& ctx)
 {
 	// Read-side dependency for the executor: copyImageToBuffer needs the source in TRANSFER_SRC.
-	const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));
+	const auto* src = graph::resolve<gpu::ImageRef>(ctx, m_input);
 	if (src == nullptr || src->value().pool_id == gpu::ImageRef::INVALID_POOL_ID)
 	{
 		return {};
@@ -35,7 +36,7 @@ std::vector<gpu::ImageUsage> ScreenshotNode::image_usages(graph::ExecContext& ct
 
 std::expected<bool, graph::ExecError> ScreenshotNode::record(gpu::GpuExecContext& ctx)
 {
-	const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));
+	const auto* src = graph::resolve<gpu::ImageRef>(ctx, m_input);
 	if (src == nullptr)
 	{
 		return std::unexpected(graph::ExecError::MISSING_INPUT);

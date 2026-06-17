@@ -23,6 +23,7 @@
 #include <veng/passes/PhongPass.hpp>
 #include <veng/pipelines/GraphicsPipeline.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rendergraph/Resolve.hpp>
 #include <veng/resources/Image.hpp>
 #include <veng/resources/RenderTargetSet.hpp>
 #include <veng/resources/ResourcePool.hpp>
@@ -83,7 +84,7 @@ class PhongRenderNode final : public gpu::GpuNode
 			return std::unexpected(built.error());
 		}
 
-		const auto* size = dynamic_cast<graph::ValueData<rhi::Extent2D>*>(ctx.data(m_inputs[0]));
+		const auto* size = graph::resolve<rhi::Extent2D>(ctx, m_inputs[0]);
 		if (size == nullptr)
 		{
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -94,8 +95,8 @@ class PhongRenderNode final : public gpu::GpuNode
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
 
-		const auto* view_proj_d = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(m_view_proj));
-		const auto* eye_d		= dynamic_cast<graph::ValueData<glm::vec4>*>(ctx.data(m_eye));
+		const auto* view_proj_d = graph::resolve<glm::mat4>(ctx, m_view_proj);
+		const auto* eye_d		= graph::resolve<glm::vec4>(ctx, m_eye);
 		if (view_proj_d == nullptr || eye_d == nullptr)
 		{
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -131,8 +132,8 @@ class PhongRenderNode final : public gpu::GpuNode
 				{
 					continue;
 				}
-				const auto* model_d = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(obj.model));
-				const auto* mesh_d	= dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(obj.mesh));
+				const auto* model_d = graph::resolve<glm::mat4>(ctx, obj.model);
+				const auto* mesh_d	= graph::resolve<gpu::MeshRef>(ctx, obj.mesh);
 				if (model_d == nullptr || mesh_d == nullptr)
 				{
 					return std::unexpected(graph::ExecError::MISSING_INPUT);

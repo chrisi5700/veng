@@ -17,6 +17,7 @@
 #include <veng/gpu/UniformRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/nodes/GraphicsNode.hpp>
+#include <veng/rendergraph/Resolve.hpp>
 #include <veng/rhi/Convert.hpp>
 #include <veng/shader/Shader.hpp>
 
@@ -45,7 +46,7 @@ std::vector<gpu::ImageUsage> GraphicsNode::image_usages(graph::ExecContext& ctx)
 	usages.reserve(m_sampled_images.size());
 	for (const SampledBinding& binding : m_sampled_images)
 	{
-		const auto* slot = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[binding.input_index]));
+		const auto* slot = graph::resolve<gpu::ImageRef>(ctx, m_inputs[binding.input_index]);
 		if (slot == nullptr)
 		{
 			continue;
@@ -139,7 +140,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		m_sampler_handle = sampler.value();
 	}
 
-	const auto* size = dynamic_cast<graph::ValueData<rhi::Extent2D>*>(ctx.data(m_inputs[0]));
+	const auto* size = graph::resolve<rhi::Extent2D>(ctx, m_inputs[0]);
 	if (size == nullptr)
 	{
 		return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -162,7 +163,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				continue;
 			}
-			const auto* mesh_data = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(*draw.mesh));
+			const auto* mesh_data = graph::resolve<gpu::MeshRef>(ctx, *draw.mesh);
 			if (mesh_data == nullptr)
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -231,7 +232,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 
 		for (const graph::DataHandle handle : m_uniforms)
 		{
-			const auto* uniform = dynamic_cast<graph::ValueData<gpu::UniformRef>*>(ctx.data(handle));
+			const auto* uniform = graph::resolve<gpu::UniformRef>(ctx, handle);
 			if (uniform == nullptr)
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -254,7 +255,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		// set_instances_from). The shader sees the raw array; std430 layout is the contract.
 		for (const graph::DataHandle handle : m_storage_buffers)
 		{
-			const auto* storage = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(handle));
+			const auto* storage = graph::resolve<gpu::BufferRef>(ctx, handle);
 			if (storage == nullptr)
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -273,9 +274,8 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 
 		for (const SampledBinding& binding : m_sampled_images)
 		{
-			const auto* sampled =
-				dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_inputs[binding.input_index]));
-			const auto it = m_descriptors_by_name.find(binding.name);
+			const auto* sampled = graph::resolve<gpu::ImageRef>(ctx, m_inputs[binding.input_index]);
+			const auto	it		= m_descriptors_by_name.find(binding.name);
 			if (sampled == nullptr)
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -344,7 +344,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 		std::uint32_t instance_count = draw.instance_count;
 		if (draw.instance_count_source.has_value())
 		{
-			const auto* slot = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(*draw.instance_count_source));
+			const auto* slot = graph::resolve<gpu::BufferRef>(ctx, *draw.instance_count_source);
 			if (slot == nullptr)
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -358,7 +358,7 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 
 		if (draw.mesh.has_value())
 		{
-			const auto* mesh_data = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(*draw.mesh));
+			const auto* mesh_data = graph::resolve<gpu::MeshRef>(ctx, *draw.mesh);
 			if (mesh_data == nullptr)
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);

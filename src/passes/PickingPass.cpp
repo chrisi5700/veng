@@ -24,6 +24,7 @@
 #include <veng/nodes/GraphicsNode.hpp>
 #include <veng/passes/PickingPass.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rendergraph/Resolve.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/ResourcePool.hpp>
 #include <veng/rhi/Convert.hpp>
@@ -72,7 +73,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 	{
 		// Read-side dependency for the executor: copyImageToBuffer needs the source in
 		// TRANSFER_SRC. Same contract as ScreenshotNode.
-		const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));
+		const auto* src = graph::resolve<gpu::ImageRef>(ctx, m_input);
 		if (src == nullptr || src->value().pool_id == gpu::ImageRef::INVALID_POOL_ID)
 		{
 			return {};
@@ -82,7 +83,7 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 
 	std::expected<bool, graph::ExecError> record(gpu::GpuExecContext& ctx) override
 	{
-		const auto* src = dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_input));
+		const auto* src = graph::resolve<gpu::ImageRef>(ctx, m_input);
 		if (src == nullptr)
 		{
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -120,8 +121,8 @@ class PickingReadbackNode final : public gpu::GpuNode, public gpu::Sink
 			static_cast<std::uint64_t>(image.extent.width) * image.extent.height * bytes_per_pixel;
 		if (!s.staging.has_value() || s.staging->size() < size)
 		{
-			auto buf = Buffer::create(ctx.rhi(), size, rhi::BufferUsageFlags::TRANSFER_DST,
-									  rhi::MemoryAccess::HOST_VISIBLE);
+			auto buf =
+				Buffer::create(ctx.rhi(), size, rhi::BufferUsageFlags::TRANSFER_DST, rhi::MemoryAccess::HOST_VISIBLE);
 			if (!buf.has_value() || buf->mapped() == nullptr)
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED);

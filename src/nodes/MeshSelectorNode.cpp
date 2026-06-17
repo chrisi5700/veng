@@ -9,6 +9,7 @@
 #include <veng/gpu/MeshRef.hpp>
 #include <veng/nodes/MeshSelectorNode.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rendergraph/Resolve.hpp>
 
 namespace veng::nodes
 {
@@ -28,15 +29,15 @@ std::expected<bool, graph::ExecError> MeshSelectorNode::execute(graph::ExecConte
 	{
 		return std::unexpected(graph::ExecError::NODE_FAILED);
 	}
-	auto* level_slot = dynamic_cast<graph::ValueData<std::uint32_t>*>(ctx.data(m_inputs.back()));
-	auto* out		 = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(m_output));
+	auto* level_slot = graph::resolve<std::uint32_t>(ctx, m_inputs.back());
+	auto* out		 = graph::resolve<gpu::MeshRef>(ctx, m_output);
 	if (level_slot == nullptr || out == nullptr)
 	{
 		return std::unexpected(graph::ExecError::MISSING_INPUT);
 	}
 	// Clamp defensively: a metric node should already keep level in range, but never index past the set.
 	const std::uint32_t level	  = std::min(level_slot->value(), m_mesh_count - 1);
-	auto*				mesh_slot = dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(m_inputs[level]));
+	auto*				mesh_slot = graph::resolve<gpu::MeshRef>(ctx, m_inputs[level]);
 	if (mesh_slot == nullptr)
 	{
 		return std::unexpected(graph::ExecError::MISSING_INPUT);

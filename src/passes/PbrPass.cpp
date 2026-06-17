@@ -31,6 +31,7 @@
 #include <veng/passes/PbrPass.hpp>
 #include <veng/pipelines/GraphicsPipeline.hpp>
 #include <veng/rendergraph/data/Data.hpp>
+#include <veng/rendergraph/Resolve.hpp>
 #include <veng/resources/Image.hpp>
 #include <veng/resources/RenderTargetSet.hpp>
 #include <veng/resources/ResourcePool.hpp>
@@ -152,7 +153,7 @@ class PbrRenderNode final : public gpu::GpuNode
 			return std::unexpected(built.error());
 		}
 
-		const auto* size = dynamic_cast<graph::ValueData<rhi::Extent2D>*>(ctx.data(m_inputs[0]));
+		const auto* size = graph::resolve<rhi::Extent2D>(ctx, m_inputs[0]);
 		if (size == nullptr)
 		{
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -163,8 +164,8 @@ class PbrRenderNode final : public gpu::GpuNode
 			return std::unexpected(graph::ExecError::NODE_FAILED);
 		}
 
-		const auto* view_proj_d = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(m_view_proj));
-		const auto* eye_d		= dynamic_cast<graph::ValueData<glm::vec4>*>(ctx.data(m_eye));
+		const auto* view_proj_d = graph::resolve<glm::mat4>(ctx, m_view_proj);
+		const auto* eye_d		= graph::resolve<glm::vec4>(ctx, m_eye);
 		if (view_proj_d == nullptr || eye_d == nullptr)
 		{
 			return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -197,7 +198,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		glm::vec4  cluster_params = glm::vec4(0.0F);
 		if (m_clustered)
 		{
-			const auto* view_d = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(m_cluster_view));
+			const auto* view_d = graph::resolve<glm::mat4>(ctx, m_cluster_view);
 			if (view_d == nullptr)
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -267,8 +268,8 @@ class PbrRenderNode final : public gpu::GpuNode
 		const auto draw_object = [&](const Object&			 obj,
 									 const GraphicsPipeline& pipe) -> std::expected<void, graph::ExecError>
 		{
-			const auto* model_d = dynamic_cast<graph::ValueData<glm::mat4>*>(ctx.data(obj.model));
-			const auto* mesh_d	= dynamic_cast<graph::ValueData<gpu::MeshRef>*>(ctx.data(obj.mesh));
+			const auto* model_d = graph::resolve<glm::mat4>(ctx, obj.model);
+			const auto* mesh_d	= graph::resolve<gpu::MeshRef>(ctx, obj.mesh);
 			if (model_d == nullptr || mesh_d == nullptr)
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -371,9 +372,9 @@ class PbrRenderNode final : public gpu::GpuNode
 	// The buffers bound to the three light-SSBO bindings (7,8,9) this frame, with their byte ranges.
 	struct LightBuffers
 	{
-		rhi::BufferHandle			  lights;
-		rhi::BufferHandle			  grid;
-		rhi::BufferHandle			  index;
+		rhi::BufferHandle			 lights;
+		rhi::BufferHandle			 grid;
+		rhi::BufferHandle			 index;
 		std::array<std::uint64_t, 3> sizes; // lights, grid, index
 	};
 
@@ -385,7 +386,7 @@ class PbrRenderNode final : public gpu::GpuNode
 		std::array<rhi::BufferHandle*, 3>	   targets{&out.lights, &out.grid, &out.index};
 		for (std::size_t i = 0; i < handles.size(); ++i)
 		{
-			const auto* ref = dynamic_cast<graph::ValueData<gpu::BufferRef>*>(ctx.data(handles[i]));
+			const auto* ref = graph::resolve<gpu::BufferRef>(ctx, handles[i]);
 			if (ref == nullptr || !ref->value().buffer.valid())
 			{
 				return std::unexpected(graph::ExecError::MISSING_INPUT);
@@ -535,8 +536,7 @@ class PbrRenderNode final : public gpu::GpuNode
 
 			for (std::size_t t = 0; t < TEXTURE_COUNT; ++t)
 			{
-				const auto* slot_data =
-					dynamic_cast<graph::ValueData<gpu::ImageRef>*>(ctx.data(m_materials[m].textures[t]));
+				const auto* slot_data = graph::resolve<gpu::ImageRef>(ctx, m_materials[m].textures[t]);
 				if (slot_data == nullptr || !slot_data->value().texture.valid())
 				{
 					return std::unexpected(graph::ExecError::MISSING_INPUT); // every material slot needs a texture
