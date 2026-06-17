@@ -361,6 +361,12 @@ class Shader
 	~Shader();
 
 	 private:
+	/// @brief Core compile path: load/link/reflect @p name through @p session and create its module on
+	///        @p device. The public overloads select the session (a Context's search paths, or veng's
+	///        own default) and delegate here.
+	static std::expected<Shader, std::string> create_shader(vk::Device device, slang::ISession* session,
+															std::string_view name, std::string_view entry_point);
+
 	Shader(const vk::Device& m_device, const vk::ShaderModule& m_shader_module, vk::ShaderStageFlagBits m_stage,
 		   ShaderDetails details, const std::vector<DescriptorInfo>& m_descriptor_infos,
 		   std::optional<PushConstantInfo> push_constant_info, std::string entry_point);

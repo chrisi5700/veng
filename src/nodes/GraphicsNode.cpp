@@ -70,8 +70,8 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 	// as a node failure (the frame is dropped, the node stays dirty and retries).
 	if (!m_pipeline.has_value())
 	{
-		auto vert = Shader::create_shader(ctx.rhi(), m_vertex_shader);
-		auto frag = Shader::create_shader(ctx.rhi(), m_fragment_shader);
+		auto vert = Shader::create_shader(ctx.context(), m_vertex_shader);
+		auto frag = Shader::create_shader(ctx.context(), m_fragment_shader);
 		if (!vert.has_value() || !frag.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);

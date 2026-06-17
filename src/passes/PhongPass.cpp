@@ -209,8 +209,8 @@ class PhongRenderNode final : public gpu::GpuNode
 		{
 			return {};
 		}
-		auto vert = Shader::create_shader(ctx.rhi(), "passes/phong.vert");
-		auto frag = Shader::create_shader(ctx.rhi(), "passes/phong.frag");
+		auto vert = Shader::create_shader(ctx.context(), "passes/phong.vert");
+		auto frag = Shader::create_shader(ctx.context(), "passes/phong.frag");
 		if (!vert.has_value() || !frag.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);

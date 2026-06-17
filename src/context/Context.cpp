@@ -117,7 +117,8 @@ void destroy_debug_messenger(vk::Instance instance, vk::DebugUtilsMessengerEXT m
 
 std::expected<Context, ContextCreationError> Context::create(
 	std::string_view title, std::span<const char* const> instance_extensions,
-	const std::function<VkSurfaceKHR(VkInstance)>& surface_factory)
+	const std::function<VkSurfaceKHR(VkInstance)>& surface_factory,
+	std::span<const std::string_view>			   shader_search_paths)
 {
 	// vk-bootstrap owns the handles until we hand them to Context; these guards
 	// tear them back down if we bail out part-way through.
@@ -321,6 +322,14 @@ std::expected<Context, ContextCreationError> Context::create(
 	instance_guard.armed = false;
 	device_guard.armed	 = false;
 	surface_guard.armed	 = false;
+
+	std::vector<std::string> owned_paths;
+	owned_paths.reserve(shader_search_paths.size());
+	for (std::string_view path : shader_search_paths)
+	{
+		owned_paths.emplace_back(path);
+	}
+
 	return Context{vk::Instance(vkb_instance.instance),
 				   vk::DebugUtilsMessengerEXT(vkb_instance.debug_messenger),
 				   vk::PhysicalDevice(vkb_physical.physical_device),
@@ -329,12 +338,78 @@ std::expected<Context, ContextCreationError> Context::create(
 				   vk::Queue(graphics_queue.value()),
 				   vk::Queue(compute_queue.value()),
 				   allocator,
-				   surface};
+				   surface,
+				   std::move(owned_paths),
+				   true};
+}
+
+std::expected<Context, ContextCreationError> Context::adopt(vk::Instance instance, vk::PhysicalDevice physical_device,
+															vk::Device device, vk::Queue graphics_queue,
+															std::uint32_t					  graphics_family,
+															std::span<const std::string_view> shader_search_paths)
+{
+	if (!instance || !physical_device || !device || !graphics_queue)
+	{
+		Logger::instance().error("Context::adopt called with a null Vulkan handle");
+		return std::unexpected(DeviceCreationError{vk::Result::eErrorInitializationFailed});
+	}
+
+	// veng issues every vulkan.hpp call through its own dynamic dispatcher, so it must be initialised
+	// against the adopted instance/device. If a veng-created Context already bootstrapped the loader
+	// in this process the proc-addr fp is set; otherwise load it from the Vulkan library. The host
+	// (e.g. Qt) loads Vulkan separately — this dispatcher is veng's own, independent of the host's.
+	if (VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr == nullptr)
+	{
+		static vk::detail::DynamicLoader loader;
+		VULKAN_HPP_DEFAULT_DISPATCHER.init(loader.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
+	}
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(instance);
+	VULKAN_HPP_DEFAULT_DISPATCHER.init(device);
+
+	// veng creates only what it owns on the borrowed device: the VMA allocator (and, in the Context
+	// ctor, the rhi::Device). The destructor frees only those — never the adopted instance/device.
+	vma::VulkanFunctions	 functions = vma::functionsFromDispatcher(VULKAN_HPP_DEFAULT_DISPATCHER);
+	vma::AllocatorCreateInfo allocator_info{};
+	allocator_info.physicalDevice	= physical_device;
+	allocator_info.device			= device;
+	allocator_info.instance			= instance;
+	allocator_info.vulkanApiVersion = VK_API_VERSION_1_3;
+	allocator_info.pVulkanFunctions = &functions;
+
+	vma::Allocator allocator;
+	if (auto result = vma::createAllocator(&allocator_info, &allocator); result != vk::Result::eSuccess)
+	{
+		Logger::instance().error("Context::adopt: failed to create VMA allocator: {}", vk::to_string(result));
+		return std::unexpected(AllocatorCreationError{result});
+	}
+	Logger::instance().debug("Context::adopt: created VMA allocator on the adopted device");
+
+	std::vector<std::string> owned_paths;
+	owned_paths.reserve(shader_search_paths.size());
+	for (std::string_view path : shader_search_paths)
+	{
+		owned_paths.emplace_back(path);
+	}
+
+	// Graphics queue doubles as compute; no debug messenger or surface is veng-owned on the adopt path.
+	const QueueFamilyIndices indices{.graphics = graphics_family, .compute = graphics_family};
+	return Context{instance,
+				   vk::DebugUtilsMessengerEXT{},
+				   physical_device,
+				   indices,
+				   device,
+				   graphics_queue,
+				   graphics_queue,
+				   allocator,
+				   vk::SurfaceKHR{},
+				   std::move(owned_paths),
+				   /*owns_instance=*/false};
 }
 
 Context::~Context()
 {
-	// The RHI device owns samplers it destroys with m_device, so it must die before m_device does.
+	// veng-owned no matter how the context was built: the RHI device owns samplers it destroys with
+	// m_device, so it must die before m_device might; the allocator is veng-created on m_device too.
 	m_rhi.reset();
 
 	if (m_allocator)
@@ -343,24 +418,29 @@ Context::~Context()
 		Logger::instance().trace("Destroyed VMA allocator");
 	}
 
-	if (m_device)
+	// The instance/device/surface are only veng's to tear down on the create() path. On the adopt()
+	// path the host (e.g. Qt) owns them and outlives this context, so veng must leave them alone.
+	if (m_owns_instance)
 	{
-		m_device.destroy();
-		Logger::instance().trace("Destroyed logical device");
-	}
+		if (m_device)
+		{
+			m_device.destroy();
+			Logger::instance().trace("Destroyed logical device");
+		}
 
-	if (m_surface)
-	{
-		m_instance.destroySurfaceKHR(m_surface);
-		Logger::instance().trace("Destroyed surface");
-	}
+		if (m_surface)
+		{
+			m_instance.destroySurfaceKHR(m_surface);
+			Logger::instance().trace("Destroyed surface");
+		}
 
-	destroy_debug_messenger(m_instance, m_debug_messenger);
+		destroy_debug_messenger(m_instance, m_debug_messenger);
 
-	if (m_instance)
-	{
-		m_instance.destroy();
-		Logger::instance().trace("Destroyed instance");
+		if (m_instance)
+		{
+			m_instance.destroy();
+			Logger::instance().trace("Destroyed instance");
+		}
 	}
 }
 Context::Context(Context&& other) noexcept
@@ -373,6 +453,8 @@ Context::Context(Context&& other) noexcept
 	, m_compute_queue(other.m_compute_queue)
 	, m_allocator(std::exchange(other.m_allocator, nullptr))
 	, m_surface(std::exchange(other.m_surface, nullptr))
+	, m_shader_search_paths(std::move(other.m_shader_search_paths))
+	, m_owns_instance(other.m_owns_instance)
 	, m_rhi(std::move(other.m_rhi))
 {
 }
@@ -381,37 +463,43 @@ Context& Context::operator=(Context&& other) noexcept
 	if (this == &other)
 		return *this;
 
-	// Clean up — release the RHI device (and its owned samplers) before m_device is destroyed.
+	// Clean up — release veng-owned objects (RHI device + its samplers, then the allocator) always;
+	// the instance/device/surface only when this context owns them (not on the adopt() path).
 	m_rhi.reset();
 	if (m_allocator)
 	{
 		m_allocator.destroy();
 	}
-	if (m_device)
+	if (m_owns_instance)
 	{
-		m_device.destroy();
-	}
-	if (m_surface)
-	{
-		m_instance.destroySurfaceKHR(m_surface);
-	}
-	destroy_debug_messenger(m_instance, m_debug_messenger);
-	if (m_instance)
-	{
-		m_instance.destroy();
+		if (m_device)
+		{
+			m_device.destroy();
+		}
+		if (m_surface)
+		{
+			m_instance.destroySurfaceKHR(m_surface);
+		}
+		destroy_debug_messenger(m_instance, m_debug_messenger);
+		if (m_instance)
+		{
+			m_instance.destroy();
+		}
 	}
 
 	// Steal
-	m_instance		  = std::exchange(other.m_instance, nullptr);
-	m_debug_messenger = std::exchange(other.m_debug_messenger, nullptr);
-	m_physical_device = other.m_physical_device;
-	m_queue_indices	  = other.m_queue_indices;
-	m_device		  = std::exchange(other.m_device, nullptr);
-	m_graphics_queue  = other.m_graphics_queue;
-	m_compute_queue	  = other.m_compute_queue;
-	m_allocator		  = std::exchange(other.m_allocator, nullptr);
-	m_surface		  = std::exchange(other.m_surface, nullptr);
-	m_rhi			  = std::move(other.m_rhi);
+	m_instance			  = std::exchange(other.m_instance, nullptr);
+	m_debug_messenger	  = std::exchange(other.m_debug_messenger, nullptr);
+	m_physical_device	  = other.m_physical_device;
+	m_queue_indices		  = other.m_queue_indices;
+	m_device			  = std::exchange(other.m_device, nullptr);
+	m_graphics_queue	  = other.m_graphics_queue;
+	m_compute_queue		  = other.m_compute_queue;
+	m_allocator			  = std::exchange(other.m_allocator, nullptr);
+	m_surface			  = std::exchange(other.m_surface, nullptr);
+	m_shader_search_paths = std::move(other.m_shader_search_paths);
+	m_owns_instance		  = other.m_owns_instance;
+	m_rhi				  = std::move(other.m_rhi);
 	return *this;
 }
 

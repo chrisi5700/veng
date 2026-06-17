@@ -18,10 +18,13 @@
 #ifndef VENG_CONTEXT_HPP
 #define VENG_CONTEXT_HPP
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 #include <veng/rhi/Device.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
 #include <vulkan/vulkan.hpp>
@@ -72,12 +75,43 @@ class Context
 	 *                             (empty for headless).
 	 * @param surface_factory      Callable that creates a `VkSurfaceKHR` from the instance
 	 *                             (empty for headless).
+	 * @param shader_search_paths  Extra directories the Slang compiler searches for shader modules,
+	 *                             in addition to veng's own shipped shaders (which are always
+	 *                             searched first). This is how a downstream consumer points
+	 *                             @ref veng::Shader::create_shader at its own `.slang` files.
 	 * @return A fully initialised @ref veng::Context, or a @ref ContextCreationError variant
 	 *         identifying which creation step failed.
 	 */
 	static std::expected<Context, ContextCreationError> create(
 		std::string_view title, std::span<const char* const> instance_extensions = {},
-		const std::function<VkSurfaceKHR(VkInstance)>& surface_factory = {});
+		const std::function<VkSurfaceKHR(VkInstance)>& surface_factory	   = {},
+		std::span<const std::string_view>			   shader_search_paths = {});
+
+	/**
+	 * @brief Adopt a Vulkan instance + device owned by a host framework (e.g. Qt's `QVulkanWindow`).
+	 *
+	 * Wraps externally-created Vulkan objects instead of creating its own: veng builds only the
+	 * resources it owns — the VMA allocator and the @ref veng::rhi::Device registry — on the borrowed
+	 * @p device, and its destructor frees *only those*, never the adopted instance/device (the host
+	 * keeps owning those). The graphics queue doubles as the compute queue (the common case for an
+	 * embedded surface owned by the host). The host is responsible for having requested every device
+	 * feature/extension veng needs (dynamic rendering, synchronization2, …) when it created @p device.
+	 *
+	 * No surface is owned here: a host that drives its own presentation (Qt owns the swapchain)
+	 * renders veng's frame into an offscreen target and blits it into the host's image — so no
+	 * @ref veng::rhi::Swapchain is involved on the adopt path.
+	 *
+	 * @param instance             The host-owned `vk::Instance`.
+	 * @param physical_device      The physical device the host selected.
+	 * @param device               The host-owned logical `vk::Device` (not destroyed by veng).
+	 * @param graphics_queue       A graphics-capable queue on @p device (also used for compute).
+	 * @param graphics_family      The queue family index @p graphics_queue belongs to.
+	 * @param shader_search_paths  Extra Slang shader search directories (see @ref create).
+	 * @return A Context borrowing the host's instance/device, or a @ref ContextCreationError.
+	 */
+	static std::expected<Context, ContextCreationError> adopt(
+		vk::Instance instance, vk::PhysicalDevice physical_device, vk::Device device, vk::Queue graphics_queue,
+		std::uint32_t graphics_family, std::span<const std::string_view> shader_search_paths = {});
 	~Context();
 
 	Context(const Context&)			   = delete;
@@ -103,6 +137,8 @@ class Context
 	[[nodiscard]] vk::SurfaceKHR surface() const { return m_surface; }
 	/** @return The RHI handle registry (texture/buffer handle ↔ vk-object indirection). */
 	[[nodiscard]] rhi::Device& rhi() const noexcept { return *m_rhi; }
+	/** @return The extra Slang shader search directories this context was created with. */
+	[[nodiscard]] std::span<const std::string> shader_search_paths() const noexcept { return m_shader_search_paths; }
 
 	/**
 	 * @brief Execute GPU work synchronously on the graphics queue.
@@ -120,7 +156,8 @@ class Context
 	 private:
 	Context(vk::Instance m_instance, vk::DebugUtilsMessengerEXT m_debug_messenger, vk::PhysicalDevice m_physical_device,
 			QueueFamilyIndices m_queue_indices, vk::Device m_device, vk::Queue m_graphics_queue,
-			vk::Queue m_compute_queue, vma::Allocator m_allocator, vk::SurfaceKHR m_surface)
+			vk::Queue m_compute_queue, vma::Allocator m_allocator, vk::SurfaceKHR m_surface,
+			std::vector<std::string> shader_search_paths, bool owns_instance)
 		: m_instance(m_instance)
 		, m_debug_messenger(m_debug_messenger)
 		, m_physical_device(m_physical_device)
@@ -130,6 +167,8 @@ class Context
 		, m_compute_queue(m_compute_queue)
 		, m_allocator(m_allocator)
 		, m_surface(m_surface)
+		, m_shader_search_paths(std::move(shader_search_paths))
+		, m_owns_instance(owns_instance)
 	{
 		m_rhi = std::make_unique<rhi::Device>(m_device, m_allocator, m_graphics_queue, m_queue_indices.graphics);
 		Logger::instance().info("VulkanContext VK_HEADER_VERSION: {}", VK_HEADER_VERSION);
@@ -143,7 +182,12 @@ class Context
 	vk::Queue				   m_graphics_queue;
 	vk::Queue				   m_compute_queue;
 	vma::Allocator			   m_allocator;
-	vk::SurfaceKHR			   m_surface; ///< Null for headless; owned and destroyed before the instance.
+	vk::SurfaceKHR			   m_surface;			  ///< Null for headless; owned and destroyed before the instance.
+	std::vector<std::string>   m_shader_search_paths; ///< Extra Slang shader search dirs (see @ref create).
+	/// Whether this context owns its instance/device (the @ref create path) or borrows them from a host
+	/// (the @ref adopt path). Gates whether the destructor tears the instance/device/surface down — the
+	/// VMA allocator and @ref veng::rhi::Device are veng-created either way and always freed.
+	bool m_owns_instance = true;
 	/// The RHI device (handle registry + resource/command factory). Declared last so it is destroyed
 	/// FIRST — its owned vk objects (created textures/buffers, sampler, command pool, fence) are freed
 	/// while the borrowed `vk::Device`/allocator above are still alive.

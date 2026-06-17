@@ -407,8 +407,8 @@ class PbrRenderNode final : public gpu::GpuNode
 		{
 			return {};
 		}
-		auto vert = Shader::create_shader(ctx.rhi(), "passes/pbr.vert");
-		auto frag = Shader::create_shader(ctx.rhi(), "passes/pbr.frag");
+		auto vert = Shader::create_shader(ctx.context(), "passes/pbr.vert");
+		auto frag = Shader::create_shader(ctx.context(), "passes/pbr.frag");
 		if (!vert.has_value() || !frag.has_value())
 		{
 			return std::unexpected(graph::ExecError::NODE_FAILED);

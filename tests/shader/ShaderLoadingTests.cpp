@@ -1,5 +1,10 @@
+#include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
 #include <map>
+#include <string>
+#include <string_view>
 #include <veng/context/Context.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/shader/Shader.hpp>
@@ -640,4 +645,53 @@ TEST_CASE("Invalid shader fails gracefully", "[shader][loading][error]")
 		REQUIRE(!result.has_value());
 		REQUIRE(!result.error().empty());
 	}
+}
+
+// --- Custom shader search path (the downstream-consumer story) -----------------------------------
+// A Context created with extra shader search paths must resolve modules from those paths by name —
+// this is what lets a library built on veng (geng) load its own .slang files through create_shader,
+// instead of being limited to veng's shipped shaders. veng's own SHADER_DIR stays searched first.
+TEST_CASE("create_shader resolves modules from a Context's custom search path", "[shader][loading][searchpath]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+
+	namespace fs	   = std::filesystem;
+	const fs::path dir = fs::temp_directory_path() / "veng_custom_shader_search";
+	fs::remove_all(dir);
+	fs::create_directories(dir);
+	{
+		std::ofstream out(dir / "geng_custom.slang");
+		out << "struct VOut { float4 pos : SV_Position; };\n"
+			   "[shader(\"vertex\")]\n"
+			   "VOut main(uint vid : SV_VertexID)\n"
+			   "{\n"
+			   "    VOut o;\n"
+			   "    o.pos = float4(0.0, 0.0, 0.0, 1.0);\n"
+			   "    return o;\n"
+			   "}\n";
+	}
+
+	const std::string					  dir_str = dir.string();
+	const std::array<std::string_view, 1> search_paths{dir_str};
+
+	SECTION("a custom-path context loads a shader living only in that path — and veng's own still load")
+	{
+		auto ctx_res = veng::Context::create("Custom Shader Path", {}, {}, search_paths);
+		REQUIRE(ctx_res.has_value());
+		auto& ctx = ctx_res.value();
+
+		// Resolved by name from the custom directory.
+		REQUIRE(veng::Shader::create_shader(ctx, "geng_custom").has_value());
+		// veng's shipped shaders still resolve through the same context (SHADER_DIR is searched first).
+		REQUIRE(veng::Shader::create_shader(ctx, "tests/loading/vertex/simple_vert").has_value());
+	}
+
+	SECTION("a context without that path cannot find the custom shader")
+	{
+		auto ctx_res = veng::Context::create("Default Shader Path");
+		REQUIRE(ctx_res.has_value());
+		REQUIRE_FALSE(veng::Shader::create_shader(ctx_res.value(), "geng_custom").has_value());
+	}
+
+	fs::remove_all(dir);
 }

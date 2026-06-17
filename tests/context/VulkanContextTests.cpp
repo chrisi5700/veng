@@ -198,3 +198,39 @@ TEST_CASE("Context::create reports a null surface from the factory, not a crash"
 	REQUIRE_FALSE(ctx.has_value());
 	REQUIRE(std::holds_alternative<SurfaceCreationError>(ctx.error()));
 }
+
+// --- Context::adopt -----------------------------------------------------------------------------
+// adopt() wraps a host-owned instance/device (the Qt / embedder path). It must (1) produce a working
+// context on the *borrowed* device and (2) free only what it created — never the adopted handles. We
+// stand in for the host with a veng-created Context, adopt its handles, exercise the adopted context,
+// then destroy it and prove the original is still usable. A teardown of the shared instance/device
+// would be a double-free / use-after-free the gate's ASan would flag.
+TEST_CASE("Context::adopt borrows a host device without owning it", "[vulkan][adopt]")
+{
+	veng::Logger::instance().set_level(spdlog::level::err);
+
+	auto host_res = veng::Context::create("Adopt Host");
+	REQUIRE(host_res.has_value());
+	veng::Context& host = host_res.value();
+
+	{
+		auto adopted_res = veng::Context::adopt(host.instance(), host.physical_device(), host.device(),
+												host.graphics_queue(), host.queue_indices().graphics);
+		REQUIRE(adopted_res.has_value());
+		veng::Context& adopted = adopted_res.value();
+
+		// Shares the host device, but owns its own allocator + rhi registry: allocate a texture
+		// through it to prove both are live on the borrowed device.
+		auto tex = adopted.rhi().create_texture({.extent = {16, 16},
+												 .format = veng::rhi::Format::RGBA8_UNORM,
+												 .usage	 = veng::rhi::TextureUsageFlags::COLOR_ATTACHMENT});
+		REQUIRE(tex.has_value());
+		adopted.rhi().destroy_texture(tex.value());
+
+		// And a trivial submit on the borrowed graphics queue.
+		REQUIRE(adopted.immediate_submit([](vk::CommandBuffer) {}) == vk::Result::eSuccess);
+	} // adopted destructs here: frees only its allocator/rhi, leaving the host instance/device intact.
+
+	// The host device survived the adopted context's teardown — still usable.
+	REQUIRE(host.immediate_submit([](vk::CommandBuffer) {}) == vk::Result::eSuccess);
+}

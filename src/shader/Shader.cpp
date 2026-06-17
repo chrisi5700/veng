@@ -6,7 +6,10 @@
  * @ingroup shaders
  */
 #include <map>
+#include <mutex>
 #include <slang-com-ptr.h>
+#include <span>
+#include <string>
 #include <veng/common.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/shader/Shader.hpp>
@@ -30,7 +33,8 @@ Slang::ComPtr<slang::IGlobalSession> create_global_session()
 	return session;
 }
 
-Slang::ComPtr<slang::ISession> create_spirv_session(slang::IGlobalSession* global)
+Slang::ComPtr<slang::ISession> create_spirv_session(slang::IGlobalSession*		 global,
+													std::span<const std::string> extra_search_paths)
 {
 	slang::SessionDesc session_desc = {};
 
@@ -40,21 +44,51 @@ Slang::ComPtr<slang::ISession> create_spirv_session(slang::IGlobalSession* globa
 	session_desc.targets		  = &target_desc;
 	session_desc.targetCount	  = 1;
 
-	const char* search_paths[]	 = {SHADER_DIR};
-	session_desc.searchPaths	 = search_paths;
-	session_desc.searchPathCount = 1;
+	// veng's own SHADER_DIR is always searched first, so its shipped shaders resolve and cannot be
+	// shadowed by name; the consumer's directories (from the owning Context) follow. Slang copies the
+	// path strings into the session, so the borrowed `const char*`s only need to live for this call.
+	std::vector<const char*> search_paths;
+	search_paths.reserve(extra_search_paths.size() + 1);
+	search_paths.push_back(SHADER_DIR);
+	for (const std::string& path : extra_search_paths)
+	{
+		search_paths.push_back(path.c_str());
+	}
+	session_desc.searchPaths	 = search_paths.data();
+	session_desc.searchPathCount = static_cast<SlangInt>(search_paths.size());
 
 	Slang::ComPtr<slang::ISession> session;
 	global->createSession(session_desc, session.writeRef());
-	Logger::instance().debug("Created SPIR-V session with search path: {}", SHADER_DIR);
+	Logger::instance().debug("Created SPIR-V session with {} search path(s)", search_paths.size());
 	return session;
 }
 
-slang::ISession* get_session()
+/// Resolve (lazily creating + caching) the Slang session for a given set of extra search paths. The
+/// global session is process-wide; the per-search-path ISession carries the search paths, so one is
+/// kept per distinct path set (keyed by the joined paths) — a single windowed app has exactly one.
+/// Shader compilation can run on graph worker threads, so the cache is mutex-guarded.
+slang::ISession* get_session(std::span<const std::string> extra_search_paths)
 {
-	static Slang::ComPtr<slang::IGlobalSession> global	= create_global_session();
-	static Slang::ComPtr<slang::ISession>		session = create_spirv_session(global);
-	return session.get();
+	static Slang::ComPtr<slang::IGlobalSession>					 global = create_global_session();
+	static std::mutex											 mutex;
+	static std::map<std::string, Slang::ComPtr<slang::ISession>> sessions;
+
+	std::string key;
+	for (const std::string& path : extra_search_paths)
+	{
+		key += path;
+		key.push_back('\n'); // separator keeps {"a","bc"} distinct from {"ab","c"}
+	}
+
+	const std::scoped_lock lock(mutex);
+	if (auto it = sessions.find(key); it != sessions.end())
+	{
+		return it->second.get();
+	}
+	Slang::ComPtr<slang::ISession> session = create_spirv_session(global, extra_search_paths);
+	slang::ISession*			   raw	   = session.get();
+	sessions.emplace(std::move(key), std::move(session));
+	return raw;
 }
 
 // ============================================================================
@@ -75,12 +109,12 @@ std::optional<std::string> check_diagnostics(slang::IBlob* diagnostics)
 
 /// Load a shader module and find the specified entry point.
 /// Creates a composite component type combining module + entry point.
-std::expected<Slang::ComPtr<slang::IComponentType>, std::string> load_shader_program(std::string_view name,
+std::expected<Slang::ComPtr<slang::IComponentType>, std::string> load_shader_program(slang::ISession* session,
+																					 std::string_view name,
 																					 std::string_view entry_point)
 {
 	Logger::instance().debug("Loading shader module '{}' with entry point '{}'", name, entry_point);
 
-	auto*						session = get_session();
 	Slang::ComPtr<slang::IBlob> diagnostics;
 
 	Slang::ComPtr<slang::IModule> module(session->loadModule(name.data(), diagnostics.writeRef()));
@@ -913,13 +947,13 @@ vk::ShaderStageFlagBits ShaderDetails::stage() const
 // Main shader abstraction. Loads, compiles, and extracts reflection data.
 // ============================================================================
 
-std::expected<Shader, std::string> Shader::create_shader(vk::Device device, std::string_view name,
-														 std::string_view entry_point)
+std::expected<Shader, std::string> Shader::create_shader(vk::Device device, slang::ISession* session,
+														 std::string_view name, std::string_view entry_point)
 {
 	Logger::instance().info("Creating shader '{}':'{}'", name, entry_point);
 
-	auto linked =
-		load_shader_program(name, entry_point).and_then([](auto prog) { return link_program(std::move(prog)); });
+	auto linked = load_shader_program(session, name, entry_point)
+					  .and_then([](auto prog) { return link_program(std::move(prog)); });
 
 	if (!linked)
 	{
@@ -950,16 +984,26 @@ std::expected<Shader, std::string> Shader::create_shader(vk::Device device, std:
 	return Shader{device, *module, stage, details, descriptors, push_constants, std::string{entry_point}};
 }
 
+std::expected<Shader, std::string> Shader::create_shader(vk::Device device, std::string_view name,
+														 std::string_view entry_point)
+{
+	// No owning Context here, so only veng's own shipped shaders are reachable (the default session).
+	return create_shader(device, get_session({}), name, entry_point);
+}
+
 std::expected<Shader, std::string> Shader::create_shader(const Context& context, std::string_view name,
 														 std::string_view entry_point)
 {
-	return create_shader(context.device(), name, entry_point);
+	// Route through the session built from this context's search paths — this is what lets a downstream
+	// consumer load its own shaders by name (e.g. a 2D library's `sprite.slang`).
+	return create_shader(context.device(), get_session(context.shader_search_paths()), name, entry_point);
 }
 
 std::expected<Shader, std::string> Shader::create_shader(rhi::Device& rhi, std::string_view name,
 														 std::string_view entry_point)
 {
-	return create_shader(rhi.device(), name, entry_point);
+	// The rhi::Device carries no search paths; prefer the Context overload for custom shaders.
+	return create_shader(rhi.device(), get_session({}), name, entry_point);
 }
 
 const std::vector<DescriptorInfo>& Shader::get_descriptor_infos() const
