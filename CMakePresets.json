@@ -10,7 +10,9 @@
       "cacheVariables": {
         "CMAKE_CXX_STANDARD": "26",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "ENABLE_COMPILER_WARNINGS": "ON"
+        "ENABLE_COMPILER_WARNINGS": "ON",
+        "VENG_BUILD_EXAMPLES": "ON",
+        "VENG_BUILD_TESTS": "ON"
       }
     },
     {

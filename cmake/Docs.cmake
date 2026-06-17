@@ -33,10 +33,10 @@ FetchContent_GetProperties(doxygen-awesome-css SOURCE_DIR VENG_AWESOME_DIR)
 
 # --- Doxyfile.in substitution variables -------------------------------------------------
 set(VENG_DOXY_VERSION    "0.1.0")
-set(VENG_DOXY_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/docs")
-set(VENG_DOXY_STRIP_PATH "${CMAKE_SOURCE_DIR}")
-set(VENG_DOXY_MAINPAGE   "${CMAKE_SOURCE_DIR}/README.md")
-set(VENG_DOXY_INPUT      "\"${CMAKE_SOURCE_DIR}/include\" \"${CMAKE_SOURCE_DIR}/src\" \"${CMAKE_SOURCE_DIR}/README.md\" \"${CMAKE_SOURCE_DIR}/CLAUDE.md\"")
+set(VENG_DOXY_OUTPUT_DIR "${veng_SOURCE_DIR}/docs")
+set(VENG_DOXY_STRIP_PATH "${veng_SOURCE_DIR}")
+set(VENG_DOXY_MAINPAGE   "${veng_SOURCE_DIR}/README.md")
+set(VENG_DOXY_INPUT      "\"${veng_SOURCE_DIR}/include\" \"${veng_SOURCE_DIR}/src\" \"${veng_SOURCE_DIR}/README.md\" \"${veng_SOURCE_DIR}/CLAUDE.md\"")
 
 if(DOXYGEN_DOT_FOUND)
     set(VENG_DOXY_HAVE_DOT "YES")
@@ -52,7 +52,7 @@ file(MAKE_DIRECTORY "${_docs_bin}")
 set(VENG_DOXY_HEADER "${_docs_bin}/header.html")
 
 set(_doxyfile "${_docs_bin}/Doxyfile")
-configure_file("${CMAKE_SOURCE_DIR}/docs/Doxyfile.in" "${_doxyfile}" @ONLY)
+configure_file("${veng_SOURCE_DIR}/docs/Doxyfile.in" "${_doxyfile}" @ONLY)
 
 # Generate Doxygen's version-correct stock header, then inject the doxygen-awesome scripts so
 # the dark-mode toggle, fragment copy button, paragraph links and interactive ToC are wired
@@ -81,25 +81,25 @@ if(NOT EXISTS "${VENG_DOXY_HEADER}")
     else()
         message(WARNING "veng: could not generate the Doxygen HTML header (rc=${_hdr_rc}); docs will use the default theme")
         set(VENG_DOXY_HEADER "")
-        configure_file("${CMAKE_SOURCE_DIR}/docs/Doxyfile.in" "${_doxyfile}" @ONLY)
+        configure_file("${veng_SOURCE_DIR}/docs/Doxyfile.in" "${_doxyfile}" @ONLY)
     endif()
 endif()
 
 # On-demand regeneration.
 add_custom_target(docs
     COMMAND "${DOXYGEN_EXECUTABLE}" "${_doxyfile}"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    WORKING_DIRECTORY "${veng_SOURCE_DIR}"
     COMMENT "veng: regenerating API docs -> docs/html/index.html"
     VERBATIM)
 
 # Regenerate at configure time (best-effort: a docs failure never breaks configure).
 execute_process(
     COMMAND "${DOXYGEN_EXECUTABLE}" "${_doxyfile}"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    WORKING_DIRECTORY "${veng_SOURCE_DIR}"
     RESULT_VARIABLE _doc_rc
     OUTPUT_QUIET)
 if(_doc_rc EQUAL 0)
-    message(STATUS "veng: API docs generated -> ${CMAKE_SOURCE_DIR}/docs/html/index.html")
+    message(STATUS "veng: API docs generated -> ${veng_SOURCE_DIR}/docs/html/index.html")
 else()
     message(WARNING "veng: doxygen exited ${_doc_rc}; docs may be incomplete")
 endif()

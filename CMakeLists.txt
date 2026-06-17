@@ -13,6 +13,12 @@ set(ENABLE_SANITIZER_THREAD OFF CACHE BOOL "Enable ThreadSanitizer")
 set(ENABLE_SANITIZER_UNDEFINED OFF CACHE BOOL "Enable UndefinedBehaviorSanitizer")
 set(ENABLE_LTO OFF CACHE BOOL "Enable Link Time Optimization")
 
+# The example apps and the test suite are only built by default when veng is the top-level
+# project. A consumer that pulls veng in via add_subdirectory() gets just the libraries (and
+# their Vulkan deps) — it can still opt in by setting these in its own cache / preset.
+option(VENG_BUILD_EXAMPLES "Build the veng example applications" ${PROJECT_IS_TOP_LEVEL})
+option(VENG_BUILD_TESTS    "Build the veng test suite"           ${PROJECT_IS_TOP_LEVEL})
+
 find_package(Threads REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
@@ -24,16 +30,24 @@ find_package(vk-bootstrap CONFIG REQUIRED)
 find_package(VulkanMemoryAllocator CONFIG REQUIRED)
 find_package(unofficial-vulkan-memory-allocator-hpp CONFIG REQUIRED)
 
-# Enable testing at the top level so `ctest` run from the root build dir recurses
-# into tests/ (catch_discover_tests registers there). Without this the root
-# CTestTestfile is empty and `ctest -N` reports zero tests.
-enable_testing()
-
 add_subdirectory(src)
-add_subdirectory(example)
-add_subdirectory(tests)
 # add_subdirectory(libs/SFML) # for example to add other cmake dependencies
+
+if(VENG_BUILD_EXAMPLES)
+    add_subdirectory(example)
+endif()
+
+if(VENG_BUILD_TESTS)
+    # Enable testing at the top level so `ctest` run from the root build dir recurses
+    # into tests/ (catch_discover_tests registers there). Without this the root
+    # CTestTestfile is empty and `ctest -N` reports zero tests.
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # Optional Doxygen API docs (doxygen-awesome-css theme, dark-mode). Generated into docs/html
 # at configure time when VENG_BUILD_DOCS=ON and doxygen is installed; a no-op otherwise.
-include(Docs)
+# Docs are a top-level dev concern only — never built for an add_subdirectory() consumer.
+if(PROJECT_IS_TOP_LEVEL)
+    include(Docs)
+endif()

@@ -150,7 +150,7 @@ target_link_libraries(StlLoaderTests PRIVATE veng_assets Catch2::Catch2WithMain)
 # Mesh-repair unit tests — drive the internal detail:: helper directly (src/ on the include path).
 add_executable(MeshProcessingTests assets/MeshProcessingTests.cpp)
 target_link_libraries(MeshProcessingTests PRIVATE veng_assets Catch2::Catch2WithMain)
-target_include_directories(MeshProcessingTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(MeshProcessingTests PRIVATE ${veng_SOURCE_DIR}/src)
 
 # OBJ / PLY / 3MF loader tests — inline fixtures, no GPU. The 3MF test writes its fixture with lib3mf.
 add_executable(ObjLoaderTests assets/ObjLoaderTests.cpp)
