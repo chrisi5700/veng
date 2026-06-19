@@ -132,6 +132,7 @@ std::expected<void, vk::Result> SwapchainManager::build_swapchain(vk::Extent2D e
 		m_render_finished.push_back(semaphore.value);
 		m_render_finished_handles.push_back(m_rhi->register_semaphore(semaphore.value));
 	}
+	++m_generation; // create + every rebuild: signals consumers the image set is fresh (see generation()).
 	return {};
 }
 
@@ -251,6 +252,7 @@ SwapchainManager::SwapchainManager(SwapchainManager&& other) noexcept
 	, m_graphics_family(other.m_graphics_family)
 	, m_frames_in_flight(other.m_frames_in_flight)
 	, m_swapchain(std::exchange(other.m_swapchain, nullptr))
+	, m_generation(other.m_generation)
 	, m_images(std::move(other.m_images))
 	, m_texture_handles(std::move(other.m_texture_handles))
 	, m_format(other.m_format)
@@ -280,6 +282,7 @@ SwapchainManager& SwapchainManager::operator=(SwapchainManager&& other) noexcept
 		m_graphics_family		  = other.m_graphics_family;
 		m_frames_in_flight		  = other.m_frames_in_flight;
 		m_swapchain				  = std::exchange(other.m_swapchain, nullptr);
+		m_generation			  = other.m_generation;
 		m_images				  = std::move(other.m_images);
 		m_texture_handles		  = std::move(other.m_texture_handles);
 		m_format				  = other.m_format;

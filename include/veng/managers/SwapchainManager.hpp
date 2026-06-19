@@ -71,6 +71,15 @@ class SwapchainManager
 
 	/** @return The current swapchain extent in pixels. */
 	[[nodiscard]] rhi::Extent2D extent() const noexcept { return rhi::to_rhi(m_extent); }
+	/**
+	 * @brief Monotonic counter bumped every time the swapchain is (re)built.
+	 *
+	 * A rebuild replaces every image with a fresh RHI texture handle, so any graph source fed the
+	 * swapchain image is genuinely stale afterwards. A driver (or @ref FrameExecutor) compares this
+	 * against the last value it acted on to know it must re-dirty that source — the reactive signal
+	 * that a rebuilt (and so far never-drawn, black) image needs a frame even when the scene is quiet.
+	 */
+	[[nodiscard]] std::uint64_t generation() const noexcept { return m_generation; }
 	/** @return The swapchain surface format. */
 	[[nodiscard]] rhi::Format format() const noexcept { return rhi::to_rhi(m_format); }
 	/**
@@ -137,6 +146,7 @@ class SwapchainManager
 	std::uint32_t					m_graphics_family{};
 	std::size_t						m_frames_in_flight{};
 	vk::SwapchainKHR				m_swapchain;
+	std::uint64_t					m_generation{}; ///< Bumped on every successful (re)build; see @ref generation.
 	std::vector<vk::Image>			m_images;
 	std::vector<rhi::TextureHandle> m_texture_handles; ///< One per swapchain image; re-registered on rebuild.
 	vk::Format						m_format = vk::Format::eUndefined;

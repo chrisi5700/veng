@@ -24,6 +24,7 @@ FrameExecutor::FrameExecutor(Context& context, SwapchainManager& swap, ResourceP
 	, m_scheduler(&scheduler)
 	, m_swapchain_handle(swapchain_handle)
 	, m_frames_in_flight(frames_in_flight == 0 ? 1 : frames_in_flight)
+	, m_last_swap_generation(swap.generation())
 	, m_pending_retire(m_frames_in_flight)
 {
 }
@@ -32,6 +33,16 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 											  Pacing pacing, std::mutex* graph_mutex)
 {
 	const std::size_t slot = m_frame_index % m_frames_in_flight;
+
+	// A swapchain rebuild (driver-side, between frames) swapped in a fresh image set with new RHI
+	// texture handles, so the swapchain-image source is genuinely stale even when the scene has not
+	// changed. Detect it by the swap's generation running ahead of the last one we reconciled; the
+	// OnDemand path below turns that into a real dirty pulse so the demanded cone (blit + present)
+	// replans and the rebuilt — so far never-drawn, black — image is actually presented. Continuous
+	// already `set`s the swapchain source every frame, so it needs no special case; we still consume
+	// the generation here so the next OnDemand frame doesn't re-fire on a rebuild already handled.
+	const bool swap_rebuilt = m_swap->generation() != m_last_swap_generation;
+	m_last_swap_generation	= m_swap->generation();
 
 	// OnDemand: resolve BEFORE acquire so an unchanged graph idles the thread (no GPU work,
 	// no semaphore wait, no submit). The swapchain source is set_now'd later as a value-only
@@ -45,6 +56,16 @@ FrameExecutor::Frame FrameExecutor::run_frame(graph::Graph& graph, std::span<con
 		if (graph_mutex != nullptr)
 		{
 			lock = std::unique_lock<std::mutex>(*graph_mutex);
+		}
+		// A rebuild dirties the swapchain source with a real `set` (not `set_now`) so resolve plans
+		// blit + present. The value is a placeholder for image 0 — overwritten by the acquired image
+		// before the blit reads it; only the resulting `changed_at` pulse matters here.
+		if (swap_rebuilt)
+		{
+			graph.set(m_swapchain_handle, gpu::ImageRef{.texture = m_swap->texture_handle(0),
+														.extent	 = m_swap->extent(),
+														.format	 = m_swap->format(),
+														.version = m_frame_index});
 		}
 		auto resolved = graph.resolve(sinks);
 		if (!resolved.has_value())
