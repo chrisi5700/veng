@@ -138,11 +138,6 @@ class FrameExecutor
 	std::size_t						  m_frames_in_flight;
 	std::uint64_t					  m_frame_index = 0;
 
-	/// Last @ref SwapchainManager::generation this executor reconciled. When the swap's generation
-	/// runs ahead (a rebuild happened), the next frame `set`s — not `set_now`s — the swapchain source
-	/// so the demanded cone (blit+present) replans and the fresh image is actually drawn.
-	std::uint64_t					  m_last_swap_generation;
-
 	/// Per-slot list of Sinks that ran in the frame that previously held that slot; fired in
 	/// `on_retired` at the next `acquire(slot)` (which waited the fence, so they have retired).
 	std::vector<std::vector<gpu::Sink*>> m_pending_retire;
