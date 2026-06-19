@@ -132,15 +132,24 @@ std::expected<TextureHandle, Error> Device::create_texture(const TextureDesc& de
 	}
 
 	const Texture slot{.image = image, .view = view, .allocation = allocation};
+	return claim_texture(slot);
+}
+
+TextureHandle Device::claim_texture(const Texture& slot)
+{
+	// Recycle a freed id when one is available, else grow the table. The returned handle is stamped
+	// with the slot's current generation (bumped at each release), so a recycled id never compares
+	// equal to a handle that still names the resource previously at that slot.
 	if (!m_free_textures.empty())
 	{
 		const std::uint32_t id = m_free_textures.back();
 		m_free_textures.pop_back();
 		m_textures[id] = slot;
-		return TextureHandle{.id = id};
+		return TextureHandle{.id = id, .generation = m_texture_generations[id]};
 	}
 	m_textures.push_back(slot);
-	return TextureHandle{.id = static_cast<std::uint32_t>(m_textures.size() - 1)};
+	m_texture_generations.push_back(0);
+	return TextureHandle{.id = static_cast<std::uint32_t>(m_textures.size() - 1), .generation = 0};
 }
 
 void Device::destroy_texture(TextureHandle handle) noexcept
@@ -157,6 +166,7 @@ void Device::destroy_texture(TextureHandle handle) noexcept
 			m_allocator.destroyImage(tex.image, tex.allocation);
 		}
 		m_textures[handle.id] = Texture{};
+		++m_texture_generations[handle.id]; // any handle still naming the freed resource is now stale
 		m_free_textures.push_back(handle.id);
 	}
 }
@@ -188,15 +198,23 @@ std::expected<BufferHandle, Error> Device::create_buffer(const BufferDesc& desc)
 	}
 
 	const Buffer slot{.buffer = buffer, .allocation = allocation, .mapped = info.pMappedData};
+	return claim_buffer(slot);
+}
+
+BufferHandle Device::claim_buffer(const Buffer& slot)
+{
+	// Mirrors claim_texture: recycle a freed id (stamping the returned handle with the slot's current
+	// generation) or grow the table, so a recycled buffer id never aliases a still-live handle.
 	if (!m_free_buffers.empty())
 	{
 		const std::uint32_t id = m_free_buffers.back();
 		m_free_buffers.pop_back();
 		m_buffers[id] = slot;
-		return BufferHandle{.id = id};
+		return BufferHandle{.id = id, .generation = m_buffer_generations[id]};
 	}
 	m_buffers.push_back(slot);
-	return BufferHandle{.id = static_cast<std::uint32_t>(m_buffers.size() - 1)};
+	m_buffer_generations.push_back(0);
+	return BufferHandle{.id = static_cast<std::uint32_t>(m_buffers.size() - 1), .generation = 0};
 }
 
 void Device::destroy_buffer(BufferHandle handle) noexcept
@@ -209,13 +227,16 @@ void Device::destroy_buffer(BufferHandle handle) noexcept
 			m_allocator.destroyBuffer(buf.buffer, buf.allocation);
 		}
 		m_buffers[handle.id] = Buffer{};
+		++m_buffer_generations[handle.id]; // any handle still naming the freed buffer is now stale
 		m_free_buffers.push_back(handle.id);
 	}
 }
 
 void* Device::mapped(BufferHandle handle) const noexcept
 {
-	return handle.id < m_buffers.size() ? m_buffers[handle.id].mapped : nullptr;
+	return (handle.id < m_buffers.size() && m_buffer_generations[handle.id] == handle.generation)
+			   ? m_buffers[handle.id].mapped
+			   : nullptr;
 }
 
 CommandEncoder Device::begin_commands()
@@ -305,20 +326,13 @@ vk::Sampler Device::sampler(SamplerHandle handle) const noexcept
 }
 TextureHandle Device::register_texture(vk::Image image, vk::ImageView view)
 {
-	if (!m_free_textures.empty())
-	{
-		const std::uint32_t id = m_free_textures.back();
-		m_free_textures.pop_back();
-		m_textures[id] = Texture{.image = image, .view = view};
-		return TextureHandle{.id = id};
-	}
-	m_textures.push_back(Texture{.image = image, .view = view});
-	return TextureHandle{.id = static_cast<std::uint32_t>(m_textures.size() - 1)};
+	return claim_texture(Texture{.image = image, .view = view});
 }
 
 void Device::rebind_texture(TextureHandle handle, vk::Image image, vk::ImageView view) noexcept
 {
-	if (handle.id < m_textures.size())
+	// Generation-checked: a stale handle must not clobber a slot that has since been recycled.
+	if (handle.id < m_textures.size() && m_texture_generations[handle.id] == handle.generation)
 	{
 		m_textures[handle.id] = Texture{.image = image, .view = view};
 	}
@@ -329,31 +343,30 @@ void Device::release_texture(TextureHandle handle) noexcept
 	if (handle.id < m_textures.size())
 	{
 		m_textures[handle.id] = Texture{};
+		++m_texture_generations[handle.id]; // any handle still naming the freed resource is now stale
 		m_free_textures.push_back(handle.id);
 	}
 }
 
 vk::Image Device::image(TextureHandle handle) const noexcept
 {
-	return handle.id < m_textures.size() ? m_textures[handle.id].image : vk::Image{};
+	return (handle.id < m_textures.size() && m_texture_generations[handle.id] == handle.generation)
+			   ? m_textures[handle.id].image
+			   : vk::Image{};
 }
 
 vk::ImageView Device::view(TextureHandle handle) const noexcept
 {
-	return handle.id < m_textures.size() ? m_textures[handle.id].view : vk::ImageView{};
+	// A generation mismatch means this handle outlived its resource (the slot was freed/recycled):
+	// resolve to a null view so a stale binding fails closed instead of aliasing a different texture.
+	return (handle.id < m_textures.size() && m_texture_generations[handle.id] == handle.generation)
+			   ? m_textures[handle.id].view
+			   : vk::ImageView{};
 }
 
 BufferHandle Device::register_buffer(vk::Buffer buffer)
 {
-	if (!m_free_buffers.empty())
-	{
-		const std::uint32_t id = m_free_buffers.back();
-		m_free_buffers.pop_back();
-		m_buffers[id] = Buffer{.buffer = buffer};
-		return BufferHandle{.id = id};
-	}
-	m_buffers.push_back(Buffer{.buffer = buffer});
-	return BufferHandle{.id = static_cast<std::uint32_t>(m_buffers.size() - 1)};
+	return claim_buffer(Buffer{.buffer = buffer});
 }
 
 void Device::release_buffer(BufferHandle handle) noexcept
@@ -361,13 +374,18 @@ void Device::release_buffer(BufferHandle handle) noexcept
 	if (handle.id < m_buffers.size())
 	{
 		m_buffers[handle.id] = Buffer{};
+		++m_buffer_generations[handle.id]; // any handle still naming the freed buffer is now stale
 		m_free_buffers.push_back(handle.id);
 	}
 }
 
 vk::Buffer Device::buffer(BufferHandle handle) const noexcept
 {
-	return handle.id < m_buffers.size() ? m_buffers[handle.id].buffer : vk::Buffer{};
+	// Generation mismatch => the handle outlived its buffer (slot freed/recycled): resolve to null so
+	// a stale binding fails closed rather than aliasing a different buffer.
+	return (handle.id < m_buffers.size() && m_buffer_generations[handle.id] == handle.generation)
+			   ? m_buffers[handle.id].buffer
+			   : vk::Buffer{};
 }
 
 SemaphoreHandle Device::register_semaphore(vk::Semaphore semaphore)

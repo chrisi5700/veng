@@ -191,9 +191,17 @@ class Device
 	vk::CommandPool			   m_command_pool{};   ///< One-shot pool for begin_commands().
 	vk::CommandBuffer		   m_command_buffer{}; ///< The reusable one-shot buffer begin_commands() hands out.
 	vk::Fence				   m_fence{};		   ///< submit() waits on this.
+	/// Claim a registry slot for @p slot (recycling a freed id when one is available, else growing the
+	/// table), returning a handle stamped with the slot's current generation.
+	[[nodiscard]] TextureHandle claim_texture(const Texture& slot);
+	[[nodiscard]] BufferHandle	claim_buffer(const Buffer& slot);
+
 	std::vector<Texture>	   m_textures;
+	std::vector<std::uint32_t> m_texture_generations; ///< Parallel to @ref m_textures; bumped on release so a
+													  ///< recycled id yields a handle distinct from the freed one.
 	std::vector<std::uint32_t> m_free_textures;
 	std::vector<Buffer>		   m_buffers;
+	std::vector<std::uint32_t> m_buffer_generations; ///< Parallel to @ref m_buffers; see @ref m_texture_generations.
 	std::vector<std::uint32_t> m_free_buffers;
 	std::vector<vk::Semaphore> m_semaphores; ///< Non-owning; the swapchain owns the vk objects.
 	std::vector<std::uint32_t> m_free_semaphores;

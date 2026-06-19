@@ -24,17 +24,29 @@ namespace veng::rhi
 inline constexpr std::uint32_t INVALID_HANDLE = ~0U;
 
 /// @brief Opaque handle to a registered texture (image + default view). @see Device::texture
+///
+/// The registry recycles ids, so an id alone does not uniquely identify a resource: a freed slot
+/// reused for a new texture would alias the old handle's value. @ref generation disambiguates —
+/// @ref Device bumps the slot's generation on every release, so a handle that outlived its resource
+/// compares unequal to the slot's reuse (and resolves to a null vk object). This is what lets a
+/// descriptor change-cache keyed on handle identity stay correct across a resize/realloc.
 struct TextureHandle
 {
-	std::uint32_t	   id = INVALID_HANDLE;
+	std::uint32_t	   id		  = INVALID_HANDLE;
+	std::uint32_t	   generation = 0; ///< Slot reuse counter; see the type comment.
 	[[nodiscard]] bool valid() const noexcept { return id != INVALID_HANDLE; }
 	friend bool		   operator==(const TextureHandle&, const TextureHandle&) noexcept = default;
 };
 
 /// @brief Opaque handle to a registered buffer. @see Device::buffer
+///
+/// Carries a @ref generation for the same reason as @ref TextureHandle: the registry recycles ids,
+/// so a descriptor change-cache keyed on a buffer handle would alias a freed buffer to its
+/// reused-id successor without it. @ref Device bumps the slot's generation on release.
 struct BufferHandle
 {
-	std::uint32_t	   id = INVALID_HANDLE;
+	std::uint32_t	   id		  = INVALID_HANDLE;
+	std::uint32_t	   generation = 0; ///< Slot reuse counter; see the type comment.
 	[[nodiscard]] bool valid() const noexcept { return id != INVALID_HANDLE; }
 	friend bool		   operator==(const BufferHandle&, const BufferHandle&) noexcept = default;
 };
