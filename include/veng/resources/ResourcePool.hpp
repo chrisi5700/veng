@@ -35,6 +35,7 @@
 #include <vector>
 #include <veng/gpu/BufferRef.hpp>
 #include <veng/gpu/ImageRef.hpp>
+#include <veng/gpu/UniformRef.hpp>
 #include <veng/resources/Buffer.hpp>
 #include <veng/resources/Image.hpp>
 #include <vulkan-memory-allocator-hpp/vk_mem_alloc.hpp>
@@ -246,6 +247,24 @@ class ResourcePool
 	void consume(const gpu::BufferRef& ref) noexcept
 	{
 		if (ref.pool_id != gpu::BufferRef::INVALID_POOL_ID)
+		{
+			touch_buffer(ref.pool_id);
+		}
+	}
+
+	/**
+	 * @brief Convenience overload: retain the pooled copy backing a uniform `ref` while in flight.
+	 *
+	 * Uniform analogue of @ref consume(const gpu::BufferRef&) — uniform buffers are N-buffered in the
+	 * same buffer pool, so a `GraphicsNode::add_uniform` consumer whose `UniformNode` producer may be
+	 * cached this frame must call this, or the pool can recycle the copy out from under the descriptor
+	 * set still referencing it. A no-op when `ref` is not pool-owned.
+	 *
+	 * @param ref A @ref veng::gpu::UniformRef whose pool copy should be retained.
+	 */
+	void consume(const gpu::UniformRef& ref) noexcept
+	{
+		if (ref.pool_id != gpu::UniformRef::INVALID_POOL_ID)
 		{
 			touch_buffer(ref.pool_id);
 		}

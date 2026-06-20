@@ -4,15 +4,20 @@
  * @brief The value that flows on a uniform edge of the reactive graph.
  *
  * `UniformRef` is the descriptor-set counterpart to @ref veng::gpu::MeshRef. It is a non-owning reference
- * to a GPU uniform buffer plus the reflected binding name it fills. A `UniformNode` owns the
- * backing `Buffer`, uploads the value, and produces a `UniformRef`; a
- * `GraphicsNode::add_uniform` reads it, matches `name` to the shader's reflected descriptor
- * (`DescriptorInfo.name`), and writes the buffer into a descriptor set. This is the user's
- * `UniformNode{value, "name"} -> GraphicsNode.add_uniform(...)`.
+ * to a GPU uniform buffer plus the reflected binding name it fills. A `UniformNode` declares an
+ * N-buffered, pool-owned uniform buffer, writes this frame's physical copy, and produces a
+ * `UniformRef`; a `GraphicsNode::add_uniform` reads it, matches `name` to the shader's reflected
+ * descriptor (`DescriptorInfo.name`), and writes the buffer into a descriptor set. This is the
+ * user's `UniformNode{value, "name"} -> GraphicsNode.add_uniform(...)`.
+ *
+ * Because the backing buffer is pool-owned and N-buffered (see @ref veng::ResourcePool), the ref
+ * carries the producer's `pool_id`: a consumer reading this ref while its producer is cached must
+ * call `pool.consume(ref)` so the copy it points at is retained for the in-flight window —
+ * otherwise the pool can recycle that copy out from under the descriptor set still referencing it.
  *
  * Equality is value-based, including a `version` the producing `UniformNode` bumps on every
- * publish — critical because the buffer handle is stable across re-uploads (contents change in
- * place), so without a version a structural comparison would call two distinct upload values
+ * publish — critical because a re-upload may reuse the same physical copy (same buffer handle, new
+ * contents), so without a version a structural comparison would call two distinct upload values
  * "equal" and silently cache away the consuming draw.
  *
  * @ingroup gpu_handles
@@ -46,8 +51,15 @@ struct UniformRef
 	std::uint64_t	  size = 0; ///< Byte size of the buffer.
 	std::string		  name;		///< The reflected descriptor binding this fills (`DescriptorInfo.name`).
 
-	/// Producer-bumped version. Incremented on every publish so two consecutive produces of the
-	/// same underlying buffer handle (whose contents changed in place) compare unequal and the
+	/// Pool id of the backing buffer (like @ref veng::gpu::BufferRef::pool_id). A consumer reading this ref
+	/// while its producer is cached must call `pool.consume(ref)` so the N-buffered copy it points
+	/// at is retained for the in-flight window — otherwise the pool can recycle it out from under
+	/// the descriptor set still referencing it.
+	static constexpr std::uint32_t INVALID_POOL_ID = ~0U;
+	std::uint32_t pool_id = INVALID_POOL_ID; ///< @ref veng::ResourcePool id, or `INVALID_POOL_ID` if unmanaged.
+
+	/// Producer-bumped version. Incremented on every publish so two consecutive produces (which may
+	/// reuse the same physical copy: same buffer handle, new contents) compare unequal and the
 	/// change-cutoff in `ValueData<UniformRef>` fires correctly.
 	std::uint64_t version = 0;
 

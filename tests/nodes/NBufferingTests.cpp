@@ -15,8 +15,10 @@
 #include <memory>
 #include <utility>
 #include <veng/context/Context.hpp>
+#include <veng/gpu/BufferRef.hpp>
 #include <veng/gpu/GpuExecContext.hpp>
 #include <veng/gpu/ImageRef.hpp>
+#include <veng/gpu/UniformRef.hpp>
 #include <veng/logging/Logger.hpp>
 #include <veng/nodes/GraphicsNode.hpp>
 #include <veng/rendergraph/Graph.hpp>
@@ -99,7 +101,8 @@ TEST_CASE("frames in flight render into distinct N-buffered target copies", "[no
 		REQUIRE(cmd.begin(vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit)) ==
 				vk::Result::eSuccess);
 
-		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()), i % FRAMES_IN_FLIGHT);
+		veng::gpu::GpuExecContext gpu_ctx(graph, ctx, pool, veng::rhi::CommandEncoder(cmd, ctx.rhi()),
+										  i % FRAMES_IN_FLIGHT);
 		auto					  plan = graph.resolve(std::array{token});
 		REQUIRE(plan.has_value());
 		REQUIRE(graph.execute(*plan, scheduler, gpu_ctx));
@@ -181,4 +184,51 @@ TEST_CASE("ResourcePool defers buffer-resize frees past the in-flight window", "
 	REQUIRE(pool.retiring_buffer_count() == 1); // begin_frame alone must NOT free it (pre-fence-wait)
 	REQUIRE(pool.acquire_buffer(id, 128).has_value());
 	REQUIRE(pool.retiring_buffer_count() == 0); // the record-time acquire purges the now-retired copy
+}
+
+TEST_CASE("a consumer's consume() retains a cached producer's pooled buffer across the in-flight window",
+		  "[nodes][nbuffering][lifetime]")
+{
+	// The bug class fixed for sampled images (PbrPass), storage buffers, and uniform buffers
+	// (GraphicsNode): when a producer is CACHED (its value is unchanged this frame) it does not
+	// re-acquire its pooled copy, so that copy's last_use goes unstamped. A consumer that binds the
+	// copy MUST stamp it via pool.consume(ref) — otherwise, once the producer next re-runs, the pool
+	// sees the copy as retired and reuses it while an in-flight frame's descriptor set still references
+	// it (VUID-vkDestroyBuffer-00922 / a write-after-read stomp). This proves consume() performs that
+	// retention for each buffer ref type, with pure pool bookkeeping (no GPU work).
+	veng::Logger::instance().set_level(spdlog::level::warn);
+	auto ctx = make_context();
+
+	// Run the 3-frame cached-producer scenario, stamping the consumer's copy via `consume_via` each
+	// frame, and report how many physical copies the pool ended up with. With the retention working,
+	// frame 2 cannot reuse the copy frame 1 is still in flight on, so a second copy is allocated (== 2).
+	const auto copies_after_scenario = [&ctx](auto consume_via) -> std::size_t
+	{
+		veng::ResourcePool	 pool(ctx.device(), ctx.rhi(), ctx.allocator(), 2); // two frames in flight
+		const veng::BufferId id = pool.declare_buffer(veng::rhi::BufferUsageFlags::UNIFORM);
+
+		pool.begin_frame(0); // producer acquires copy A (now current); consumer binds it this frame
+		REQUIRE(pool.acquire_buffer(id, 64).has_value());
+		consume_via(pool, id);
+		REQUIRE(pool.buffer_copy_count(id) == 1);
+
+		pool.begin_frame(1); // producer CACHED (no acquire) — consumer still binds A, so must stamp it
+		consume_via(pool, id);
+		REQUIRE(pool.buffer_copy_count(id) == 1);
+
+		pool.begin_frame(2); // producer re-runs; A was stamped at frame 1 (still in flight) -> new copy
+		REQUIRE(pool.acquire_buffer(id, 64).has_value());
+		return pool.buffer_copy_count(id);
+	};
+
+	SECTION("via consume(BufferRef)")
+	{
+		REQUIRE(copies_after_scenario([](veng::ResourcePool& pool, veng::BufferId id)
+									  { pool.consume(veng::gpu::BufferRef{.pool_id = id}); }) == 2);
+	}
+	SECTION("via consume(UniformRef)") // the newly wired path: UniformRef::pool_id + consume overload
+	{
+		REQUIRE(copies_after_scenario([](veng::ResourcePool& pool, veng::BufferId id)
+									  { pool.consume(veng::gpu::UniformRef{.pool_id = id}); }) == 2);
+	}
 }

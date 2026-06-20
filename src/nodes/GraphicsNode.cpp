@@ -273,6 +273,11 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED); // no such reflected binding
 			}
+			// Retain the pooled copy we bind so it is not recycled while this frame is in flight: uniform
+			// buffers are N-buffered in the pool, so a cached UniformNode producer leaves last_use unstamped
+			// and the copy could be reused under this in-flight descriptor set. Mirrors the storage/sampled
+			// paths below.
+			ctx.pool().consume(ref);
 			entries.push_back(rhi::BindGroupEntry{.binding	   = static_cast<std::uint32_t>(it->second.binding),
 												  .type		   = rhi::BindingType::UNIFORM_BUFFER,
 												  .buffer	   = ref.buffer,
