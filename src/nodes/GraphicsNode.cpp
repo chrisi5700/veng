@@ -296,6 +296,11 @@ std::expected<bool, graph::ExecError> GraphicsNode::record(gpu::GpuExecContext& 
 			{
 				return std::unexpected(graph::ExecError::NODE_FAILED); // no such reflected binding
 			}
+			// Retain the pooled copy we bind so it is not recycled while this frame is in flight: when the
+			// producing StorageBufferNode is cached (its value unchanged this frame) the buffer's last_use
+			// is not otherwise stamped, so a later resize could purge this copy out from under an in-flight
+			// descriptor set (VUID-vkDestroyBuffer-buffer-00922). Mirrors the sampled-image path below.
+			ctx.pool().consume(ref);
 			entries.push_back(rhi::BindGroupEntry{.binding	   = static_cast<std::uint32_t>(it->second.binding),
 												  .type		   = rhi::BindingType::STORAGE_BUFFER,
 												  .buffer	   = ref.buffer,
