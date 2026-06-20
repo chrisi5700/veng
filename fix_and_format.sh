@@ -28,10 +28,9 @@ done
 
 if command -v clang-tidy >/dev/null 2>&1 && [ -n "$build_dir" ]; then
 	echo "==> clang-tidy (advisory, using $build_dir)"
-	# Scope to our translation units; checks kept focused to avoid third-party noise.
+	# Scope to our translation units; the check set comes from the .clang-tidy file (single source).
 	find src -name '*.cpp' -print0 |
-		xargs -0 -r clang-tidy -p "$build_dir" --quiet \
-			-checks='bugprone-*,performance-*,modernize-*,-modernize-use-trailing-return-type,clang-analyzer-*' ||
+		xargs -0 -r clang-tidy -p "$build_dir" --quiet ||
 		true
 else
 	echo "==> clang-tidy skipped (need clang-tidy + a configured build dir with compile_commands.json)"

@@ -1,0 +1,20 @@
+---
+# veng's clang-tidy standard.
+#
+# Advisory, not the enforcing gate: code quality is enforced by the llm-vcpkg preset building every
+# library/app target with -Werror + ASan/UBSan (see run_test.sh). This file makes the same focused
+# check set that fix_and_format.sh runs discoverable to editors/IDEs and to a standalone checkout,
+# rather than relying on a .clang-tidy inherited from a parent directory. Kept intentionally narrow
+# (no broad cppcoreguidelines-*/readability-*) to avoid third-party and stylistic noise.
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  clang-analyzer-*
+
+WarningsAsErrors: ''
+# Analyse veng's own headers but skip system and vcpkg-installed ones.
+HeaderFilterRegex: '^(?!.*/usr/)(?!.*/vcpkg_installed/).*'
+FormatStyle: file
