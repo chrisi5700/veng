@@ -52,6 +52,12 @@ target_compile_options(ShaderLoadingTests PRIVATE -O0)
 add_executable(ShaderValidationTests shader/ShaderValidationTests.cpp)
 target_link_libraries(ShaderValidationTests PRIVATE veng_shader Catch2::Catch2WithMain)
 
+# Public umbrella header compile-guard — fails to build if <veng/veng.hpp> stops compiling standalone
+# (links the veng::veng umbrella, so it also exercises the aggregated usage requirements).
+add_executable(UmbrellaTests UmbrellaTests.cpp)
+target_link_libraries(UmbrellaTests PRIVATE veng Catch2::Catch2WithMain)
+target_compile_features(UmbrellaTests PRIVATE cxx_std_23)
+
 # L3 Reactive Core tests — Vulkan-free, the priority for coverage.
 add_executable(GraphTests rendergraph/GraphTests.cpp)
 target_link_libraries(GraphTests PRIVATE veng_render_graph Catch2::Catch2WithMain)
@@ -219,6 +225,7 @@ target_link_libraries(FrameExecutorTests PRIVATE veng_managers veng_nodes veng_r
 
 # Most tests are device-agnostic and run on the default driver. Discover them plainly.
 foreach(test_target
+        UmbrellaTests
         ContextTests ShaderLoadingTests ShaderValidationTests GraphTests SchedulerTests TemporalTests
         ComputePipelineTests GraphicsPipelineTests DescriptorAllocatorTests ResourceTests ResourcePoolTests RenderTargetSetTests
         GpuBridgeTests ManagerTests RasterTriangleTests SliceDriverTests GraphicsNodeTests MeshNodeTests LodNodesTests

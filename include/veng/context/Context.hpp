@@ -54,6 +54,15 @@ struct QueueFamilyIndices
  * Owns the `vk::Instance`, `vk::Device`, `vma::Allocator`, and — for windowed contexts —
  * the `vk::SurfaceKHR`. Construction is performed through @ref create; move-only.
  *
+ * @note Lifetime: every other subsystem (@ref SwapchainManager, @ref CommandManager,
+ *       @ref veng::ResourcePool, the managers and nodes) borrows the Context by reference and does
+ *       NOT extend its lifetime. The Context must therefore outlive every object built from it;
+ *       destroy them in reverse order of creation. The borrow is unchecked — destroying the Context
+ *       first dangles those references.
+ * @note Threading: a Context is not internally synchronized. Treat creation/destruction as
+ *       single-threaded; concurrent GPU recording is supported through per-thread command pools
+ *       (see @ref CommandManager), not by sharing one Context method across threads.
+ *
  * @ingroup context
  * @see ContextCreationError
  * @see SwapchainManager

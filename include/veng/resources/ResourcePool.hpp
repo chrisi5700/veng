@@ -77,6 +77,12 @@ using BufferId = std::uint32_t;
  * Callers interact with logical resources; the pool selects and recycles physical copies
  * based on the frames-in-flight retirement window.
  *
+ * @note Threading: a pool is not internally synchronized and is owned by one frame loop. Drive it
+ *       from a single thread: `begin_frame` then the frame's node records (which `acquire`/`consume`)
+ *       run in sequence. The retirement window assumes the caller waited frame `N - frames_in_flight`'s
+ *       in-flight fence before `begin_frame(N)` (see @ref begin_frame). A consumer that binds a pooled
+ *       resource whose producer may be cached this frame must @ref consume it so its copy is retained.
+ *
  * @ingroup resources
  * @see ImageId
  * @see BufferId
