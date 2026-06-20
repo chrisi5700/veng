@@ -5,6 +5,7 @@
  *        generation, and per-stage reflection extraction.
  * @ingroup shaders
  */
+#include <cstdlib>
 #include <map>
 #include <mutex>
 #include <slang-com-ptr.h>
@@ -47,9 +48,15 @@ Slang::ComPtr<slang::ISession> create_spirv_session(slang::IGlobalSession*		 glo
 	// veng's own SHADER_DIR is always searched first, so its shipped shaders resolve and cannot be
 	// shadowed by name; the consumer's directories (from the owning Context) follow. Slang copies the
 	// path strings into the session, so the borrowed `const char*`s only need to live for this call.
+	// SHADER_DIR is the compile-time default (the source tree for a build / add_subdirectory consumer).
+	// An installed package relocates the shipped shaders, so honour a VENG_SHADER_DIR override first —
+	// vengConfig.cmake exposes the installed location as the `veng_SHADER_DIR` variable.
+	const char* const shader_dir_override = std::getenv("VENG_SHADER_DIR");
+	const char* const veng_shader_dir =
+		(shader_dir_override != nullptr && shader_dir_override[0] != '\0') ? shader_dir_override : SHADER_DIR;
 	std::vector<const char*> search_paths;
 	search_paths.reserve(extra_search_paths.size() + 1);
-	search_paths.push_back(SHADER_DIR);
+	search_paths.push_back(veng_shader_dir);
 	for (const std::string& path : extra_search_paths)
 	{
 		search_paths.push_back(path.c_str());

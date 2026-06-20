@@ -16,6 +16,7 @@
 #ifndef VENG_LOGGER_HPP
 #define VENG_LOGGER_HPP
 
+#include <cstdlib>
 #include <filesystem>
 #include <source_location>
 #include <spdlog/logger.h>
@@ -40,10 +41,20 @@ class Logger : public spdlog::logger
 {
 	std::shared_ptr<spdlog::sinks::stdout_color_sink_mt> console_sink; ///< Coloured stdout sink.
 	std::shared_ptr<spdlog::sinks::basic_file_sink_mt>	 file_sink;	   ///< Persistent file sink.
+
+	/// The log-file path: a `VENG_LOG_FILE` env override, else the compile-time `LOG_FILE` default
+	/// (the source tree for a build/add_subdirectory consumer; a relocated install defaults it to
+	/// "veng.log" in the working directory). Lets an installed package log somewhere writable.
+	static const char* log_file_path() noexcept
+	{
+		const char* const override_path = std::getenv("VENG_LOG_FILE");
+		return (override_path != nullptr && override_path[0] != '\0') ? override_path : LOG_FILE;
+	}
+
 	Logger()
 		: logger("veng")
 		, console_sink(std::make_shared<spdlog::sinks::stdout_color_sink_mt>())
-		, file_sink(std::make_shared<spdlog::sinks::basic_file_sink_mt>(LOG_FILE, true))
+		, file_sink(std::make_shared<spdlog::sinks::basic_file_sink_mt>(log_file_path(), true))
 
 	{
 #ifndef NDEBUG

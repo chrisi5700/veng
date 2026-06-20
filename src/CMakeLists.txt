@@ -8,7 +8,10 @@ target_link_libraries(veng_logging
 )
 target_compile_definitions(veng_logging
         INTERFACE
-        LOG_FILE="${veng_SOURCE_DIR}/logs/logs.txt"
+        # Build / add_subdirectory consumers log into the source tree; an installed package has no
+        # source tree, so default it to a writable cwd file (overridable at runtime via VENG_LOG_FILE).
+        $<BUILD_INTERFACE:LOG_FILE="${veng_SOURCE_DIR}/logs/logs.txt">
+        $<INSTALL_INTERFACE:LOG_FILE="veng.log">
 )
 target_include_directories(veng_logging
         INTERFACE
@@ -149,4 +152,44 @@ endforeach()
 add_library(veng INTERFACE)
 target_link_libraries(veng INTERFACE ${VENG_PUBLIC_LIBS})
 add_library(veng::veng ALIAS veng)
+
+# --- Install / export: make find_package(veng) work --------------------------------------------
+# Only when veng builds as its own project; an add_subdirectory consumer (e.g. geng) manages its own
+# install and should not have veng inject install rules into it.
+option(VENG_INSTALL "Generate veng install and export rules" ${PROJECT_IS_TOP_LEVEL})
+if(VENG_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+
+    install(TARGETS veng ${VENG_PUBLIC_LIBS}
+            EXPORT vengTargets
+            ARCHIVE  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME  DESTINATION ${CMAKE_INSTALL_BINDIR}
+            INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+    install(DIRECTORY ${veng_SOURCE_DIR}/include/veng DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    # veng's shipped shaders, so a relocated package can still resolve them. The library finds them via
+    # the VENG_SHADER_DIR env var (see Shader.cpp); vengConfig exposes the path as `veng_SHADER_DIR`.
+    install(DIRECTORY ${veng_SOURCE_DIR}/shaders/ DESTINATION ${CMAKE_INSTALL_DATADIR}/veng/shaders)
+
+    install(EXPORT vengTargets
+            NAMESPACE veng::
+            FILE vengTargets.cmake
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/veng)
+
+    configure_package_config_file(
+            ${veng_SOURCE_DIR}/cmake/vengConfig.cmake.in
+            ${CMAKE_CURRENT_BINARY_DIR}/vengConfig.cmake
+            INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/veng
+            PATH_VARS CMAKE_INSTALL_DATADIR)
+    write_basic_package_version_file(
+            ${CMAKE_CURRENT_BINARY_DIR}/vengConfigVersion.cmake
+            VERSION ${PROJECT_VERSION}
+            COMPATIBILITY SameMajorVersion)
+    install(FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/vengConfig.cmake
+            ${CMAKE_CURRENT_BINARY_DIR}/vengConfigVersion.cmake
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/veng)
+endif()
 
