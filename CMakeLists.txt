@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(veng)
+project(veng VERSION 0.1.0 LANGUAGES CXX)
 
 # Include CMake modules for target helpers and compiler settings
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

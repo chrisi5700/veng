@@ -12,7 +12,7 @@ target_compile_definitions(veng_logging
 )
 target_include_directories(veng_logging
         INTERFACE
-        ${veng_SOURCE_DIR}/include
+        $<BUILD_INTERFACE:${veng_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
 )
 
 target_add_library(veng_context)
@@ -71,7 +71,7 @@ target_link_libraries(veng_resources PUBLIC veng_context)
 # GPU bridge (L3 -> Vulkan seam): header-only GpuExecContext + GpuNode.
 add_library(veng_gpu INTERFACE)
 target_link_libraries(veng_gpu INTERFACE veng_render_graph veng_context veng_resources)
-target_include_directories(veng_gpu INTERFACE ${veng_SOURCE_DIR}/include)
+target_include_directories(veng_gpu INTERFACE $<BUILD_INTERFACE:${veng_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
 # L2.4 device-side managers — command pools (per queue/slot/thread) + the windowed
 # swapchain (over vk-bootstrap) + the per-frame FrameExecutor driving the GPU loop.
@@ -95,7 +95,7 @@ set_source_files_properties(nodes/StbWriteImpl.cpp PROPERTIES COMPILE_OPTIONS "-
 target_add_library(veng_culling)
 target_sources(veng_culling PRIVATE culling/Clusters.cpp)
 target_link_libraries(veng_culling PUBLIC glm::glm)
-target_include_directories(veng_culling PUBLIC ${veng_SOURCE_DIR}/include)
+target_include_directories(veng_culling PUBLIC $<BUILD_INTERFACE:${veng_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 
 # L5 passes — reusable, higher-level effects composed from L4 nodes (the engine's pass
 # library, shaders under shaders/passes/). The screen-space outline (silhouette -> separable
@@ -128,6 +128,25 @@ set_source_files_properties(assets/StbImpl.cpp PROPERTIES COMPILE_OPTIONS "-w")
 # Vulkan construction layers, so it builds and unit-tests without a GPU.
 target_add_library(veng_render_graph)
 target_sources(veng_render_graph PRIVATE rendergraph/Graph.cpp rendergraph/ThreadPoolScheduler.cpp)
-target_include_directories(veng_render_graph PUBLIC ${veng_SOURCE_DIR}/include)
+target_include_directories(veng_render_graph PUBLIC $<BUILD_INTERFACE:${veng_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 target_link_libraries(veng_render_graph PUBLIC Threads::Threads)
+
+# --- Public namespaced aliases + umbrella target ----------------------------------------------
+# Each library gets a `veng::<name>` alias so an add_subdirectory consumer links the same namespaced
+# targets a find_package consumer gets (install(EXPORT) below re-creates them under the same prefix).
+# `veng::veng` is the umbrella: link it to pull in the whole engine and, transitively, every PUBLIC
+# usage requirement — the Vulkan/glm libs AND the compile definitions (GLM_FORCE_DEPTH_ZERO_TO_ONE,
+# the VULKAN_HPP_* flags) — so a consumer never re-lists them or keeps the clip-space define in sync.
+set(VENG_PUBLIC_LIBS
+        veng_logging veng_context veng_shader veng_pipelines veng_descriptors
+        veng_resources veng_gpu veng_managers veng_nodes veng_culling veng_passes
+        veng_assets veng_render_graph)
+
+foreach(veng_lib IN LISTS VENG_PUBLIC_LIBS)
+    add_library(veng::${veng_lib} ALIAS ${veng_lib})
+endforeach()
+
+add_library(veng INTERFACE)
+target_link_libraries(veng INTERFACE ${VENG_PUBLIC_LIBS})
+add_library(veng::veng ALIAS veng)
 
